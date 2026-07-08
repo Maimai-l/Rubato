@@ -8,6 +8,7 @@ user_defined_symbols 从 spec 生成,禁止手写第二份清单)。
 """
 from __future__ import annotations
 import json
+import re
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -73,41 +74,69 @@ def reconcile(vocab_size: int, n_user_defined: int) -> dict:
 
 def train_unigram(corpus_files: list[str], model_prefix: str,
                   vocab_size: int = 8000, spec_path: str | Path | None = None,
-                  extra_args: dict | None = None) -> dict:
+                  extra_args: dict | None = None, allow_fallback: bool = True) -> dict:
     """
     SentencePiece UnigramLM 训练封装。R-S9.1 全部不变量在此固化:
       normalization_rule_name=identity(默认 NFKC 会改写 |/#/: —— 已知致命陷阱)
       byte_fallback / character_coverage=1.0 / split_by_whitespace
     user_defined_symbols 从 vocab_spec 注入(R-S9.3)。
 
-    ⚠ 词表 4760 < 8000 的根因(问题#3):UnigramLM 从语料可提取的候选 piece 不足时
-    会自动缩表。nASAP 39.9M chars 语料太小且作曲家分布窄 —— 必须先跑
-    scripts/s3_pdmx_a2s_labels.py 把 PDMX 130k 谱的 A2S/A2S_lite 标签生成出来
-    (论文语料 = A2S + A2S_lite,PDMX 占 1,002k utterance),再重训。
+    ⚠ 缩水规模的真实约束(问题#3 复盘):A2S 文本的【可学习 piece 上限由语料的
+    distinct 子串数决定】。缩水池(SPEC D4:12-20k 曲 → ~6万段 → ~56-90k 行)只能支撑
+    远少于 3571 的可学习 piece,vocab==8000 不可达,SentencePiece 会直接报
+    "vocab_size too high, set <= N"。这不是 bug,是缩水规模的固有结果。
+    → 真正该看的验收是 check_glyph_coverage 的 split_rate<0.30(常见字形是否原子),
+      不是 vocab==8000。词表小(~5k)但字形原子 = 模型可用,只是序列略长。
+    → allow_fallback=True:目标词表过高时自动回退到 SentencePiece 报的上限重训,
+      返回实际词表 + 显式 warning,不让流程卡死。
+    → 扩语料的安全杠杆(想逼近 8000):①并入 nASAP A2S/A2S_lite 文本(论文语料含它,
+      白拿 ~18M chars);②重叠切段(segment_score_overlap);③tokenizer 语料用【未按
+      work_key 去重】的训练侧全部曲(去重是给 train/val/test 隔离用的,不是给 tokenizer
+      语料用的)。仍不够则是缩水规模上限,需用户决策(见 EXECUTOR_CORRECTIONS §6b)。
     """
     import sentencepiece as spm
     spec = build_vocab_spec(spec_path)
-    args = {
-        "input": ",".join(str(f) for f in corpus_files),
-        "model_prefix": str(model_prefix),
-        "vocab_size": vocab_size,
-        "model_type": "unigram",
-        "normalization_rule_name": "identity",
-        "byte_fallback": True,
-        "character_coverage": 1.0,
-        "split_by_whitespace": True,
-        "user_defined_symbols": spec["user_defined_symbols"],
-        "train_extremely_large_corpus": True,
-        "unk_id": 0, "bos_id": 1, "eos_id": 2,
-    }
-    args.update(extra_args or {})
-    spm.SentencePieceTrainer.train(**args)
+
+    def _train(vs: int):
+        args = {
+            "input": ",".join(str(f) for f in corpus_files),
+            "model_prefix": str(model_prefix),
+            "vocab_size": vs,
+            "model_type": "unigram",
+            "normalization_rule_name": "identity",
+            "byte_fallback": True,
+            "character_coverage": 1.0,
+            "split_by_whitespace": True,
+            "user_defined_symbols": spec["user_defined_symbols"],
+            "train_extremely_large_corpus": True,
+            "unk_id": 0, "bos_id": 1, "eos_id": 2,
+        }
+        args.update(extra_args or {})
+        spm.SentencePieceTrainer.train(**args)
+
+    fell_back = False
+    try:
+        _train(vocab_size)
+    except Exception as e:
+        m = re.search(r"<=\s*(\d+)", str(e))
+        if allow_fallback and m:
+            cap = int(m.group(1))
+            _train(cap)                      # 回退到语料支持的上限
+            fell_back = True
+        else:
+            raise
+
     sp = spm.SentencePieceProcessor(model_file=f"{model_prefix}.model")
     got = sp.get_piece_size()
     rec = reconcile(got, len(spec["user_defined_symbols"]))
-    return {"vocab_size": got, "reconcile": rec,
-            "warning": None if got == vocab_size else
-            f"实际词表 {got} < 目标 {vocab_size}:语料太小,先补 PDMX 标签(问题#3)"}
+    warning = None
+    if got != vocab_size:
+        warning = (f"实际词表 {got} < 目标 {vocab_size}(语料 distinct 子串不足)。"
+                   f"这是缩水规模固有结果,不是 bug。请以 check_glyph_coverage 的 "
+                   f"split_rate<0.30 为准;若字形原子则模型可用。要逼近 8000 需扩语料"
+                   f"(并入 nASAP A2S、重叠切段、不按 work_key 去重语料)或用户决策扩池。")
+    return {"vocab_size": got, "requested": vocab_size, "fell_back": fell_back,
+            "reconcile": rec, "warning": warning}
 
 
 # ---------------------------------------------------------------- 训后验收(问题#20)
