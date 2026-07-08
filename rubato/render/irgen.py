@@ -61,6 +61,17 @@ def load_real_ir(preset_id: str, sr: int = 16000,
     return ir
 
 
+def audit_real_irs(preset_ids, irs_dir: str = "assets/irs/real", sr: int = 16000) -> dict:
+    """
+    报告每个 preset 用的是真实 IR 还是程序化(防【静默回退】陷阱):
+    load_real_ir 找不到文件会静默返回 None → 回退 synth,不报错。若 EchoThief wav 的
+    文件名没【精确】改成 <preset_id>.wav,该预设会悄悄用回合成混响,你还以为在用真实 IR。
+    返回 {preset_id: 'real'|'synth'};渲染/训练前跑一次,核对 real 的数目符合预期。
+    """
+    return {pid: ("real" if load_real_ir(pid, sr, irs_dir) is not None else "synth")
+            for pid in preset_ids}
+
+
 def resolve_ir(preset: dict, preset_id: str | None, sr: int, seed: int,
                irs_dir: str = "assets/irs/real") -> np.ndarray:
     """真实 IR 优先(assets/irs/real/<preset_id>.wav),缺失回退程序化 synth_ir。"""

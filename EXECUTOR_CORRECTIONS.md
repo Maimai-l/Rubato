@@ -216,6 +216,40 @@ wk = work_key_or_fallback(row["composer_name"], row["song_name"], piece_id)
 **问责记录(诚实)**: 这个 composer 承重键的设计是规划侧(SPEC R-S3.5/3.6)的缺陷;执行端把它
 直译成硬删;0a review 时也漏抓了。三层里两层在规划侧。
 
+## 6d. 渲染增广落地清单(音色 + 真实 IR + 在线房间)
+
+论文靠 8 VST × 2 房麦 × 每段多变体拿真实录音鲁棒性(头号卖点)。我们之前:4 源、合成混响、
+每段渲一次(无增广)。修复方向如下(代码已就位:`irgen.load_real_ir/resolve_ir/audit_real_irs`、
+`dataset.online_room_augment`)。
+
+**① 音色源:全部保留(用户决定),凑够多样性**
+- 所有 SFZ 音源【保留,不删】——都是真钢琴,低保真也是真实录音的多样性。
+- 目标凑到 ~8+ 台不同乐器,逼近论文的音色多样性(源多样性 > 房间多样性,这是鲁棒性命根)。
+
+**② 真实 IR(EchoThief):核对文件名,防静默回退**
+- `irgen` 已改:`assets/irs/real/<preset_id>.wav` 存在就用真实 IR,否则回退 synth。
+- ⚠ **EchoThief 的 wav 必须精确改名成 `<preset_id>.wav`**(如 `p07_concert_hall.wav`),
+  否则该预设【静默】用回合成混响,你以为在用真实 IR 其实没有。
+- **渲染前跑 `irgen.audit_real_irs(preset_ids)` 核对**:返回每个预设 real/synth,real 数目要符合预期。
+- 挑 EchoThief 里【钢琴相关】的空间(音乐厅/教堂/房间/礼堂),别把重心放在洞穴/隧道/穹顶这类异域空间。
+
+**③ 预设权重:别用均匀 1.0,realistic 为主**
+- 现状 16 预设权重全 1.0 → cave/dome/telephone 和 small-room/recital-hall 等权 →
+  **25% 训练花在真实钢琴录音里几乎不出现的异域声学上**(ATEPP 是 YouTube 钢琴,不是洞穴/电话)。
+- 论文只用真实房麦(不增广异域声学)。**重新分层**:写实主力(小房间/录音棚/独奏厅/音乐厅/
+  教堂 ~75-85%)+ 劣化长尾(老录音/电话/业余视频/异域混响 ~15-25%)。缩水规模下更不该把
+  料浪费在离分布外的声学上。
+
+**④ 每段增广倍数:2-3 音色变体 + 在线房间(不是 16,也不是 1)**
+- **房间**:`RubatoDataset` 里对干声调 `online_room_augment(audio, utt_id, epoch, presets_cfg)`
+  每 epoch 换一个预设(真实 IR)→ 零额外磁盘、每 epoch 变。
+- **音色**:算力够 → 每段预渲 2-3 个不同源;算力紧 → 每段 1 源但 hash 保证 8+ 源全局均匀覆盖。
+- **前提**:S4 渲【干声】(源音色,不烘焙预设),预设在线加;若 S4 已把预设烘进 opus,
+  在线再加=二次混响,须在 `core.finalize` 关掉预设烘焙(渲染期只出干声)。
+
+**⑤ codec 劣化(可选补回)**:老录音/电话/上传劣化的预设可加 `codec: {name: libopus, bitrate: 24k}`
+  模拟压缩 artifact(YouTube/手机),lp/hp 只覆盖一半。
+
 ## 7. 一句话给执行端
 
 **头号任务是修地基,但别接受缩水:论文用同一 PDMX 就到了 3571,我们到不了=在丢数据。
