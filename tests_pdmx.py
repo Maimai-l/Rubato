@@ -95,6 +95,21 @@ check("duplicate_filtered", not ok and reason == "pdmx_is_duplicate", reason)
 ok, reason = metadata_filter({"is_duplicate": "false", "is_transcription": "false", "license": "Public Domain"})
 check("clean_metadata_passes", ok, reason)
 
+print("[7b] 缺 composer/title 不丢弃,兜底独立 work_key(修头号数据杀手)")
+from rubato.data.pdmx import work_key_or_fallback
+# 有元数据 → 正常 work_key
+check("meta_present_normal", work_key_or_fallback("Chopin", "Ballade", "pA") == work_key("Chopin", "Ballade"))
+# 缺 composer → 兜底 piece_id 独立键(不丢)
+wk_nc = work_key_or_fallback("NA", "Some Piece", "pB")
+check("missing_composer_fallback", wk_nc == "__nometa__|pB", wk_nc)
+# 缺 title → 兜底
+wk_nt = work_key_or_fallback("Bach", "", "pC")
+check("missing_title_fallback", wk_nt == "__nometa__|pC", wk_nt)
+# 两首都缺元数据 → 各自独立键(不会被误当同一"作品"塌缩)
+wk1 = work_key_or_fallback("", "", "p1")
+wk2 = work_key_or_fallback("", "", "p2")
+check("nometa_pieces_distinct", wk1 != wk2, (wk1, wk2))
+
 print("[8] MinHash 近重复防线(命名无关,R-S3.6)—— 修 0a 黑名单删 0 的正解")
 import sys
 sys.path.insert(0, ".")

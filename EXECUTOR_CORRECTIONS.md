@@ -193,6 +193,29 @@ work_key 匹配可保留作辅助,但**必须用 MinHash 兜底**,且**核对剔
 非钢琴+PDMX 自带去重删掉是对的(论文也只取大谱表钢琴);但若 `n_tracks∈(1,2)` 误杀了
 三谱表/钢琴四手/带额外轨的钢琴曲,就放宽。目标是把真实的钢琴谱都收进来,逼近论文的 ~1.5 万首。
 
+## 6c. 头号数据杀手:缺 composer 硬删了 31,353 首(58.7%)—— 必修
+
+**漏斗实测**: 53,369 首合格钢琴谱(双谱表+license+MIDI 齐全)里,**31,353 首(58.7%)因
+`composer_name=='NA'` 被整首丢弃**;再 -3,634 因 title 缺失。这是过滤损失的头号,远超其他。
+
+**根因(设计缺陷,在 SPEC/规划侧)**: work_key=composer|title 被设成去重与 split 隔离的
+承重主键 → 缺 composer 就没合法 key → 被硬删。但**作曲家名对音频→乐谱训练毫无用处**,只是
+记账字段;去重与泄漏本就该靠 MinHash 内容比对(命名无关)。
+
+**修法**: 用 `pdmx.work_key_or_fallback(composer, title, piece_id)` 替换硬删:
+```python
+from rubato.data.pdmx import work_key_or_fallback, near_dup_ids
+# 不再: if composer=='NA': continue   ← 删掉这条
+wk = work_key_or_fallback(row["composer_name"], row["song_name"], piece_id)
+# 缺元数据 → '__nometa__|<piece_id>' 独立键,该曲照常进 train
+```
+- 去重/泄漏改由 MinHash(`near_dup_ids`,已实现)兜底,不依赖 composer。
+- `__nometa__` 曲各自独立键,不会被误当同一"作品"塌缩;PDMX 自带 deduplicated 子集已去过重复上传。
+- 这一条把池子从 18,382 拉回 **~53,369(论文 ~1.5 万钢琴曲的 3 倍多)**,语料/训练量都够了。
+
+**问责记录(诚实)**: 这个 composer 承重键的设计是规划侧(SPEC R-S3.5/3.6)的缺陷;执行端把它
+直译成硬删;0a review 时也漏抓了。三层里两层在规划侧。
+
 ## 7. 一句话给执行端
 
 **头号任务是修地基,但别接受缩水:论文用同一 PDMX 就到了 3571,我们到不了=在丢数据。

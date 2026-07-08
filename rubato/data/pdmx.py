@@ -46,6 +46,36 @@ def work_key(composer: str, title: str) -> str:
     return f"{normalize_work(composer)}|{normalize_work(title)}"
 
 
+def work_key_or_fallback(composer: str, title: str, piece_id: str) -> str:
+    """
+    ⚠ 缺 composer/title 的曲【绝不丢弃】—— 它的 MIDI/乐谱是好的,只是元数据缺标签,
+    对音频→乐谱训练毫无影响(作曲家名只是去重/split 的记账字段)。
+
+    设计根因修正:旧 SPEC 把 work_key=composer|title 设成承重主键,导致缺 composer 的
+    31k+ 首合格钢琴谱被硬删(占过滤损失的头号)。正解:缺元数据 → 用 piece_id 兜底成
+    【独立作品键】(它就是自己的"作品",不与任何曲共 split-key)。去重与跨集泄漏改由
+    MinHash 内容比对(near_dup_ids)兜底,命名无关,不需要 composer。
+
+    有 composer+title → 正常 work_key(参与同作品去重/split 隔离);
+    缺任一 → '__nometa__|<piece_id>'(唯一键,保证进 train 且不被误判重复)。
+    """
+    if _is_missing(composer) or _is_missing(title):
+        return f"__nometa__|{piece_id}"
+    c = normalize_work(composer)
+    t = normalize_work(title)
+    if not c or not t:                      # 归一化后为空(纯标点/编号词)也算缺
+        return f"__nometa__|{piece_id}"
+    return f"{c}|{t}"
+
+
+# PDMX 元数据缺失的常见占位:"NA" 是最常见(31k+ 首),别当成真作曲家名
+_MISSING_SENTINELS = {"", "na", "n/a", "none", "null", "nan", "unknown", "untitled", "?"}
+
+
+def _is_missing(v) -> bool:
+    return (v is None) or (str(v).strip().lower() in _MISSING_SENTINELS)
+
+
 # ---------------------------------------------------------------- MinHash 近重复(R-S3.6)
 
 def ngram_set(seq: list, n: int = 8) -> frozenset:
