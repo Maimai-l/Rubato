@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import read_jsonl, write_jsonl, write_text, read_text
 from rubato.intermo.partitura_adapter import part_to_ir
 from rubato.data.segment import segment_score, make_labels
+from rubato.data.nasap import segment_score_overlap
 from rubato.data.pdmx import build_blacklist, work_key
 
 
@@ -35,12 +36,27 @@ def load_musicxml_part(xml_path: str):
     return s.parts[0] if hasattr(s, "parts") and s.parts else s
 
 
+def load_musicxml_part_any(xml_path: str):
+    """
+    .mxl(压缩)用 partitura.load_score;.musicxml/.xml 用 load_musicxml。
+    统一入口,避免对 .mxl 用 load_musicxml 失败(0b heads-up)。
+    """
+    import partitura
+    low = xml_path.lower()
+    if low.endswith(".mxl"):
+        s = partitura.load_score(xml_path)
+    else:
+        s = partitura.load_musicxml(xml_path)
+    return s.parts[0] if hasattr(s, "parts") and s.parts else s
+
+
 def process_piece(piece: dict, xml_root: Path,
                   min_measures: int, max_measures: int, max_sec: float,
-                  lenient: bool) -> tuple[list[dict], dict]:
+                  lenient: bool, use_overlap: bool = True) -> tuple[list[dict], dict]:
     """
     单曲:归一化 XML → IR → 小节对齐切段 → A2S/A2S_lite 标签。
     返回 (label_rows, stats)。lenient 用于浪漫派非标准小节(华彩/延长)。
+    use_overlap=True:重叠切段(步长=段长一半),段数 ~1.6x,训练对更多。
     """
     pid = piece["piece_id"]
     stats = {"piece_id": pid, "segments": 0, "labels": 0}
@@ -51,7 +67,7 @@ def process_piece(piece: dict, xml_root: Path,
     xml_path = str(xml_root / xml_rel) if not Path(xml_rel).is_absolute() else xml_rel
 
     try:
-        part = load_musicxml_part(xml_path)
+        part = load_musicxml_part_any(xml_path)
     except Exception as e:
         stats["skipped"] = f"load_failed:{type(e).__name__}:{str(e)[:80]}"
         return [], stats
@@ -62,9 +78,15 @@ def process_piece(piece: dict, xml_root: Path,
         return [], stats
 
     try:
-        segs = segment_score(ir, min_measures=min_measures,
-                             max_measures=max_measures, max_sec=max_sec,
-                             sec_per_whole=2.0)   # 恒速估算切段时长(无 tmap)
+        if use_overlap:
+            # 无 tmap:重叠切段按小节数,时长约束交给 max_measures(文本语料够用)
+            segs = segment_score_overlap(ir, tmap=None,
+                                         min_measures=min_measures, max_measures=max_measures,
+                                         max_sec=max_sec)
+        else:
+            segs = segment_score(ir, min_measures=min_measures,
+                                 max_measures=max_measures, max_sec=max_sec,
+                                 sec_per_whole=2.0)   # 恒速估算切段时长
         stats["segments"] = len(segs)
     except Exception as e:
         stats["skipped"] = f"segment_failed:{type(e).__name__}:{str(e)[:80]}"
@@ -92,11 +114,38 @@ def process_piece(piece: dict, xml_root: Path,
     return rows, stats
 
 
+def fold_in_nasap_corpus(nasap_labels_path: str, corpus_lines: list[str]) -> int:
+    """
+    并入 nASAP 的 A2S/A2S_lite 文本(论文 tokenizer 语料 = PDMX + nASAP)。
+    只并入非 val/test 的行(nASAP 标签行若带 split 字段则按之;否则全并入,由调用方保证是 train)。
+    返回并入的行数。
+    """
+    if not nasap_labels_path or not Path(nasap_labels_path).exists():
+        return 0
+    n = 0
+    for row in read_jsonl(nasap_labels_path):
+        if row.get("split") in ("val", "test"):
+            continue
+        for k in ("A2S", "A2S_lite"):
+            t = row.get(k)
+            if t:
+                corpus_lines.append(t)
+                n += 1
+    return n
+
+
 def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
         out_report: str, blacklist: set | None = None,
         min_measures: int = 4, max_measures: int = 32, max_sec: float = 40.0,
-        lenient: bool = True, limit: int | None = None) -> dict:
-    """批量驱动。blacklist=work_key 集合(命中的曲整曲跳过,不产 train 标签)。"""
+        lenient: bool = True, limit: int | None = None,
+        use_overlap: bool = True, nasap_labels_path: str | None = None) -> dict:
+    """
+    批量驱动。blacklist=work_key 集合(命中的曲整曲跳过,不产 train 标签)。
+    use_overlap:重叠切段(默认 True,段数更多)。
+    nasap_labels_path:并入 nASAP A2S 文本到 tokenizer 语料(论文语料 = PDMX + nASAP)。
+    tokenizer 语料【只含 train split】(不把 val/test 文本喂 tokenizer,防泄漏);
+    labels.jsonl 含全部 split(val/test 标签评测要用)。
+    """
     blacklist = blacklist or set()
     xml_root = Path(xml_root)
     pieces = list(read_jsonl(manifest_path))
@@ -105,7 +154,8 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
 
     report = {"total": len(pieces), "processed": 0, "skipped": 0,
               "blacklisted": 0, "total_segments": 0, "total_labels": 0,
-              "total_a2s_chars": 0, "failures": []}
+              "total_a2s_chars": 0, "corpus_lines": 0, "corpus_lines_nasap": 0,
+              "use_overlap": use_overlap, "failures": []}
     all_rows = []
     corpus_lines = []
     t0 = time.time()
@@ -120,9 +170,10 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
         if wk in blacklist:                       # 问题#14:黑名单曲不进 train 标签
             report["blacklisted"] += 1
             continue
+        split = piece.get("split", "train")
         try:
             rows, stats = process_piece(piece, xml_root, min_measures, max_measures,
-                                        max_sec, lenient)
+                                        max_sec, lenient, use_overlap=use_overlap)
         except Exception:
             report["failures"].append({"piece_id": piece.get("piece_id"),
                                        "reason": "exception", "tb": traceback.format_exc()[:200]})
@@ -131,12 +182,15 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
             report["processed"] += 1
             report["total_segments"] += stats["segments"]
             report["total_labels"] += stats["labels"]
-            all_rows.extend(rows)
             for r in rows:
-                report["total_a2s_chars"] += len(r["A2S"])
-                corpus_lines.append(r["A2S"])
-                if r.get("A2S_lite"):
-                    corpus_lines.append(r["A2S_lite"])
+                r["split"] = split
+                all_rows.append(r)
+                # tokenizer 语料只收 train split(防 val/test 文本泄漏进 tokenizer)
+                if split == "train":
+                    report["total_a2s_chars"] += len(r["A2S"])
+                    corpus_lines.append(r["A2S"])
+                    if r.get("A2S_lite"):
+                        corpus_lines.append(r["A2S_lite"])
         else:
             report["skipped"] += 1
             report["failures"].append({"piece_id": piece.get("piece_id"),
@@ -144,7 +198,11 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
         if (i + 1) % 200 == 0:
             rate = (i + 1) / (time.time() - t0)
             print(f"  [{i+1}/{len(pieces)}] processed={report['processed']} "
-                  f"labels={report['total_labels']} ({rate:.1f} pieces/s)")
+                  f"labels={report['total_labels']} corpus={len(corpus_lines)} ({rate:.1f} pieces/s)")
+
+    # 并入 nASAP A2S 文本(论文语料 = PDMX + nASAP)
+    report["corpus_lines_nasap"] = fold_in_nasap_corpus(nasap_labels_path, corpus_lines)
+    report["corpus_lines"] = len(corpus_lines)
 
     write_jsonl(out_labels, all_rows)
     write_text(out_corpus, "\n".join(corpus_lines) + "\n")
@@ -153,8 +211,12 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
     Path(out_report).parent.mkdir(parents=True, exist_ok=True)
     write_text(out_report, json.dumps(report, ensure_ascii=False, indent=2))
     print(f"\nDONE: {report['processed']} pieces → {report['total_labels']} labels, "
-          f"{report['total_a2s_chars']:,} A2S chars (corpus for tokenizer).")
+          f"corpus {report['corpus_lines']:,} lines "
+          f"(PDMX train + {report['corpus_lines_nasap']:,} nASAP).")
     print(f"  labels: {out_labels}\n  corpus: {out_corpus}\n  report: {out_report}")
+    if report["corpus_lines"] < 120000:
+        print(f"  ⚠ 语料 {report['corpus_lines']:,} < 12万(论文规模):查是不是 manifest 谱数不足"
+              f"(应 ~47k)或大量 part_to_ir 失败;别用小语料训 tokenizer。")
     return report
 
 
@@ -166,10 +228,13 @@ if __name__ == "__main__":
     OUT_LABELS = ROOT / "work" / "pdmx_a2s_labels.jsonl"
     OUT_CORPUS = ROOT / "work" / "a2s_corpus.txt"
     OUT_REPORT = ROOT / "reports" / "s5_pdmx_a2s.json"
+    # nASAP A2S 标签(s7_full_nasap.py 产出);并入 tokenizer 语料。没有就传 None。
+    NASAP_LABELS = ROOT / "work" / "nasap_labels.jsonl"
 
     # 黑名单:若已有 nASAP split / ASAP-Beyer 曲目清单则读入(此处示例留空,
     # 实跑时从 nasap_split.json 的 test_works + ASAP-Beyer 清单构建)。
     blacklist = build_blacklist(nasap_test_works=[], asap_beyer_works=[])
 
     run(str(MANIFEST), str(XML_ROOT), str(OUT_LABELS), str(OUT_CORPUS),
-        str(OUT_REPORT), blacklist=blacklist)
+        str(OUT_REPORT), blacklist=blacklist, use_overlap=True,
+        nasap_labels_path=str(NASAP_LABELS) if NASAP_LABELS.exists() else None)
