@@ -162,20 +162,24 @@ presets:
     noise: -45
     gain_jitter: 2.0
 
+# 权重:写实为主 + 劣化长尾。真实 IR 优先(8 个 EchoThief),合成作补充。
+# 劣化类低权重——模型要见过但不主导训练,保证对真实录音的鲁棒性。
 weights:
-  p01_bone_dry: 1.0
-  p02_close_mic: 1.0
-  p03_small_room: 1.0
-  p04_medium_room: 1.0
-  p05_stairwell: 1.0
-  p06_recital_hall: 1.0
-  p07_concert_hall: 1.0
-  p08_theatre: 1.0
-  p09_church: 1.0
-  p10_chapel: 1.0
+  # —— 写实主流(合计 ~75%) ——
+  p01_bone_dry: 2.0
+  p02_close_mic: 2.0
+  p03_small_room: 1.5
+  p04_medium_room: 1.5
+  p05_stairwell: 1.5
+  p06_recital_hall: 1.5
+  p07_concert_hall: 2.0
+  p08_theatre: 1.5
+  p09_church: 1.5
+  p10_chapel: 1.5
   p11_hallway: 1.0
   p12_dome: 1.0
-  p13_cave: 1.0
-  p14_old_recording: 1.0
-  p15_telephone: 1.0
-  p16_amateur_video: 1.0
+  # —— 特殊/劣化长尾(合计 ~10%) ——
+  p13_cave: 0.5
+  p14_old_recording: 0.5
+  p15_telephone: 0.3
+  p16_amateur_video: 0.5
