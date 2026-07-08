@@ -180,11 +180,13 @@ def check_split_leakage(pieces: list[dict], blacklist: set) -> dict:
 
 # ---------------------------------------------------------------- license + metadata(R-S3.1/3.2)
 
-_LICENSE_OK = ("public domain", "cc0", "cc-by", "cc by", "publicdomain")
+# cc-zero / cc zero 是 CC0 的另一种写法(PDMX 元数据里大量用),不识别会误杀 30k+ 有效曲。
+_LICENSE_OK = ("public domain", "publicdomain", "cc0", "cc-zero", "cc zero",
+               "cc-by", "cc by", "ccby")
 
 
 def license_ok(license_str: str) -> bool:
-    """R-S3.2:license ∈ {public domain, CC0, CC-BY 系}。"""
+    """R-S3.2:license ∈ {public domain, CC0(含 cc-zero), CC-BY 系}。"""
     s = (license_str or "").lower()
     return any(tok in s for tok in _LICENSE_OK)
 
