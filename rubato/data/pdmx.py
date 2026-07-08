@@ -150,9 +150,48 @@ def cluster_duplicates(sigs: dict, threshold: float = 0.7) -> dict:
 def build_blacklist(nasap_test_works: list[str], asap_beyer_works: list[str]) -> set:
     """
     R-S3.6:nASAP test 与 ASAP-Beyer 曲目的 work_key 全量列入 train 黑名单
-    (跨数据集泄漏防线)。返回 work_key 集合。
+    (跨数据集泄漏防线,work_key 字符串匹配路径)。返回 work_key 集合。
+
+    ⚠ 已知局限(实测):PDMX 元数据与 ASAP 文件夹名的命名体系不同——
+    ASAP 'bach|fugue' vs PDMX 'johann sebastian bach|fugue c major',字符串 work_key
+    匹配常删 0 首。**真正的泄漏防线是下面的 MinHash 近重复(命名无关)**,work_key
+    仅作辅助。用 build_blacklist 后务必核对删除数非 0,为 0 就改用 near_dup_ids。
     """
     return set(nasap_test_works) | set(asap_beyer_works)
+
+
+# ---------------------------------------------------------------- MinHash 近重复防线(R-S3.6,命名无关)
+
+def ir_to_pitch_dur_seq(ir) -> list:
+    """
+    ScoreIR → 按 (onset, pitch) 排序的 (midi_pitch, dur_str) 序列。
+    这是 MinHash 近重复比对的输入:比的是【实际音符内容】,不吃标题/作曲家命名差异。
+    """
+    def _midi(p):
+        return p.midi if hasattr(p, "midi") else int(p)
+    notes = sorted(ir.notes, key=lambda n: (n.onset, _midi(n.pitch)))
+    return [(_midi(n.pitch), str(n.dur)) for n in notes]
+
+
+def piece_signature(ir, n: int = 8):
+    """ScoreIR → MinHash 签名(经 (pitch,dur) 序列)。近重复用。"""
+    return minhash_signature(ngram_set(ir_to_pitch_dur_seq(ir), n))
+
+
+def near_dup_ids(target_sigs: dict, ref_sigs: list, threshold: float = 0.7) -> set:
+    """
+    R-S3.6 真正的泄漏防线(命名无关)。
+    target_sigs: {piece_id: signature}(PDMX 候选曲);ref_sigs: [signature](ASAP test/Beyer 参考曲)。
+    返回近重复于【任一】参考曲的 piece_id 集合(判为泄漏,剔除出 train)。
+    Jaccard>threshold 判近重复。ref 数通常小(ASAP ~百首),O(n_pdmx × n_ref) 可接受。
+    """
+    flagged = set()
+    for pid, sig in target_sigs.items():
+        for ref in ref_sigs:
+            if estimate_jaccard(sig, ref) > threshold:
+                flagged.add(pid)
+                break
+    return flagged
 
 
 def check_split_leakage(pieces: list[dict], blacklist: set) -> dict:

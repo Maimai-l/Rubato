@@ -119,6 +119,49 @@ target 用零/空序列让模型 forward";③"Step E 通过"是手写假 A2S 标
 - ❌ 边渲染边训练。
 - ❌ 用 4798 词表推进下游。
 
+## 5b. Step 0a 复盘:黑名单删了 0 首 = #14 没生效(必修)
+
+**症状**: 0a 脚本跑出 16,792 曲,但 `train+val+test == 去重后总数`,说明黑名单**一首都没删**。
+**根因**(已实测): PDMX 元数据与 ASAP 文件夹名的命名体系不同,work_key 字符串匹配桥不过去:
+```
+ASAP 侧: 'bach|fugue'                          # 文件夹名 Bach / Fugue/bwv_846
+PDMX 侧: 'johann sebastian bach|fugue c major'  # 元数据 composer_name / song_name
+→ 不相等,黑名单命中 0
+```
+这和 xml_id 是同一类病:两数据集命名不同,字符串匹配失效。
+
+**正解**(R-S3.6 的真正防线 = MinHash 近重复,命名无关,仓库已实现 + 测试):
+```python
+import partitura
+from rubato.intermo.partitura_adapter import part_to_ir
+from rubato.data.pdmx import piece_signature, near_dup_ids
+
+# 1. 参考签名:解析 ASAP test/Beyer 的乐谱(MusicXML)→ IR → MinHash 签名
+ref_sigs = []
+for asap_xml in asap_test_and_beyer_score_paths:      # ASAP 参考谱路径列表
+    try:
+        ir = part_to_ir(partitura.load_musicxml(asap_xml).parts[0])
+        ref_sigs.append(piece_signature(ir))
+    except Exception:
+        continue
+
+# 2. 候选签名:每首已过滤的 PDMX 谱 → IR → 签名
+target_sigs = {}
+for p in manifest_pieces:                              # 0a 产出的候选
+    try:
+        ir = part_to_ir(partitura.load_score(p["xml_raw"]))   # .mxl 用 load_score
+        target_sigs[p["piece_id"]] = piece_signature(ir)
+    except Exception:
+        continue
+
+# 3. 近重复剔除(Jaccard>0.7):命名无关,比的是实际音符内容
+leaked = near_dup_ids(target_sigs, ref_sigs, threshold=0.7)
+manifest_pieces = [p for p in manifest_pieces if p["piece_id"] not in leaked]
+print(f"MinHash 泄漏剔除: {len(leaked)} 首")     # 判据:>0(0=没生效);上一轮 work_key 法曾报 5 首+146 黑名单
+```
+work_key 匹配可保留作辅助,但**必须用 MinHash 兜底**,且**核对剔除数非 0**——为 0 就是没生效。
+另:`license_ok` 的 cc-zero 已进仓库(pull 后可删本地重写);`.mxl` 用 `partitura.load_score`(非 load_musicxml)。
+
 ## 7. 一句话给执行端
 
 **头号任务是修地基:S3 过滤 + S4 渲染 + PDMX A2S 标签做到 ≥30 万行语料 → 训真 8000 tokenizer

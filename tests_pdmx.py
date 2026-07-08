@@ -95,6 +95,28 @@ check("duplicate_filtered", not ok and reason == "pdmx_is_duplicate", reason)
 ok, reason = metadata_filter({"is_duplicate": "false", "is_transcription": "false", "license": "Public Domain"})
 check("clean_metadata_passes", ok, reason)
 
+print("[8] MinHash 近重复防线(命名无关,R-S3.6)—— 修 0a 黑名单删 0 的正解")
+import sys
+sys.path.insert(0, ".")
+from fractions import Fraction as F
+from rubato.intermo.core import Note, Measure, ScoreIR, SPitch
+from rubato.data.pdmx import ir_to_pitch_dur_seq, piece_signature, near_dup_ids
+
+def _ir(steps):
+    return ScoreIR([Note("PR", SPitch(s, 0, 4), F(i), F(1)) for i, s in enumerate(steps)],
+                   [Measure(F(i), 4, 4, 0) for i in range(len(steps))], F(len(steps)))
+
+# 参考曲(ASAP test)与一首"改了标题作曲家但音符相同"的 PDMX 曲 → 应被 MinHash 抓到
+ref = _ir("CDEFGABCDEF")
+pdmx_same = _ir("CDEFGABCDEF")          # 同音符,元数据可能完全不同的作曲家/标题
+pdmx_diff = _ir("CGCGCGCGCGC")          # 不同音符
+ref_sig = piece_signature(ref)
+targets = {"same": piece_signature(pdmx_same), "diff": piece_signature(pdmx_diff)}
+flagged = near_dup_ids(targets, [ref_sig], threshold=0.7)
+check("near_dup_catches_same", "same" in flagged, flagged)
+check("near_dup_spares_diff", "diff" not in flagged, flagged)
+check("pitch_dur_seq_order", ir_to_pitch_dur_seq(ref)[0][0] == 60)   # C4 = MIDI 60
+
 print(f"\n全部通过: {PASS} 项")
 print("注:PDMX metadata 读取、MuseScore4 归一化、partitura 结构检查需真实数据,本地验证;")
-print("    work_key/MinHash/黑名单/license 逻辑沙盒已验证。")
+print("    work_key/MinHash/近重复/黑名单/license 逻辑沙盒已验证。")
