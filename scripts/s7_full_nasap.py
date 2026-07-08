@@ -11,7 +11,7 @@ import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 
-sys.path.insert(0, "D:\\vscode_projects\\ee_download\\rubato-repl")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import partitura
 import pandas as pd
@@ -22,9 +22,9 @@ from rubato.data.nasap import segment_score_overlap
 from rubato.data.segment import make_labels
 
 
-ASAP_ROOT = Path("D:\\vscode_projects\\ee_download\\asap-dataset\\asap-dataset")
+ASAP_ROOT = Path(r"D:\vscode_projects\ee_download\asap-dataset\asap-dataset")
 METADATA_CSV = ASAP_ROOT / "metadata.csv"
-REPORT_PATH = Path("D:\\vscode_projects\\ee_download\\reports\\s7_full_nasap.json")
+REPORT_PATH = Path(r"D:\vscode_projects\ee_download\reports\s7_full_nasap.json")
 
 
 def loader(p):
