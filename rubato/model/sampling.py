@@ -7,33 +7,37 @@ import hashlib
 DIALECT_MIX = {"A2S": 0.35, "A2S_lite": 0.15, "TAST": 0.20, "AMT": 0.30}
 
 
-def dialect_sampler(available_by_utt: dict, seed: int, epoch: int):
+def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
+                    mix: dict | None = None):
     """
     R-S11.2:按混比采样 (utt_id, dialect),不按数据集自然占比。
     available_by_utt: {utt_id: [可用 dialect]}。
-    返回一个 epoch 的采样列表 [(utt_id, dialect)]。
-    做法:对每个 utt,按其可用 dialect 在全局混比中的相对权重选一个 dialect。
+    返回一个 epoch 的采样列表 [(utt_id, dialect)],总量 ≈ utt 数。
+
+    修复说明:旧实现"逐 utt 按其可用 dialect 的相对权重选一个"——当可用性分布偏斜时
+    (MAESTRO 只有 AMT、占语料大头),epoch 的 dialect 分布=数据自然占比,直接违反
+    R-S11.2。现改为【全局配额】:每个 dialect 按混比分得 quota,从"支持该 dialect 的
+    utt 池"中抽样填满(池小的 dialect 有放回过采样)——分布严格贴合混比。
     """
     import random
     rng = random.Random(f"{seed}:{epoch}")
+    mix = mix or DIALECT_MIX
+    pools = {d: [u for u, avail in available_by_utt.items() if avail and d in avail]
+             for d in mix}
+    pools = {d: p for d, p in pools.items() if p}
+    if not pools:
+        return []
+    n_total = sum(1 for a in available_by_utt.values() if a)
+    tot_w = sum(mix[d] for d in pools)
     out = []
-    for utt, avail in available_by_utt.items():
-        if not avail:
-            continue
-        weights = [DIALECT_MIX.get(d, 0.0) for d in avail]
-        tot = sum(weights)
-        if tot == 0:
-            d = rng.choice(avail)
-        else:
-            r = rng.random() * tot
-            acc = 0.0
-            d = avail[-1]
-            for cand, wt in zip(avail, weights):
-                acc += wt
-                if r < acc:
-                    d = cand
-                    break
-        out.append((utt, d))
+    for d in sorted(pools):
+        quota = int(round(n_total * mix[d] / tot_w))
+        pool = pools[d]
+        take = rng.sample(pool, min(quota, len(pool)))     # 优先无放回
+        while len(take) < quota:                           # 小池按混比过采样(有放回)
+            take.append(rng.choice(pool))
+        out.extend((u, d) for u in take)
+    rng.shuffle(out)
     return out
 
 

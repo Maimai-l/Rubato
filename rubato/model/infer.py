@@ -63,20 +63,65 @@ def strip_timestamps(tast_text: str) -> str:
     return _TS_RE.sub("", tast_text).strip()
 
 
+# 小节线单元在空格边界上以 "|" 开头(如 "|3/4k-4");时间戳/prompt token 的 "|" 都紧跟 "<"。
+# 旧实现 rfind("|") 会切进 "<|tN|>" 内部产生 "...<" 垃圾 —— 必须按【单元】操作。
+_BAR_UNIT_RE = re.compile(r"(?:^|(?<= ))\|\d+/\d+k(?:0|#[1-7]|-[1-7])")
+
+
 def truncate_after_20s(tast_text: str, threshold_bin: int = 2000) -> str:
     """
-    R-S12.1.2:首个时间戳 >20s(bin>threshold)视作窗 EOS,截断其后内容。
-    4000-bin/10ms 编码下 20s = bin 2000。保留触发点之前(含该小节线)的内容。
+    R-S12.1.2:首个时间戳 >2000 bin(20s)视作窗 EOS。截断规则(单元级,保 InterMo 合法):
+      1. 找到首个 ts_bin > threshold 的单元,回退到其前最近的小节线单元 j;
+      2. 保留 units[0..j];小节线 j 上的 onset(属被弃小节)剔除;
+      3. 仍未闭合的音符(跨切点延音)在小节线 j 处补 offset —— Dyck 闭合、D-05 终止小节线均满足。
+    解析失败时退化为正则粗截(后续 validate 会兜底)。
     """
-    # 找第一个超阈值的时间戳位置
-    for m in re.finditer(r"<\|t(\d+)\|>", tast_text):
-        if int(m.group(1)) > threshold_bin:
-            # 截断到该时间戳之前;回退到最近的小节线以保小节完整
-            cut = m.start()
-            head = tast_text[:cut]
-            last_bar = head.rfind("|")
-            return head[:last_bar].strip() if last_bar > 0 else head.strip()
-    return tast_text.strip()
+    from rubato.intermo.core import units_to_text
+
+    def _regex_fallback() -> str:
+        for m in re.finditer(r"<\|t(\d+)\|>", tast_text):
+            if int(m.group(1)) > threshold_bin:
+                head = tast_text[:m.start()]
+                bars = list(_BAR_UNIT_RE.finditer(head))
+                return head[:bars[-1].start()].strip() if bars else head.strip()
+        return tast_text.strip()
+
+    try:
+        units = text_to_units(tast_text)
+    except Exception:
+        return _regex_fallback()
+
+    cut = next((i for i, u in enumerate(units)
+                if u.ts_bin is not None and u.ts_bin > threshold_bin), None)
+    if cut is None:
+        return tast_text.strip()
+    bar_j = next((j for j in range(cut - 1, -1, -1) if units[j].bar is not None), None)
+    if bar_j is None:
+        return ""                                    # 20s 内无完整小节 → 本窗无产出
+
+    kept = units[:bar_j + 1]
+    term = kept[-1]
+    # 运行 Dyck 状态:统计切点处仍 open 的 (staff, pitch)
+    open_keys: set = set()
+    for u in kept[:-1]:
+        for staff, p in u.offs:
+            open_keys.discard((staff, p))
+        for staff, p, _v in u.ons:
+            open_keys.add((staff, p))
+    for staff, p in term.offs:                       # 终止小节线自带的 offset 先生效
+        open_keys.discard((staff, p))
+    term.ons = []                                    # 属被弃小节的 onset 剔除
+    if open_keys:                                    # 跨切点延音 → 在边界补 offset
+        from rubato.intermo.core import _pitch_key
+        extra = sorted(open_keys, key=lambda e: (str(e[0]), _pitch_key(e[1])))
+        seen = {(s, p) for s, p in term.offs}
+        term.offs = sorted(term.offs + [e for e in extra if e not in seen],
+                           key=lambda e: (str(e[0]), _pitch_key(e[1])))
+    try:
+        has_ts = all(u.ts_bin is not None for u in kept)
+        return units_to_text(kept, with_ts=has_ts)
+    except Exception:
+        return _regex_fallback()
 
 
 # ---------------------------------------------------------------- 纯逻辑:窗合并(R-S12.1.3)
@@ -100,11 +145,12 @@ def validate_a2s(a2s_text: str) -> list[str]:
 # ---------------------------------------------------------------- GPU 层:单窗解码(R-S12.2)
 
 def single_window_infer(model, audio_window, sr: int, tokenizer,
-                        beam_size: int = 4) -> str:
+                        beam_size: int = 4, truncate: bool = True) -> str:
     """
     单窗 TAST 解码。R-S12.2:beam=4;不可解析→greedy 重试 1 次;再败返回空。
     需 NeMo 模型,本地跑。三种 API 形态兜底(不同 NeMo 版本签名不同)。
-    返回该窗的 A2S 文本(已截断 >20s、已剥戳)。
+    truncate=False 用于【最后一窗】:其 20-40s 区间没有后续窗兜底,截断=直接丢内容。
+    返回该窗的 A2S 文本(已按需截断、已剥戳)。
     """
     prompt = build_tast_prompt()
 
@@ -124,7 +170,7 @@ def single_window_infer(model, audio_window, sr: int, tokenizer,
             raw = _decode(beam)
         except Exception:
             continue
-        tast = truncate_after_20s(raw)   # >20s = EOS
+        tast = truncate_after_20s(raw) if truncate else raw   # >20s = EOS(末窗除外)
         a2s = strip_timestamps(tast)     # 剥戳
         if not validate_a2s(a2s):        # 合法即采用
             return a2s
@@ -149,18 +195,45 @@ def infer_a2s(model, audio, tokenizer, sr: int = 16000) -> str:
 def _infer_impl(model, audio, tokenizer, sr: int) -> str:
     """真实推理流程(R-S12.1/12.3)。"""
     windows = split_audio(audio, sr)
-    if len(windows) == 1:                # R-S12.3:短音频单窗
-        return single_window_infer(model, windows[0][1], sr, tokenizer)
-    # 长音频:逐窗解码 → 收集各窗 A2S → 小节线合并
+    if len(windows) == 1:                # R-S12.3:短音频单窗,不截断
+        return single_window_infer(model, windows[0][1], sr, tokenizer, truncate=False)
+    # 长音频:逐窗解码 → 收集各窗 A2S → 小节线合并。
+    # 末窗 truncate=False:20-40s 区间无后续窗兜底,截断即丢失全曲结尾。
     window_a2s = []
-    for start, seg in windows:
-        a2s = single_window_infer(model, seg, sr, tokenizer)
+    for wi, (start, seg) in enumerate(windows):
+        is_last = wi == len(windows) - 1
+        a2s = single_window_infer(model, seg, sr, tokenizer, truncate=not is_last)
         if a2s and a2s != _EMPTY_A2S:
             window_a2s.append(a2s)
     if not window_a2s:
         return _EMPTY_A2S
     merged = merge_windows(window_a2s)
     return merged if not validate_a2s(merged) else (window_a2s[0] or _EMPTY_A2S)
+
+
+# ---------------------------------------------------------------- AMT 推理(eval hook 用)
+
+def build_amt_prompt() -> list[str]:
+    return list(DIALECT_PROMPT["AMT"])
+
+
+def infer_amt(model, audio, tokenizer, sr: int = 16000, beam_size: int = 4) -> str:
+    """
+    AMT dialect 单窗推理(MAESTRO val 段 ≤25s,单窗覆盖)。
+    返回 AMT 文本(含时间戳/力度/踏板);失败返回空串。
+    """
+    if model is None:
+        return ""
+    prompt = build_amt_prompt()
+    try:
+        if hasattr(model, "generate"):
+            out = model.generate(audio, prompt=prompt, num_beams=beam_size)
+            return out if isinstance(out, str) else tokenizer.decode(out)
+        if hasattr(model, "transcribe"):
+            return model.transcribe([audio], num_beams=beam_size)[0]
+        return str(model(audio, prompt=prompt))
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------- 便利封装

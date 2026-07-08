@@ -4,7 +4,7 @@ __pycache__/
 work/
 outputs/
 logs/
-data/
+/data/
 environment/
 assets/
 third_party/

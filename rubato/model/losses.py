@@ -73,6 +73,10 @@ def combined_loss(sem_logits, sem_targets, ts_logits, ts_targets,
     组合三件套。返回 {loss, sem, ts}。
     实际训练中按 token 类型分流:语义位置走 semantic_loss,时间戳位置走 timestamp_loss,
     再各自序列级长度归一化后相加。此处给出结构,精确分流在 dataloader/collate 定 token 类型。
+
+    注意:此函数是"结构演示/监控指标"版本(逐 token 平均,不含 1/√|T|)。
+    真正进 backward 的训练 loss 用下面的 batch_sequence_loss —— 它精确实现论文公式
+    (逐序列 ΣCE × |T|^{-1/2},batch 取平均)且完全向量化。
     """
     parts = {}
     total = torch.tensor(0.0)
@@ -84,3 +88,111 @@ def combined_loss(sem_logits, sem_targets, ts_logits, ts_targets,
         total = total + parts["ts"]
     parts["loss"] = total
     return parts
+
+
+# ================================================================ 论文精确训练 loss(向量化)
+#
+# 论文 §3.3 的三个适配必须同时作用在 backward 路径上:
+#   1. Token weighting: L_seq = (Σ_t CE_t) · |T|^(-1/2),batch 内对序列取平均
+#   2. 语义 token: label smoothing 0.1(与 F.cross_entropy(label_smoothing=) 同口径)
+#   3. 时间戳 token: 序数平滑 P_center=0.9, w=5, 二次衰减,边界截断重归一
+#
+# 输入是 log_probs(NeMo EncDecMultiTaskModel.forward 返回 log-softmax 后的
+# transf_log_probs),不是裸 logits —— 所以这里直接在 log 概率上按目标分布 q 求
+# -Σ q·logp,数学上与"logits 过 CE"完全一致。
+
+def _per_token_semantic_nll(logp: torch.Tensor, targets: torch.Tensor,
+                            label_smoothing: float = 0.1) -> torch.Tensor:
+    """
+    语义位置逐 token 的 label-smoothed NLL。
+    logp: (N, V) log 概率;targets: (N,) 全词表 token id。返回 (N,)。
+    与 F.cross_entropy(label_smoothing=ε) 同口径:q = (1-ε)·onehot + ε/V·uniform。
+    """
+    nll = -logp.gather(-1, targets.unsqueeze(-1)).squeeze(-1)          # (N,)
+    smooth = -logp.sum(-1) / logp.shape[-1]                            # (N,)
+    return (1.0 - label_smoothing) * nll + label_smoothing * smooth
+
+
+def _per_token_ordinal_nll(logp: torch.Tensor, target_bins: torch.Tensor,
+                           ts_token_ids: torch.Tensor,
+                           p_center: float = 0.9, w: int = 5) -> torch.Tensor:
+    """
+    时间戳位置逐 token 的序数平滑 NLL(全词表 softmax 上计算,不截取子词表——
+    模型放在非时间戳 token 上的概率质量同样计入惩罚)。
+    logp: (N, V);target_bins: (N,) bin 编号 0..n_bins-1;
+    ts_token_ids: (n_bins,) LongTensor,bin -> 全词表 token id 映射。
+    返回 (N,)。
+    """
+    n_bins = ts_token_ids.shape[0]
+    device = logp.device
+    offsets = torch.arange(-w, w + 1, device=device)                   # (2w+1,)
+    neigh_bins = target_bins.unsqueeze(-1) + offsets                   # (N, 2w+1)
+    valid = (neigh_bins >= 0) & (neigh_bins < n_bins)
+    neigh_bins_c = neigh_bins.clamp(0, n_bins - 1)
+    # 权重:中心 = p_center;邻域 = (1-p)·(w+1-|d|)²/Z(Z=边界截断后的邻域权重和)
+    raw = (w + 1 - offsets.abs()).float() ** 2                         # (2w+1,)
+    wmat = raw.unsqueeze(0).expand_as(neigh_bins).clone()              # (N, 2w+1)
+    center = offsets == 0
+    wmat[:, center] = 0.0
+    wmat = wmat * valid.float()
+    Z = wmat.sum(-1, keepdim=True).clamp(min=1e-12)
+    q = (1.0 - p_center) * wmat / Z                                    # (N, 2w+1)
+    q[:, center] = p_center
+    tok_ids = ts_token_ids.to(device)[neigh_bins_c]                    # (N, 2w+1)
+    lp = logp.gather(-1, tok_ids)                                      # (N, 2w+1)
+    return -(q * lp).sum(-1)
+
+
+def batch_sequence_loss(log_probs: torch.Tensor, labels: torch.Tensor,
+                        token_types: torch.Tensor, loss_mask: torch.Tensor,
+                        ts_bins: torch.Tensor, ts_token_ids: torch.Tensor,
+                        label_smoothing: float = 0.1,
+                        p_center: float = 0.9, w: int = 5) -> dict:
+    """
+    论文精确训练 loss(R-S11.1 全三件套,进 backward)。
+    log_probs: (B, L, V) —— 模型 forward 的 log 概率(teacher forcing,已右移对齐 labels)
+    labels: (B, L) 目标 token id
+    token_types: (B, L) 0=语义 1=时间戳(与 labels 对齐)
+    loss_mask: (B, L) bool,True=计入 loss(prompt 位置 False)
+    ts_bins: (B, L) 时间戳位置的 bin 编号(非时间戳位置任意值,被 mask 忽略)
+    ts_token_ids: (n_bins,) bin -> token id
+    返回 {loss, sem, ts, n_sem, n_ts}(loss 带梯度)。
+    """
+    B, L, V = log_probs.shape
+    flat_lp = log_probs.reshape(B * L, V)
+    flat_labels = labels.reshape(B * L)
+    flat_types = token_types.reshape(B * L)
+    flat_mask = loss_mask.reshape(B * L).bool()
+    flat_bins = ts_bins.reshape(B * L)
+
+    per_token = log_probs.new_zeros(B * L)
+    sem_sel = flat_mask & (flat_types == 0)
+    ts_sel = flat_mask & (flat_types == 1)
+    if sem_sel.any():
+        per_token[sem_sel] = _per_token_semantic_nll(
+            flat_lp[sem_sel], flat_labels[sem_sel], label_smoothing)
+    if ts_sel.any():
+        per_token[ts_sel] = _per_token_ordinal_nll(
+            flat_lp[ts_sel], flat_bins[ts_sel], ts_token_ids, p_center, w)
+
+    per_token = per_token.reshape(B, L)
+    seq_ce = per_token.sum(-1)                                         # (B,) Σ_t CE_t
+    T = loss_mask.reshape(B, L).float().sum(-1).clamp(min=1.0)         # (B,) |T|
+    loss = (seq_ce * T.pow(-0.5)).mean()                               # 论文 1/√|T|,batch 平均
+
+    with torch.no_grad():
+        sem_mean = per_token.reshape(-1)[sem_sel].mean() if sem_sel.any() else log_probs.new_tensor(0.0)
+        ts_mean = per_token.reshape(-1)[ts_sel].mean() if ts_sel.any() else log_probs.new_tensor(0.0)
+    return {"loss": loss, "sem": sem_mean, "ts": ts_mean,
+            "n_sem": int(sem_sel.sum()), "n_ts": int(ts_sel.sum())}
+
+
+def build_ts_token_ids(tokenizer, n_bins: int = 4000) -> torch.Tensor:
+    """从 SentencePiece tokenizer 建 bin -> token id 映射(训练启动时建一次)。"""
+    ids = [tokenizer.piece_to_id(f"<|t{i}|>") for i in range(n_bins)]
+    unk = tokenizer.unk_id() if hasattr(tokenizer, "unk_id") else 0
+    missing = sum(1 for i in ids if i == unk)
+    if missing:
+        raise ValueError(f"{missing}/{n_bins} 个时间戳 token 不在词表内 —— "
+                         "tokenizer 训练时 user_defined_symbols 未含全部 <|tN|>")
+    return torch.tensor(ids, dtype=torch.long)

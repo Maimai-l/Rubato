@@ -4,7 +4,8 @@ tokenizer: {vocab: 8000, spm_alpha: 0.25, ts_bins: 4000, ts_ms: 10, normalizatio
 data:
   score_seg: {min_measures: 4, max_measures: 32, max_sec: 40}
   amt_seg: {target_sec: [12, 25], search_win_sec: 1.0}
-  mix: {A2S: 0.30, A2S_lite: 0.10, TAST: 0.20, AMT: 0.30, DBD: 0.10}
+  # R-S11.2【不变量】:DBD 已裁,份额并入主线;与 rubato/model/sampling.DIALECT_MIX 一致
+  mix: {A2S: 0.35, A2S_lite: 0.15, TAST: 0.20, AMT: 0.30}
   max_duration_per_batch_sec: 560     # TUNE
 optim:
   name: adamw
@@ -23,6 +24,6 @@ loss:
   sem_label_smooth: 0.1
   ts_smooth: {p_center: 0.9, w: 5}      # 时间戳序数平滑核
 specaugment: false                     # 论文未提;真实录音掉分再开
-eval_every_hours: 12
+eval_every_steps: 3000                 # R-S11.5【不变量】按步数评测,非时间制(原 eval_every_hours 违反)
 ckpt: {keep: 6, select_by: val_omr_ned}
 seed: 20260706

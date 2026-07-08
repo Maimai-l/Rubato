@@ -39,10 +39,26 @@ def assign_source_and_preset(utt_id: str, sources_cfg: dict, presets_cfg: dict):
 
 
 def render_midi_to_wav44(midi_path: str, source: dict, sources_cfg: dict,
-                         out_wav: str, utt_id: str = "") -> None:
-    """用指定音源把 MIDI 渲成 44.1k wav。引擎命令以各自 --help 为准,此处为核实过的通用形式。"""
-    sr = sources_cfg["render"]["sr_render"]
+                         out_wav: str, utt_id: str = "",
+                         timeout_s: float | None = None) -> None:
+    """
+    用指定音源把 MIDI 渲成 44.1k wav。引擎命令以各自 --help 为准,此处为核实过的通用形式。
+
+    修复(问题#2/#8/#9 相关):
+      1. 【必须有超时】旧版无 timeout —— sfizz_render 遇 Salamander(1.4GB FLAC、
+         release/共鸣/踏板噪声三层附加采样、note_polyphony=1 抢音)会以 10-100× 实时
+         的速度慢渲,表现为"卡死"。超时由 sources.yaml render.timeout_s 控制(默认 600s),
+         超时抛 subprocess.TimeoutExpired,调用方按 R-S4.4 记 failures 重试/标废,不再挂整夜。
+      2. sfizz 附加 flag 从 sources.yaml render.sfizz_flags 读(--polyphony 上限、
+         --use-eot 以 MIDI 末尾为渲染终点、--quality)。flag 名以本机 --help 为准。
+      3. 大型 SFZ 建议先跑 scripts/prepare_salamander.py 生成"渲染专用瘦身版"
+         (剥 release/噪声层 + FLAC→WAV),源路径换成瘦身版后吞吐可提一个量级。
+    """
+    render_cfg = sources_cfg["render"]
+    sr = render_cfg["sr_render"]
     engine = source["engine"]
+    if timeout_s is None:
+        timeout_s = float(render_cfg.get("timeout_s", 600))
 
     # 若 source 含 variants,确定性选一变体(同 utt_id 同 variant,bit 级可复现)
     variants = source.get("variants")
@@ -55,13 +71,15 @@ def render_midi_to_wav44(midi_path: str, source: dict, sources_cfg: dict,
 
     from rubato.platform import run
     if engine == "fluidsynth":
-        gain = sources_cfg["render"]["fluidsynth_gain"]
+        gain = render_cfg["fluidsynth_gain"]
         run("fluidsynth", ["-ni", "-F", out_wav, "-r", str(sr),
-                           "-g", str(gain), sfpath, midi_path])
+                           "-g", str(gain), sfpath, midi_path], timeout=timeout_s)
     elif engine == "sfizz":
         # sfizz_render flag 以 --help 为准(冒烟阶段核实);常见形式如下
+        extra = list(source.get("sfizz_flags") or render_cfg.get("sfizz_flags") or [])
         run("sfizz_render", ["--sfz", sfpath, "--midi", midi_path,
-                             "--wav", out_wav, "--samplerate", str(sr)])
+                             "--wav", out_wav, "--samplerate", str(sr), *extra],
+            timeout=timeout_s)
     else:
         raise ValueError(f"未知引擎 {engine}")
 
@@ -117,9 +135,21 @@ def silence_check(opus_path: str, gate_db: float = -60) -> bool:
     """用 ffmpeg volumedetect 确认非静音。返回 True=有声。"""
     from rubato.platform import run
     r = run("ffmpeg", ["-i", opus_path, "-af", "volumedetect", "-f", "null", "-"],
-            check=False)
+            check=False, timeout=120)
     for line in r.stderr.splitlines():
         if "max_volume" in line:
             val = float(line.split("max_volume:")[1].replace("dB", "").strip())
             return val > gate_db
     return False
+
+
+def duration_check(audio_path: str, expected_dur_s: float, tol_s: float = 1.5) -> dict:
+    """
+    R-S4.4 另一半 QC 门(旧版只有 silence_check):渲染时长 vs MIDI 末音 offset 差 <1.5s。
+    返回 {ok, actual_s, expected_s, diff_s}。sfizz 慢渲被超时杀掉产出截断 wav 时在此被抓。
+    """
+    info = sf.info(audio_path)
+    actual = info.frames / float(info.samplerate)
+    diff = abs(actual - expected_dur_s)
+    return {"ok": diff < tol_s, "actual_s": round(actual, 2),
+            "expected_s": round(expected_dur_s, 2), "diff_s": round(diff, 2)}

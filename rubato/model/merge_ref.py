@@ -66,26 +66,44 @@ def _measure_note_signature(ir: ScoreIR, mi: int):
     return frozenset(sig)
 
 
+def _sig_jaccard(sa: frozenset, sb: frozenset) -> float:
+    if not sa and not sb:
+        return 1.0
+    union = len(sa | sb)
+    return len(sa & sb) / union if union else 1.0
+
+
 def _concat_ir(a: ScoreIR, b: ScoreIR, overlap_hint: int = None) -> ScoreIR:
     """
     把 b 接到 a 之后,自动识别并去除重叠小节。
-    重叠判定:a 结尾若干小节的音符签名 == b 开头若干小节的音符签名。
+    重叠判定三级:
+      1. 精确:a 结尾 k 小节的音符签名序列 == b 开头 k 小节;
+      2. 模糊:解码噪声下逐小节 Jaccard 均值 ≥0.6 也算重叠(两窗对同一小节的
+         转写可有少量差异,精确匹配会漏);
+      3. 都不中 → overlap=0【不丢内容】。旧实现强制 overlap=1,窗间内容真不重叠时
+         会静默扔掉一个真实小节 —— 宁可重复,不可丢失(重复可被后续人工/评测发现,
+         丢失不可恢复)。
     """
     na, nb = len(a.measures), len(b.measures)
-    # 找最大重叠 k:a[-k:] 的签名序列 == b[:k]
     max_k = min(na, nb, 8) if overlap_hint is None else min(overlap_hint, na, nb)
     overlap = 0
-    for k in range(max_k, 0, -1):
+    for k in range(max_k, 0, -1):                     # 1. 精确
         a_sigs = [_measure_note_signature(a, na - k + i) for i in range(k)]
         b_sigs = [_measure_note_signature(b, i) for i in range(k)]
         if a_sigs == b_sigs:
             overlap = k
             break
-    if overlap == 0:
-        overlap = 1 if overlap_hint is None else 0   # 保守:hint 显式为0才不去重
+    if overlap == 0 and overlap_hint is None:          # 2. 模糊
+        best_k, best_score = 0, 0.0
+        for k in range(max_k, 0, -1):
+            sims = [_sig_jaccard(_measure_note_signature(a, na - k + i),
+                                 _measure_note_signature(b, i)) for i in range(k)]
+            score = sum(sims) / k
+            if score >= 0.6 and score > best_score:
+                best_k, best_score = k, score
+        overlap = best_k                               # 3. 仍为 0 → 不去重,保内容
 
     # 拼接:a 全部 + b 从第 overlap 个小节起,时间平移到 a 末尾
-    a_bounds = [m.start for m in a.measures] + [a.score_end]
     shift = a.score_end                       # b 的起点接到 a 末尾
     b_bounds = [m.start for m in b.measures] + [b.score_end]
     b_skip_start = b_bounds[overlap] if overlap < len(b_bounds) else b.score_end
@@ -95,10 +113,26 @@ def _concat_ir(a: ScoreIR, b: ScoreIR, overlap_hint: int = None) -> ScoreIR:
         m = b.measures[i]
         new_measures.append(Measure(m.start - b_skip_start + shift, m.num, m.den, m.fifths))
 
-    new_notes = list(a.notes)
-    for n in b.notes:
-        if n.onset >= b_skip_start:
-            new_notes.append(Note(n.staff, n.pitch, n.onset - b_skip_start + shift, n.dur))
+    a_notes = list(a.notes)
+    b_notes = [Note(n.staff, n.pitch, n.onset - b_skip_start + shift, n.dur)
+               for n in b.notes if n.onset >= b_skip_start]
+
+    # 接缝延音融合(Dyck open 状态跨窗的 IR 层实现):
+    # 窗文本各自自包含,跨缝长音在 a 侧以"offset 恰在缝上"结束、b 侧以"onset 恰在缝上"
+    # 重新开始 —— 同 (staff,pitch) 配对时合并为一个音,恢复延音。两遍处理,不边遍历边删。
+    seam_ons = {(n.staff, str(n.pitch)): n for n in b_notes if n.onset == shift}
+    fused_a, consumed = [], set()
+    for n in a_notes:
+        key = (n.staff, str(n.pitch))
+        if n.offset == shift and n.onset < shift and key in seam_ons and key not in consumed:
+            tail = seam_ons[key]
+            fused_a.append(Note(n.staff, n.pitch, n.onset, tail.offset - n.onset))
+            consumed.add(key)
+        else:
+            fused_a.append(n)
+    fused_b = [n for n in b_notes
+               if not (n.onset == shift and (n.staff, str(n.pitch)) in consumed)]
+    new_notes = fused_a + fused_b
 
     new_end = shift + (b.score_end - b_skip_start)
     return ScoreIR(new_notes, new_measures, new_end)

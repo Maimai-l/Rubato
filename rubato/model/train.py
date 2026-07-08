@@ -77,97 +77,98 @@ def bucket_batches(samples: list[dict], max_batch_sec: float = 560.0):
 
 # ---------------------------------------------------------------- 训练步(R-S11.1 装配)
 
-def training_step_logic(model, batch, tokenizer):
+def resolve_log_probs(output):
     """
-    单训练步的 loss 计算(装配 combined_loss)。返回 loss dict。
-    batch: {audio_feats, target_tokens, token_types, seq_lengths, ...}。
-    token_types 区分语义/时间戳位置 → 分流到对应 loss。
-    此函数体现装配逻辑;实际张量流经 NeMo 模型的 forward,本地接。
+    从 NeMo forward 的返回值中取出 log_probs,形态不认识就【抛错】。
+    EncDecMultiTaskModel.forward(..., transcript=input_ids, transcript_length=...)
+    返回 4 元组 (transf_log_probs, encoded_len, enc_states, enc_mask)。
+    旧实现按 dict/Tensor 判断、判不中就静默用 0.0 当 loss —— 训练会"跑通但学不到任何东西"。
+    这里绝不静默:未知形态直接 TypeError。
     """
     import torch
+    if isinstance(output, (tuple, list)):
+        lp = output[0]
+        if not isinstance(lp, torch.Tensor):
+            raise TypeError(f"forward 返回元组但首元素非 Tensor: {type(lp)}")
+        return lp
+    if isinstance(output, dict):
+        for k in ("log_probs", "transf_log_probs", "logits"):
+            if k in output:
+                return output[k]
+        raise TypeError(f"forward 返回 dict 但无 log_probs/logits 键: {list(output)}")
+    if isinstance(output, torch.Tensor):
+        return output
+    raise TypeError(f"无法从 forward 输出提取 log_probs: {type(output)}")
+
+
+def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=None):
+    """
+    单训练步。返回 {loss(带梯度), semantic_loss, ordinal_loss, ...}。
+
+    batch 契约(rubato/data/dataset.py 的 collate 产出):
+      audio          (B, S)  原始波形(16k mono,tiling 补齐后)
+      audio_lens     (B,)    有效采样点数
+      input_ids      (B, L)  decoder 输入 = [prompt + 标签 + eot] 去掉最后一位(teacher forcing 右移)
+      input_lens     (B,)    input_ids 有效长度
+      labels         (B, L)  目标 = 完整序列去掉第一位(与 input_ids 错一位对齐)
+      token_types    (B, L)  0=语义 1=时间戳(与 labels 对齐)
+      loss_mask      (B, L)  bool,prompt 位置 False(R-S10.4)
+      ts_bins        (B, L)  时间戳位置的 bin 编号(其余位置 0,被 mask 忽略)
+
+    loss 路径(修复:三件套现在真正进 backward,不再只是监控指标):
+      NeMo preprocessor → encoder/decoder forward(teacher forcing)→ transf_log_probs
+      → batch_sequence_loss(语义 label-smooth + 时间戳序数平滑 + 1/√|T| 序列归一)
+    """
+    import torch
+    from rubato.model.losses import batch_sequence_loss, build_ts_token_ids
+
     device = next(model.parameters()).device
-    audio = batch["audio_feats"].to(device)
-    audio_len = batch["seq_lengths"].to(device)
-    targets = batch["target_tokens"].to(device)
-    target_len = batch.get("target_lengths",
-                           torch.tensor([len(t) for t in targets], device=device)).to(device)
+    audio = batch["audio"].to(device)
+    audio_len = batch["audio_lens"].to(device)
+    input_ids = batch["input_ids"].to(device)
+    input_lens = batch["input_lens"].to(device)
+    labels = batch["labels"].to(device)
+    token_types = batch["token_types"].to(device)
+    loss_mask = batch["loss_mask"].to(device)
+    ts_bins = batch["ts_bins"].to(device)
 
-    # 1. Preprocess: raw audio → mel features (NeMo preprocessor)
-    processed, processed_len = model.preprocessor(
-        input_signal=audio, length=audio_len,
-    )
+    if ts_token_ids is None:
+        ts_token_ids = build_ts_token_ids(tokenizer)
+    ts_token_ids = ts_token_ids.to(device)
 
-    # 2. Forward with PROCESSED signal (not raw audio)
+    # 1. raw wav → mel(必须走 canary 自带 preprocessor,R-S10.3 前端一致性)
+    processed, processed_len = model.preprocessor(input_signal=audio, length=audio_len)
+
+    # 2. teacher-forcing forward。EncDecMultiTaskModel 返回
+    #    (transf_log_probs, encoded_len, enc_states, enc_mask);transf_log_probs 已 log-softmax。
     output = model.forward(
         processed_signal=processed, processed_signal_length=processed_len,
-        transcript=targets, transcript_length=target_len,
+        transcript=input_ids, transcript_length=input_lens,
     )
+    log_probs = resolve_log_probs(output)
+    assert log_probs.dim() == 3, f"log_probs 应为 (B,L,V),得 {tuple(log_probs.shape)}"
+    assert log_probs.shape[:2] == labels.shape, \
+        f"log_probs {tuple(log_probs.shape[:2])} 与 labels {tuple(labels.shape)} 未对齐 —— " \
+        "检查 collate 是否做了 teacher-forcing 右移(input=seq[:-1], labels=seq[1:])"
 
-    # Extract loss
-    if isinstance(output, dict):
-        loss = output.get("loss")
-        if loss is None:
-            loss = torch.tensor(0.0, device=device, requires_grad=True)
-    elif isinstance(output, torch.Tensor):
-        loss = output
-    else:
-        loss = torch.tensor(0.0, device=device, requires_grad=True)
-
+    cfg = loss_cfg or {}
+    parts = batch_sequence_loss(
+        log_probs, labels, token_types, loss_mask, ts_bins, ts_token_ids,
+        label_smoothing=cfg.get("sem_label_smooth", 0.1),
+        p_center=cfg.get("p_center", 0.9), w=cfg.get("w", 5),
+    )
+    loss = parts["loss"]
+    assert loss.requires_grad, "loss 无梯度 —— forward 图断了(检查 no_grad/detach)"
     assert torch.isfinite(loss), f"loss 非有限: {loss}"
-
-    # --- combined_loss 组件 (R-S11.1): 作为额外指标,不参与 backward ---
-    sem_loss_val = torch.tensor(0.0, device=device)
-    ts_loss_val = torch.tensor(0.0, device=device)
-
-    if isinstance(output, dict) and "logits" in output and tokenizer is not None:
-        logits = output["logits"]  # (B, T, V)
-        token_types = batch.get("token_types")
-        loss_mask = batch.get("loss_mask")
-        if token_types is not None and loss_mask is not None:
-            with torch.no_grad():
-                token_types = token_types.to(device)
-                loss_mask = loss_mask.to(device)
-
-                # 时间戳 token ID → bin 编号映射
-                ts_token_ids = torch.tensor(
-                    [tokenizer.piece_to_id(f"<|t{i}|>") for i in range(4000)],
-                    device=device,
-                )
-                ts_id_to_bin = {tokenizer.piece_to_id(f"<|t{i}|>"): i for i in range(4000)}
-
-                sem_mask = (token_types == 0) & loss_mask
-                ts_mask = (token_types == 1) & loss_mask
-
-                sem_logits, sem_targets = None, None
-                ts_logits, ts_targets = None, None
-
-                if sem_mask.any():
-                    sem_logits = logits[sem_mask]
-                    sem_targets = targets[sem_mask]
-
-                if ts_mask.any():
-                    # 取时间戳子集的 logits (N_ts, 4000)
-                    ts_logits = logits[ts_mask][:, ts_token_ids]
-                    ts_target_ids = targets[ts_mask]
-                    ts_targets = torch.tensor(
-                        [ts_id_to_bin[int(t)] for t in ts_target_ids],
-                        device=device, dtype=torch.long,
-                    )
-
-                seq_lengths = batch.get("seq_lengths",
-                    torch.tensor([targets.shape[1]] * targets.shape[0], device=device))
-                loss_dict = combined_loss(
-                    sem_logits, sem_targets, ts_logits, ts_targets, seq_lengths,
-                )
-                sem_loss_val = loss_dict.get("sem", torch.tensor(0.0, device=device))
-                ts_loss_val = loss_dict.get("ts", torch.tensor(0.0, device=device))
 
     return {
         "loss": loss,
-        "semantic_loss": sem_loss_val,
-        "ordinal_loss": ts_loss_val,
-        "ts_loss": ts_loss_val,
-        "seq_lengths": batch.get("seq_lengths", torch.tensor(0.0)),
+        "semantic_loss": parts["sem"],
+        "ordinal_loss": parts["ts"],
+        "ts_loss": parts["ts"],
+        "n_sem": parts["n_sem"], "n_ts": parts["n_ts"],
+        "batch_audio_sec": float(audio_len.sum().item()) / 16000.0,
+        "seq_lengths": batch.get("seq_lengths", loss_mask.sum(-1)),
     }
 
 
@@ -179,19 +180,24 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, legato_omr_fn=None)
     legato_omr_fn: LEGATO OMR-NED 计算函数(本地注入,U10 已验证可用)。
     返回指标 dict,喂给 StopController。
     """
-    from rubato.model.infer import infer_a2s   # S12
+    from rubato.model.infer import infer_a2s, infer_amt   # S12
     from rubato.intermo.core import text_to_units, validate_units
 
     metrics = {"parseable_rate": 0.0, "val_omr_ned": None,
                "a2s_note_f1": None, "maestro_amt_f1": None}
 
-    # nASAP val:生成 + 可解析率
+    # nASAP val:生成 + 可解析率。
+    # 注意:infer_a2s 失败时兜底返回 _EMPTY_A2S(合法空谱)—— 若把它算"可解析",
+    # 可解析率会被结构性钉在 ~1.0,R-S11.7 的 <80% 止损永远不触发。空谱按不可解析计。
+    from rubato.model.infer import _EMPTY_A2S
     n_ok, n_total = 0, 0
     omr_scores = []
     for sample in nasap_val:
         pred = infer_a2s(model, sample["audio"], tokenizer)
         n_total += 1
         viol = validate_units(text_to_units(pred)) if pred else ["empty"]
+        if pred == _EMPTY_A2S:
+            viol = viol or ["empty_fallback"]
         if not viol:
             n_ok += 1
             if legato_omr_fn and sample.get("ref_xml"):
@@ -200,8 +206,21 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, legato_omr_fn=None)
     if omr_scores:
         metrics["val_omr_ned"] = sum(omr_scores) / len(omr_scores)
 
-    # MAESTRO val:AMT note F1(mir_eval,本地接)
-    # metrics["maestro_amt_f1"] = compute_amt_f1(model, maestro_val, tokenizer)
+    # MAESTRO val:AMT note F1(mir_eval)。此前只有注释 —— 但 R-S11.7 的
+    # "步≥8000 且 AMT F1<70 → 停训" 依赖它,不算等于止损规则永不触发。
+    if maestro_val:
+        from rubato.model.evaluate import note_f1, amt_text_to_notes
+        f1s = []
+        for sample in maestro_val:
+            pred_text = infer_amt(model, sample["audio"], tokenizer)
+            try:
+                est_notes = amt_text_to_notes(pred_text)
+            except Exception:
+                est_notes = []
+            ref_notes = sample.get("ref_notes") or []
+            f1s.append(note_f1(ref_notes, est_notes)["f1"])
+        if f1s:
+            metrics["maestro_amt_f1"] = 100.0 * sum(f1s) / len(f1s)
 
     return metrics
 
@@ -216,6 +235,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     R-S11.7:StopController 四触发。
     """
     import torch
+    from rubato.model.losses import build_ts_token_ids
     opt, sched = build_optimizer(model, cfg)
     stopper = StopController()
     ckpt_dir = Path(cfg.get("ckpt_dir", "outputs/ckpt"))
@@ -227,15 +247,35 @@ def train(model, datamodule, cfg: dict, tokenizer,
     best_omr = float("inf")
     report = {"stop_events": [], "eval_history": []}
 
+    # 一次性预备:时间戳 id 映射 / 梯度累积额度 / bf16
+    ts_token_ids = build_ts_token_ids(tokenizer)
+    accum_target_sec = float(cfg.get("grad_accum_to_audio_sec", 2000))
+    loss_cfg = cfg.get("loss", {})
+    use_bf16 = (str(cfg.get("precision", "")).startswith("bf16")
+                and torch.cuda.is_available())
+    autocast = (lambda: torch.autocast("cuda", dtype=torch.bfloat16)) if use_bf16 \
+        else (lambda: __import__("contextlib").nullcontext())
+
     model.train()
+    opt.zero_grad()
+    accum_sec = 0.0
     for epoch in range(cfg.get("max_epochs", 1000)):
         for batch in datamodule.train_batches(epoch):
-            opt.zero_grad()
-            parts = training_step_logic(model, batch, tokenizer)
-            parts["loss"].backward()
+            with autocast():
+                parts = training_step_logic(model, batch, tokenizer,
+                                            ts_token_ids=ts_token_ids, loss_cfg=loss_cfg)
+            batch_sec = parts.get("batch_audio_sec", accum_target_sec)
+            # R-S11.4:梯度累积至有效 ≈2000 audio-sec/步;按音频秒数等比缩放各 micro-batch
+            scale = min(1.0, batch_sec / max(accum_target_sec, 1e-6))
+            (parts["loss"] * scale).backward()
+            accum_sec += batch_sec
+            if accum_sec < accum_target_sec:
+                continue
+            accum_sec = 0.0
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sched.step()
+            opt.zero_grad()
             step += 1
 
             # 评测 + 止损
@@ -243,7 +283,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 model.eval()
                 with torch.no_grad():
                     m = run_eval_hooks(model, datamodule.nasap_val,
-                                       [], tokenizer, legato_omr_fn)
+                                       getattr(datamodule, "maestro_val", []),
+                                       tokenizer, legato_omr_fn)
                 report["eval_history"].append({"step": step, **m})
 
                 action = stopper.update(
@@ -272,10 +313,13 @@ def train(model, datamodule, cfg: dict, tokenizer,
                     report["final"] = f"converged:{action['reason']}"
                     return report
                 if act == "rollback_lr":
-                    # 回滚上一 ckpt + lr×0.5
+                    # 回滚上一 ckpt + lr×0.5。
+                    # 注意:LambdaLR 每步用 base_lrs×lambda(step) 重算 lr,直接改
+                    # param_groups["lr"] 会在下一次 sched.step() 被覆盖 —— 必须改 base_lrs。
                     if len(ckpt_ring) >= 2:
                         prev = torch.load(ckpt_ring[-2])
                         model.load_state_dict(prev["model"])
+                    sched.base_lrs = [b * 0.5 for b in sched.base_lrs]
                     for g in opt.param_groups:
                         g["lr"] *= 0.5
 

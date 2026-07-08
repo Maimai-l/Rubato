@@ -212,6 +212,51 @@ def verify_frontend(nemo_preprocessor, wav_paths: list[str], fe_spec: dict,
             "note": "若归一化方式不同,diff 会偏大;此时以复用 NeMo preprocessor 为准而非自建"}
 
 
+# ---------------------------------------------------------------- 词表替换(R-S10.2,版本鲁棒)
+
+def resize_decoder_vocab(model, new_vocab: int, old_vocab: int | None = None) -> dict:
+    """
+    R-S10.2 的直接实现:embedding / 输出投影换成 new_vocab 行并【全新初始化】,
+    encoder 与 decoder 主体不动。
+
+    为什么不首选 NeMo 的 change_vocabulary:canary 系列用 aggregate tokenizer
+    (spl_tokens + 语言子词表)+ 注册的 canary prompt_format,change_vocabulary 期望
+    同构的 tokenizer 目录结构,喂单个 8000 词 SPM 时不同 NeMo 版本行为不一(报错或
+    静默保留旧 prompt 表)。而我们自研训练环走 forward() 直喂 token id,根本不需要
+    NeMo 内部 tokenizer —— 只需把词表相关权重换形。此函数通用遍历:
+      nn.Embedding(num_embeddings==old_vocab) → 换 new_vocab 行
+      nn.Linear(out_features==old_vocab)      → 换 new_vocab 行(输出投影)
+    返回 {replaced_embeddings, replaced_linears, old_vocab}。
+    """
+    import torch.nn as nn
+
+    if old_vocab is None:
+        # 从 decoder embedding 推断旧词表(取最大的 Embedding,位置表通常远小于词表)
+        embs = [m.num_embeddings for m in model.modules() if isinstance(m, nn.Embedding)]
+        if not embs:
+            raise RuntimeError("模型内无 nn.Embedding,无法推断旧词表")
+        old_vocab = max(embs)
+
+    n_emb = n_lin = 0
+    for parent in model.modules():
+        for name, child in parent.named_children():
+            if isinstance(child, nn.Embedding) and child.num_embeddings == old_vocab:
+                new = nn.Embedding(new_vocab, child.embedding_dim,
+                                   padding_idx=child.padding_idx)
+                setattr(parent, name, new)
+                n_emb += 1
+            elif isinstance(child, nn.Linear) and child.out_features == old_vocab:
+                new = nn.Linear(child.in_features, new_vocab,
+                                bias=child.bias is not None)
+                setattr(parent, name, new)
+                n_lin += 1
+    if n_emb == 0:
+        raise RuntimeError(f"未找到 num_embeddings=={old_vocab} 的 Embedding —— "
+                           "old_vocab 传错或模型结构不符")
+    return {"replaced_embeddings": n_emb, "replaced_linears": n_lin,
+            "old_vocab": old_vocab, "new_vocab": new_vocab}
+
+
 # ---------------------------------------------------------------- 主构建(本地,NeMo 路线)
 
 def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
@@ -243,12 +288,14 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
                       "frontend": frontend_spec_from_cfg(cfg)}
     assert enc_layers == 17, f"R-S10.1 违反:encoder 应 17 层,得 {enc_layers}"
 
-    # 3. 换词表(NeMo API;确切签名以版本为准)
-    model.change_vocabulary(new_tokenizer_dir=str(Path(tokenizer_model).parent),
-                            new_tokenizer_type="bpe")
-
-    # 4. 重置 embedding/softmax(词表变了,shape 变化会自动重建;确认非静默复用)
-    #    prompt token 已在新词表中,随 embedding 一起新初始化
+    # 3+4. 换词表 + 重置 embedding/softmax(R-S10.2:全新初始化,prompt 随之)。
+    #    主路径:通用换形(resize_decoder_vocab)—— 自研训练环直喂 token id,
+    #    不依赖 NeMo 内部 tokenizer/prompt 表,绕开 canary aggregate-tokenizer 的
+    #    change_vocabulary 兼容陷阱。旧路径保留作 fallback(NeMo 原生训练时用)。
+    import sentencepiece as spm
+    sp = spm.SentencePieceProcessor(model_file=str(tokenizer_model))
+    new_vocab = sp.get_piece_size()
+    report["vocab_swap"] = resize_decoder_vocab(model, new_vocab)
 
     # 5. encoder hash 核对(R-S10.2)
     new_state = model.state_dict()
@@ -269,10 +316,14 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
     else:
         report["frontend_verify"] = {"skipped": "未提供 frontend_wav_paths"}
 
-    # 6. 参数量(A-S10.1,相对基准)
+    # 6. 参数量(A-S10.1,相对基准)。emb/softmax 是否共享权重因版本而异,
+    #    tied/untied 两种口径任一吻合即通过,避免误伤正确模型。
     total = sum(p.numel() for p in model.parameters())
-    report["param_count"] = check_param_count(total, backbone_ref=backbone_ref)
-    if report["param_count"]["ok"] is False:
-        raise AssertionError(f"A-S10.1 违反:backbone 参数量偏离 {report['param_count']}")
+    r_untied = check_param_count(total, backbone_ref=backbone_ref, tied=False)
+    r_tied = check_param_count(total, backbone_ref=backbone_ref, tied=True)
+    report["param_count"] = r_untied if r_untied.get("ok") else r_tied
+    if backbone_ref is not None and not (r_untied.get("ok") or r_tied.get("ok")):
+        raise AssertionError(
+            f"A-S10.1 违反:backbone 参数量偏离(untied={r_untied} tied={r_tied})")
 
     return model, report
