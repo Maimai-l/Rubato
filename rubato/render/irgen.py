@@ -26,6 +26,51 @@ from __future__ import annotations
 import numpy as np
 
 
+def load_real_ir(preset_id: str, sr: int = 16000,
+                 irs_dir: str = "assets/irs/real") -> "np.ndarray | None":
+    """
+    真实 IR(R-S4.3 + U12):assets/irs/real/<preset_id>.wav 存在则加载、转单声道、
+    重采样到 sr、能量归一化,返回;不存在返回 None(调用方回退 synth_ir)。
+
+    为什么要真实 IR:程序化 synth_ir 是【指数衰减白噪声】,只近似 RT60 与粗略频谱,
+    缺真实空间的早期反射图样、模态密度、房间染色。对【真实录音鲁棒性】(论文头号卖点)
+    这是域差:模型学会抗"假混响",真录音的真房间声学不一样。真实 IR 消除这个域差。
+
+    免费真实 IR 来源(下载后放 assets/irs/real/<preset_id>.wav):
+      OpenAIR(openairlib.net,教堂/厅堂/房间)、EchoThief(echothief.com,100+ 真实空间)、
+      MIT Acoustical Reverberation Survey(270 个日常空间)、Aachen AIR。
+    """
+    import os
+    from pathlib import Path
+    import soundfile as sf
+    p = Path(irs_dir) / f"{preset_id}.wav"
+    if not p.exists():
+        return None
+    ir, ir_sr = sf.read(str(p), dtype="float32")
+    if ir.ndim > 1:
+        ir = ir.mean(axis=1)                     # → mono
+    if ir_sr != sr:
+        try:
+            import soxr
+            ir = soxr.resample(ir, ir_sr, sr)
+        except Exception:
+            import scipy.signal as ss
+            ir = ss.resample(ir, int(round(len(ir) * sr / ir_sr))).astype("float32")
+    ir = ir.astype("float32")
+    ir /= np.sqrt(np.sum(ir ** 2)) + 1e-9        # 能量归一,防卷积后音量漂移
+    return ir
+
+
+def resolve_ir(preset: dict, preset_id: str | None, sr: int, seed: int,
+               irs_dir: str = "assets/irs/real") -> np.ndarray:
+    """真实 IR 优先(assets/irs/real/<preset_id>.wav),缺失回退程序化 synth_ir。"""
+    if preset_id is not None:
+        real = load_real_ir(preset_id, sr, irs_dir)
+        if real is not None:
+            return real
+    return synth_ir(preset["rt60"], preset["predelay"], sr, seed)
+
+
 def synth_ir(rt60_s: float, predelay_ms: float, sr: int = 16000,
              seed: int = 0) -> np.ndarray:
     """合成一个房间混响 IR:predelay 静音 + 指数衰减白噪声尾巴。"""
@@ -66,15 +111,23 @@ def _highshelf(x: np.ndarray, sr: int, gain_db: float, f0: float = 4000.0) -> np
 
 
 def apply_preset(audio: np.ndarray, preset: dict, sr: int = 16000,
-                 seed: int = 0, ir_override: np.ndarray | None = None) -> np.ndarray:
-    """把一个录音预设完整作用到干声上。audio: mono float32 @ sr。返回同格式。"""
+                 seed: int = 0, ir_override: np.ndarray | None = None,
+                 preset_id: str | None = None,
+                 irs_dir: str = "assets/irs/real") -> np.ndarray:
+    """
+    把一个录音预设完整作用到干声上。audio: mono float32 @ sr。返回同格式。
+    IR 优先级:ir_override > 真实 IR(assets/irs/real/<preset_id>.wav)> 程序化 synth_ir。
+    传 preset_id 即自动启用真实 IR(存在时);不传则维持旧行为(程序化)。
+    """
     from scipy.signal import fftconvolve, butter, lfilter
     rng = np.random.default_rng(seed)
     x = audio.astype(np.float32)
 
-    # 1) 卷积混响
-    ir = ir_override if ir_override is not None else synth_ir(
-        preset["rt60"], preset["predelay"], sr, seed)
+    # 1) 卷积混响(真实 IR 优先)
+    if ir_override is not None:
+        ir = ir_override
+    else:
+        ir = resolve_ir(preset, preset_id, sr, seed, irs_dir)
     wet = fftconvolve(x, ir, mode="full")[:len(x) + len(ir)]
     wet = wet[:len(x)]                       # 对齐到原长(尾巴溢出可选保留,这里截断求简)
     mix = float(preset["wet"])

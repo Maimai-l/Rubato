@@ -107,6 +107,38 @@ def _supports_sampling(tokenizer) -> bool:
 
 # ---------------------------------------------------------------- 音频加载(本地,LOCAL)
 
+def online_room_augment(audio, utt_id: str, epoch: int, presets_cfg: dict,
+                        seed: int = 20260706, sr: int = 16000,
+                        irs_dir: str = "assets/irs/real"):
+    """
+    在线房间增广(R-S4.5 apply_online):对【干声】每 epoch 施加一个 hash 选中的录音预设
+    (真实 IR 优先,见 irgen.resolve_ir)。同 (utt, epoch) 确定,不同 epoch 变→白拿的房间多样性。
+
+    这补上论文的增广乘数中"房间/环境"那一维,且【无额外磁盘】(不预渲多份)。
+    前提:S4 应渲【干声】(源音色,不烘焙预设),预设在此在线施加;若 S4 已烘焙预设,
+    此步会二次加混响,需在 S4 关闭预设烘焙(见 EXECUTOR 指引)。
+    音色维度另需在渲染期用多个源(见 sources.yaml),在线只能变房间不能变音色。
+    """
+    import hashlib
+    from rubato.render.irgen import apply_preset
+    presets = presets_cfg["presets"]
+    weights = presets_cfg.get("weights", {pid: 1.0 for pid in presets})
+    ids = list(presets)
+    h = hashlib.sha256(f"{seed}:{epoch}:{utt_id}:preset".encode()).hexdigest()
+    u = int(h[:15], 16) / float(16 ** 15)
+    # 加权选一个预设
+    tot = sum(weights.get(pid, 0.0) for pid in ids) or 1.0
+    acc, chosen = 0.0, ids[-1]
+    for pid in ids:
+        acc += weights.get(pid, 0.0) / tot
+        if u < acc:
+            chosen = pid
+            break
+    ps_seed = int(int(h[15:30], 16) % 1_000_000)
+    return apply_preset(audio, presets[chosen], sr=sr, seed=ps_seed,
+                        preset_id=chosen, irs_dir=irs_dir)
+
+
 def load_audio(path: str, sr_target: int = 16000, tile_pad_s: float = 0.0):
     """
     FLAC/Opus → 16k mono float32 numpy。tile_pad_s>0 时前导补零(R-S11.3 tiling)。
