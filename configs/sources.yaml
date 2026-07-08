@@ -44,3 +44,12 @@ render:
   opus_bitrate: 64k
   fluidsynth_gain: 0.7
   silence_gate_db: -60
+  timeout_s: 600          # 单曲渲染超时(秒)。Salamander 慢渲不再挂死管线,超时记 failures
+  # sfizz_render 附加 flag(以本机 sfizz_render --help 为准,不识别的请删):
+  #   --polyphony 96 : 限制最大发声数。Salamander V3(kinwie 版)每个 note-off 会触发
+  #                    弦共鸣/击槌噪声 release 采样、踏板事件触发踏板噪声采样,加上
+  #                    note_polyphony=1 的抢音,声部数爆炸是慢渲主因之一
+  #   --use-eot      : 以 MIDI end-of-track 为渲染终点(生成 MIDI 时在末音后留 2-3s 静音,
+  #                    否则收尾混响被截)。防止长释放采样把渲染拖到天荒地老
+  #   --quality 2    : 重采样质量(默认 2;调 1 提速,音质略降)
+  sfizz_flags: ["--polyphony", "96", "--use-eot", "--quality", "2"]

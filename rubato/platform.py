@@ -21,12 +21,29 @@ from pathlib import Path
 
 _BIN_CACHE: dict[str, str] = {}
 
+# 仓库根(本文件在 rubato/ 下)。configs/project.yaml 的默认解析必须锚定仓库根,
+# 不能依赖 CWD —— 旧版 "configs/project.yaml" 相对路径在从其他目录启动脚本时
+# 找不到文件或读错文件(问题#17 "platform.run 路径解析不稳定" 的根源之一)。
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 
-def load_binaries(project_yaml: str | Path = "configs/project.yaml") -> dict:
-    """从 project.yaml 读 binaries 段;缓存。"""
+
+def load_binaries(project_yaml: str | Path | None = None) -> dict:
+    """从 project.yaml 读 binaries 段。默认锚定仓库根,与 CWD 无关。"""
     import yaml
-    cfg = yaml.safe_load(Path(project_yaml).read_text(encoding="utf-8"))
-    return cfg.get("binaries", {})
+    p = Path(project_yaml) if project_yaml else _REPO_ROOT / "configs/project.yaml"
+    if not p.exists():
+        return {}
+    cfg = yaml.safe_load(p.read_text(encoding="utf-8"))
+    return cfg.get("binaries", {}) or {}
+
+
+def posix_path(p: str | Path) -> str:
+    """
+    路径统一为正斜杠字符串(问题#16:Windows 下 glob 正斜杠 × os.sep 反斜杠拼接
+    产出 'mid/1\\49\\file.mid' 混合路径,subprocess 偶发失败)。
+    拼路径永远用 pathlib 的 /,落字符串前过一次本函数。
+    """
+    return Path(p).as_posix()
 
 
 def resolve_exe(name: str, binaries: dict | None = None) -> str:
@@ -71,7 +88,7 @@ def run(name: str, args: list[str], binaries: dict | None = None,
     """
     exe = resolve_exe(name, binaries)
     return subprocess.run(
-        [exe, *args],
+        [exe, *(str(a) for a in args)],     # 容忍 Path 对象;统一转 str
         check=check,
         capture_output=capture,
         text=True,

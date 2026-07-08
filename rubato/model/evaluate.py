@@ -139,12 +139,50 @@ def omr_ned_via_legato(est_xml: str, ref_xml: str, legato_fn) -> float:
     return legato_fn(est_xml, ref_xml)
 
 
+# ---------------------------------------------------------------- AMT 文本 → 音符事件
+
+def amt_text_to_notes(amt_text: str, ts_ms: int = 10) -> list[dict]:
+    """
+    AMT 文本 → [{pitch, on, off, vel}](秒)。perf_to_amt 的逆变换,eval hook 用。
+    未闭合音符按最后时间戳收尾;孤儿 offset 忽略(不抛,评测要鲁棒)。
+    """
+    if not amt_text or not amt_text.strip():
+        return []
+    units = text_to_units(amt_text.strip())
+    notes: list[dict] = []
+    open_notes: dict[int, tuple[float, int]] = {}    # pitch -> (on_sec, vel)
+    last_t = 0.0
+    for u in units:
+        t = (u.ts_bin * ts_ms / 1000.0) if u.ts_bin is not None else last_t
+        last_t = max(last_t, t)
+        for _staff, p in u.offs:
+            pitch = p if isinstance(p, int) else p.midi
+            if pitch in open_notes:
+                on, vel = open_notes.pop(pitch)
+                notes.append({"pitch": pitch, "on": on, "off": max(t, on + ts_ms / 1000.0),
+                              "vel": vel})
+        for _staff, p, vel in u.ons:
+            pitch = p if isinstance(p, int) else p.midi
+            if pitch not in open_notes:              # 重复 onset 忽略后者
+                open_notes[pitch] = (t, vel if vel is not None else 64)
+    for pitch, (on, vel) in open_notes.items():      # 未闭合 → 末时间戳收尾
+        notes.append({"pitch": pitch, "on": on, "off": max(last_t, on + ts_ms / 1000.0),
+                      "vel": vel})
+    notes.sort(key=lambda n: (n["on"], n["pitch"]))
+    return notes
+
+
 # ---------------------------------------------------------------- 报告对照(R-S13.4)
 
+# 论文对照数字(修正:原版把 Table 3 的 note F1(87.1/91.0)误标成 OMR-NED,
+# 会让 gap_annotation 对着错误目标下"可缩/结构性"结论)。
+# OMR-NED 越低越好:论文 Table 2,Rubato TAST @ ASAP = 64.3。
+# note F1 越高越好:论文 Table 3,TAST @ ASAP = 91.0,TAST @ MAESTRO = 87.1,AMT @ MAESTRO = 97.0。
 PAPER_NUMBERS = {
     "maestro_amt_f1": 97.0,
-    "nasap_tast_omr_ned": 87.1,     # 论文 TAST OMR 数字
-    "nasap_a2s_omr_ned": 91.0,
+    "nasap_omr_ned": 64.3,          # 论文 ASAP OMR-NED(TAST 输出)
+    "nasap_tast_note_f1": 91.0,     # 论文 ASAP note F1(TAST)
+    "maestro_tast_note_f1": 87.1,   # 论文 MAESTRO note F1(TAST)
 }
 
 
