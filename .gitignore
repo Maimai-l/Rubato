@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.state/
+work/
+outputs/
+logs/
+data/
+environment/
+assets/
+third_party/
+rubato-repl/
+_*

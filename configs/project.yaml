@@ -1,0 +1,27 @@
+paths:
+  data_root: data
+  work: work
+  outputs: outputs
+  assets: assets
+  third_party: third_party
+  maestro_zip: data/raw/maestro-v3.0.0.zip
+  maestro_midi: data/raw/maestro-v3.0.0-midi.zip
+  pdmx_root: data/raw/pdmx
+  asap_root: third_party/asap-dataset
+  nasap_align: third_party/asap-dataset/note_alignments
+  legato: third_party/legato
+hardware:
+  gpu: 0
+  cpu_workers: -1        # -1 = nproc
+  ram_gb: 32
+  disk_budget_gb: 120
+seed: 20260706
+
+# 外部程序路径(Windows)。裸名=依赖 PATH;写绝对路径=不依赖 PATH。
+# 用户交接确认这些在 PATH:ffmpeg 8.1 / fluidsynth 2.5.6 / sfizz_render 1.2.3 / MuseScore 4
+binaries:
+  ffmpeg: ffmpeg                 # 或 "C:/path/to/ffmpeg.exe"
+  fluidsynth: fluidsynth
+  sfizz_render: sfizz_render
+  musescore: MuseScore4.exe      # 平台相关:Win=MuseScore4.exe, Linux/Mac=mscore/musescore
+  virtuoso_python: null          # VN 独立 conda 环境的 python.exe 绝对路径(S5 用);null=用当前解释器

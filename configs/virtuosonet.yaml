@@ -1,0 +1,25 @@
+# VirtuosoNet 集成配置 —— 所有 flag 均从源码核实(virtuoso/parser.py + README),非记忆
+repo_dir: third_party/virtuosoNet
+python: .venv-vn/bin/python          # 独立 venv:仓库标称 Py3.10/cu118;5070Ti 是 Blackwell,需 cu128 torch
+                                      # setup_virtuosonet.sh 装现代 torch 后 GPU 冒烟;失败自动回退 CPU
+checkpoint: third_party/virtuosoNet/pretrained_weights/han_measnote_gru/checkpoint_best.pt
+yml_path:  third_party/virtuosoNet/pretrained_weights/han_measnote_gru/han_measnote_gru.yml
+session_mode: inference              # 【已核实】--session_mode=inference
+output_root: work/vn_out
+timeout_sec: 300                     # 单曲超时→humanize 兜底池
+bool_pedal: true                     # 【已核实 -bp/--boolPedal】二值化 CC64,AMT 踏板标签更干净
+max_measures: 64                     # 超长曲截断,防 pyScoreParser 爆内存
+
+# ---- 作曲家策略(三级)。已核实:16 个受支持,8 个数据量大 ----
+supported: [Bach, Balakirev, Beethoven, Brahms, Chopin, Debussy, Glinka, Haydn,
+            Liszt, Mozart, Prokofiev, Rachmaninoff, Ravel, Schubert, Schumann, Scriabin]
+high_data: [Bach, Beethoven, Chopin, Haydn, Liszt, Mozart, Ravel, Schubert]  # README 明列
+# 级1: PDMX composer 字段归一化匹配(别名表见 rubato/data/composer_alias.py)
+# 级2: 命中后仍以 shuffle_p 概率随机替换为 high_data 之一(README 明说风格可跨作曲家)→ 表现多样性
+shuffle_p: 0.15
+# 级3: 未命中→按权重从 high_data 采样(偏浪漫派,rubato 更丰富,正是想要的偏差源)
+fallback_weights: {Chopin: 0.20, Beethoven: 0.20, Mozart: 0.15, Schubert: 0.15,
+                   Liszt: 0.10, Haydn: 0.10, Bach: 0.05, Ravel: 0.05}
+# ---- 速度:谱面有标记则不传 qpm(源码默认从谱面读);无标记传采样值 ----
+qpm_fallback_log_uniform: [63, 132]  # 【已核实 --qpm_primo type=int】
+seed: 20260706
