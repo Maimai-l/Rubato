@@ -157,11 +157,11 @@ def load_pdmx_csv(csv_path: Path) -> list[dict]:
             mid_path = row.get("mid", "").strip()
             if not mid_path or mid_path == "NA":
                 continue
-            # Title is required. Composer: use work_key_or_fallback (missing →
-            # __nometa__|<piece_id> — never drop valid piano pieces over metadata).
+            # Never drop valid piano pieces over missing metadata.
+            # work_key_or_fallback: missing composer or title → __nometa__|<piece_id>
             title = row.get("song_name", "").strip() or row.get("title", "").strip()
             if not title or title == "NA":
-                continue
+                title = ""  # let work_key_or_fallback handle missing
             composer = row.get("composer_name", "").strip()
             piece_id = Path(mid_path).stem
             wk = work_key_or_fallback(composer, title, piece_id)
@@ -172,7 +172,7 @@ def load_pdmx_csv(csv_path: Path) -> list[dict]:
                 "mxl_rel": row.get("mxl", "").strip(),
                 "data_rel": row.get("path", "").strip(),
                 "composer_meta": composer if (composer and composer != "NA") else "unknown",
-                "title": title,
+                "title": title or "unknown",
                 "work_key": wk,
                 "license": lic,
                 "n_notes": _safe_int(row.get("n_notes", "0")),
