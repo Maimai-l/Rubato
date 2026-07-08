@@ -12,6 +12,8 @@ xml_id 精确对齐是核心:同音高在一曲中出现几十次,靠音高匹�
 from __future__ import annotations
 from fractions import Fraction
 
+import re
+
 from rubato.intermo.core import TimeMap
 
 
@@ -60,6 +62,17 @@ def _first_int(d: dict, keys):
 
 # ---------------------------------------------------------------- xml_id 匹配(问题#6 核心)
 
+# 真实 nASAP 对齐 TSV 的 xml_id = partitura note.id + '-' + 和弦/声部序号,
+# 例如 partitura note.id='n2' 在 TSV 里是 'n2-1'(和弦第 1 音)、'n2-2'……
+# 这是实测格式(见 EXECUTOR 日志:note.id='n2' vs TSV='n2-1',匹配率曾塌到 ~1%)。
+_CHORD_SUFFIX_RE = re.compile(r"-\d+$")
+
+
+def _strip_chord_suffix(xid: str) -> str:
+    """'n2-1' → 'n2'(剥掉尾部 -<和弦序号>);无后缀则原样。"""
+    return _CHORD_SUFFIX_RE.sub("", xid.strip())
+
+
 def _normalize_xmlid(xid: str) -> str:
     """去掉常见前缀装饰,便于宽松匹配(如 'P1-1-8' 与 '1-8')。"""
     x = xid.strip()
@@ -83,11 +96,17 @@ def match_xmlid(align_id: str, xmlid_pos: dict, match_idx: dict) -> str | None:
     """多策略把对齐记录的 xml_id 映射到乐谱位置表的键。返回命中的键或 None。"""
     if align_id in xmlid_pos:                         # 1. 精确
         return align_id
+    stripped = _strip_chord_suffix(align_id)          # 2. 剥和弦序号:'n2-1'→'n2'(真实 nASAP 主路径)
+    if stripped != align_id and stripped in xmlid_pos:
+        return stripped
     nk = _normalize_xmlid(align_id)
-    if nk in match_idx:                               # 2. 归一化后相等
+    if nk in match_idx:                               # 3. 归一化后相等
         return match_idx[nk]
+    nk2 = _normalize_xmlid(stripped)
+    if nk2 in match_idx:                              # 4. 剥和弦序号后再归一化
+        return match_idx[nk2]
     tail = align_id.split("-")[-1]
-    if f"__tail__{tail}" in match_idx:                # 3. 末段相等
+    if f"__tail__{tail}" in match_idx:                # 5. 末段相等(其他方言兜底)
         return match_idx[f"__tail__{tail}"]
     return None
 
@@ -165,3 +184,20 @@ def build_xmlid_map(part) -> dict:
             continue
         out[str(nid)] = Fraction(int(n.start.t), whole)
     return out
+
+
+def diagnose_match(alignment: list[dict], xmlid_pos: dict, sample: int = 8) -> dict:
+    """
+    匹配率诊断(问题#6 排查用):真实数据匹配率若仍低,打印两侧 id 样本看格式差异。
+    返回 {match_rate, matched, total, unmatched_align_ids, xmlid_pos_ids}。
+    """
+    match_idx = _build_match_index(xmlid_pos)
+    matched = sum(1 for a in alignment
+                  if match_xmlid(a["xml_id"], xmlid_pos, match_idx) is not None)
+    total = max(len(alignment), 1)
+    unmatched = [a["xml_id"] for a in alignment
+                 if match_xmlid(a["xml_id"], xmlid_pos, match_idx) is None]
+    return {"match_rate": round(matched / total, 4), "matched": matched,
+            "total": len(alignment),
+            "unmatched_align_ids": unmatched[:sample],
+            "xmlid_pos_ids": list(xmlid_pos)[:sample]}
