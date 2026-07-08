@@ -102,10 +102,14 @@ def process_piece(xml_path: str, alignment_rows: list[dict]) -> tuple[list[dict]
         return [], stats
 
     # 7. Make labels for each segment
+    # 段起点在原曲的乐谱位置(Fraction),供 make_labels 平移局部 tmap:
+    # sub_ir 已归零,但 tmap 建在原曲坐标系,不传 offset 则 TAST 时间戳全部映射到曲首(错)。
+    bounds = [m.start for m in ir.measures] + [ir.score_end]
     label_rows = []
     for si, (sub_ir, (a, b)) in enumerate(segs):
         try:
-            labels, fails = make_labels(sub_ir, "nasap", tmap=tmap)
+            score_offset = bounds[a] if a < len(bounds) else bounds[-1]
+            labels, fails = make_labels(sub_ir, "nasap", tmap=tmap, score_offset=score_offset)
             if labels:
                 label_rows.append({
                     "utt_id": f"nasap_{Path(xml_path).stem}_{si:03d}",
