@@ -89,9 +89,12 @@ bl = build_blacklist(nasap_test_works=res["manifest"]["test_works"], asap_beyer_
 
 ---
 
-## D. 写 dataset.py 并配对音频↔标签 —— #4 / #5【尚未实现,需本地新建】
+## D. dataset.py 配对音频↔标签 —— #4 / #5【已写骨架,需本地填真实路径 + 验证】
 
-**现状(诚实交代)**: 我**没有**写 `rubato/data/dataset.py`。只在 `train.py:training_step_logic` 的 docstring 里定义了 batch 契约。这一步要本地按契约新建。
+**现状**: `rubato/data/dataset.py` **已实现**(encode_target / collate_batch / RubatoDataset /
+RubatoDataModule),沙盒逻辑测过(`tests_dataset.py` 33 项:token_types/ts_bins/loss_mask/
+teacher-forcing 右移/tiling/collate 契约)。**仍需本地做的**:①填真实 labels.jsonl / 音频路径;
+②确认 `load_audio` 的 FLAC/Opus 解码在你环境可用;③tiling×预设链次序(R-S4.5)。
 
 **batch 契约(collate 必须产出)**:
 ```
@@ -111,11 +114,18 @@ ts_bins     (B,L)   时间戳位置的 bin 编号(0..3999),其余位置 0
 - bucketing:`train.bucket_batches(samples, max_batch_sec=560)`。
 - 音频源:MAESTRO FLAC(AMT)、flat/vn/human Opus、nASAP 借 MAESTRO FLAC。labels 来自 `labels.jsonl`(C 步产出)+ `maestro_amt_labels.jsonl`(gen_amt_labels.py 产出)。
 
+**装配(dataset.py 已提供)**:
+```python
+from rubato.data.dataset import RubatoDataset, RubatoDataModule
+train_ds = RubatoDataset(utts, labels, sp_tokenizer)      # utts=manifest_utts, labels=labels.jsonl
+dm = RubatoDataModule(train_ds, nasap_val, maestro_val)
+# train.py: for batch in dm.train_batches(epoch): ...(已对接)
+```
 **判据(PASS)**:
-1. 单 batch 冒烟:`training_step_logic(model, batch, tokenizer)` 返回 `loss.requires_grad==True` 且 `torch.isfinite(loss)`。
+1. 单 batch 冒烟:`training_step_logic(model, next(dm.train_batches(0)), sp)` 返回 `loss.requires_grad==True` 且 `torch.isfinite(loss)`。
 2. `batch["input_ids"].shape == batch["labels"].shape`(右移对齐;不齐会在 `training_step_logic` 的 assert 处炸)。
 3. 每 dialect 的样本数矩阵与 §1 保留表一致(不得出现 DBD)。
-**FAIL**: assert "log_probs 与 labels 未对齐" → collate 的 teacher-forcing 右移错(input=seq[:-1], labels=seq[1:])。
+**FAIL**: assert "log_probs 与 labels 未对齐" → collate 的 teacher-forcing 右移错(dataset.encode_target 已做 input=seq[:-1], labels=seq[1:],若改动过此处检查)。
 
 ---
 
