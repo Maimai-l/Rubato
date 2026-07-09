@@ -133,6 +133,11 @@ def main():
     ap.add_argument("--out-corpus", type=str, default="")
     args = ap.parse_args()
 
+    # 输出句柄只开一次(在循环外)。append 模式:配合 --offset/--limit 分块累积;
+    # 整轮重跑前请先删旧文件,否则会二次追加。
+    label_fh = open(args.out_labels, "a", encoding="utf-8") if args.out_labels else None
+    corpus_fh = open(args.out_corpus, "a", encoding="utf-8") if args.out_corpus else None
+
     print("=" * 70)
     print("S7 nASAP Full Dataset Processing")
     print("=" * 70)
@@ -242,19 +247,17 @@ def main():
                 results["total_segments"] += len(label_rows)
 
                 # Write labels
-                if args.out_labels:
-                    results.setdefault("_label_fh", open(args.out_labels, "a", encoding="utf-8"))
+                if label_fh:
                     for lr in label_rows:
-                        results["_label_fh"].write(json.dumps(lr, ensure_ascii=False) + "\n")
+                        label_fh.write(json.dumps(lr, ensure_ascii=False) + "\n")
 
-                # Write corpus (A2S + A2S_lite)
-                if args.out_corpus:
-                    results.setdefault("_corpus_fh", open(args.out_corpus, "a", encoding="utf-8"))
+                # Write corpus (A2S + A2S_lite only — tokenizer 语料按论文 §3.2)
+                if corpus_fh:
                     for lr in label_rows:
                         for d in ("A2S", "A2S_lite"):
                             t = lr.get(d)
                             if t and t.strip():
-                                results["_corpus_fh"].write(t.strip() + "\n")
+                                corpus_fh.write(t.strip() + "\n")
 
                 # Count A2S chars
                 for lr in label_rows:
@@ -344,12 +347,17 @@ def main():
           f"nonmonotone={results['timemap_stats']['dropped_nonmonotone']}, "
           f"anchors={results['timemap_stats']['anchors']})")
     # Close file handles
-    if "_label_fh" in results:
-        results["_label_fh"].close()
-    if "_corpus_fh" in results:
-        results["_corpus_fh"].close()
+    if label_fh:
+        label_fh.close()
+    if corpus_fh:
+        corpus_fh.close()
 
     print(f"\nReport written to: {REPORT_PATH}")
+    if args.out_labels:
+        print(f"Labels written to: {args.out_labels}  (successful={results['successful']}, "
+              f"segments={results['total_segments']})")
+    if args.out_corpus:
+        print(f"Corpus (A2S+A2S_lite) written to: {args.out_corpus}")
 
 
 if __name__ == "__main__":

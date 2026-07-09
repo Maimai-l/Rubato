@@ -66,13 +66,20 @@ python scripts/s5_pdmx_a2s_labels.py
 真实音频对齐得到 tmap，产出带时间戳的 TAST（和无戳 A2S/A2S_lite）。**问题#6 的 xml_id 匹配已修**
 （剥和弦后缀 `n2-1`→`n2` + LIS 单调化 + 锚点密度门）。
 
+> **⚠ 必须带输出参数**：s7 早期版本只写 report、【不落 labels 到盘】(执行端已发现并补了
+> `--out-labels`/`--out-corpus`)。所以务必带上输出路径,否则跑完只有统计、没有 labels：
+
 ```bash
-python scripts/s7_full_nasap.py
-# 看报告里的匹配率诊断（diagnose_match）：match_rate 应【远高于】早期的 0.37%/1%，
-# 正常应到 0.9+。若仍很低 → 停：打印两侧 id 样本看格式，别产出错锚点的坏 TimeMap。
+python scripts/s7_full_nasap.py \
+  --out-labels D:\vscode_projects\ee_download\work\nasap_labels.jsonl \
+  --out-corpus D:\vscode_projects\ee_download\work\a2s_corpus.txt      # 追加,与 s5 的语料并到同一文件
+# 输出参数是 append 模式:整轮重跑前先删旧 labels/corpus,别二次追加。
+# 看报告匹配率诊断(diagnose_match):match_rate 应【远高于】早期 0.37%/1%,正常 0.9+。
+# 看末行打印的 successful/segments:必须 > 0,否则 labels 是空的(timemap/匹配挂了,别继续)。
 ```
 
-产出：nASAP labels.jsonl（含 A2S/A2S_lite/TAST）、`reports/s7_full_nasap.json`。
+产出：nASAP labels.jsonl（含 A2S/A2S_lite/TAST）、追加进 `a2s_corpus.txt` 的 A2S/A2S_lite、`reports/s7_full_nasap.json`。
+> 注:s7 的 `--out-corpus` 只写 A2S+A2S_lite(与论文 §3.2 一致),不写 TAST。
 
 ### 1.3 MAESTRO MIDI → AMT（`scripts/gen_amt_labels.py`）
 
