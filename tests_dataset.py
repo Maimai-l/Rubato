@@ -42,17 +42,17 @@ class MockTok:
         return [t for t in text.split(" ") if t]
 
     def piece_to_id(self, p):
-        # 时间戳 token 给区间 [40, 40+N_BINS) 的 id,便于反查 bin
-        m = re.match(r"^<\|t(\d+)\|>$", p)
+        # 时间戳 token(秒·两位小数)→ 高位段 id = 1e6 + bin,便于反查 bin
+        m = re.match(r"^<\|(\d+\.\d{2})\|>$", p)
         if m:
-            return 1_000_000 + int(m.group(1))   # 高位段,不与 _alloc(1000+) 冲突
+            return 1_000_000 + int(round(float(m.group(1)) * 100))
         return self._alloc(p)
 
 
 print("[1] encode_target:token_types / ts_bins / loss_mask / 右移")
 tok = MockTok()
 # TAST 文本:两个单元各带一个时间戳
-text = "|4/4k0PR:C4 <|t5|> 1/1 <|t150|>"
+text = "|4/4k0PR:C4 <|0.05|> 1/1 <|1.50|>"
 enc = encode_target(tok, "TAST", text, sample=False)
 prompt = DIALECT_PROMPT["TAST"]
 # 完整序列 = prompt(5) + label pieces + eot;右移后长度 = 完整-1
@@ -89,16 +89,16 @@ check("a2s_no_ts", all(t == 0 for t in enc_a2s["token_types"]))
 check("a2s_bins_zero", all(b == 0 for b in enc_a2s["ts_bins"]))
 
 print("[4] tiling:时间戳整体 +t0,钳到上界")
-shifted = apply_tiling_text("|4/4k0 <|t5|> 1/1 <|t150|>", t0_bins=100)
-check("tiling_shifts", "<|t105|>" in shifted and "<|t250|>" in shifted, shifted)
-clamped = apply_tiling_text("<|t3990|>", t0_bins=50)
-check("tiling_clamps", "<|t3999|>" in clamped, clamped)
-check("tiling_zero_noop", apply_tiling_text("<|t5|>", 0) == "<|t5|>")
+shifted = apply_tiling_text("|4/4k0 <|0.05|> 1/1 <|1.50|>", t0_bins=100)
+check("tiling_shifts", "<|1.05|>" in shifted and "<|2.50|>" in shifted, shifted)
+clamped = apply_tiling_text("<|39.90|>", t0_bins=50)
+check("tiling_clamps", "<|39.99|>" in clamped, clamped)
+check("tiling_zero_noop", apply_tiling_text("<|0.05|>", 0) == "<|0.05|>")
 
 print("[5] AMT domain 前缀")
-enc_dom = encode_target(tok, "AMT", "N60<|v80|> <|t3|>", sample=False, domain="real")
+enc_dom = encode_target(tok, "AMT", "N60<|vel:80|> <|0.03|>", sample=False, domain="real")
 # domain 加在 prompt 末,loss_mask 仍 False;序列比无 domain 长 1
-enc_nodom = encode_target(tok, "AMT", "N60<|v80|> <|t3|>", sample=False)
+enc_nodom = encode_target(tok, "AMT", "N60<|vel:80|> <|0.03|>", sample=False)
 check("domain_adds_token", len(enc_dom["input_ids"]) == len(enc_nodom["input_ids"]) + 1)
 
 print("[6] collate:padding + batch 契约键")

@@ -23,8 +23,10 @@ from rubato.model.build import DIALECT_PROMPT
 from rubato.model.sampling import dialect_sampler, tiling_offset
 from rubato.model.train import bucket_batches
 
-_TS_RE = re.compile(r"^<\|t(\d+)\|>$")
-_TS_INLINE_RE = re.compile(r"<\|t(\d+)\|>")
+from rubato.intermo.core import ts_glyph, ts_bin_from_glyph
+
+_TS_RE = re.compile(r"^<\|(\d+\.\d{2})\|>$")
+_TS_INLINE_RE = re.compile(r"<\|(\d+\.\d{2})\|>")
 TS_MS = 10
 N_BINS = 4000
 
@@ -33,7 +35,7 @@ N_BINS = 4000
 
 def apply_tiling_text(text: str, t0_bins: int) -> str:
     """
-    TAST/AMT 的时间戳整体 +t0(R-S11.3)。在【文本级】平移 <|tN|> → <|t(N+t0)|>,
+    TAST/AMT 的时间戳整体 +t0(R-S11.3)。在【文本级】平移时间戳字形(秒·两位小数),
     钳到 N_BINS-1。音频侧对应补 t0 秒前导(在 collate/加载时做)。
     t0_bins==0 → 原样返回(A2S/A2S_lite 不 tiling)。
     """
@@ -41,7 +43,7 @@ def apply_tiling_text(text: str, t0_bins: int) -> str:
         return text
 
     def _shift(m):
-        return f"<|t{min(int(m.group(1)) + t0_bins, N_BINS - 1)}|>"
+        return ts_glyph(min(ts_bin_from_glyph(m.group(1)) + t0_bins, N_BINS - 1))
     return _TS_INLINE_RE.sub(_shift, text)
 
 
@@ -81,7 +83,7 @@ def encode_target(tokenizer, dialect: str, label_text: str,
         m = _TS_RE.match(p)
         if m:
             types.append(1)
-            bins.append(min(int(m.group(1)), N_BINS - 1))
+            bins.append(min(ts_bin_from_glyph(m.group(1)), N_BINS - 1))
         else:
             types.append(0)
             bins.append(0)

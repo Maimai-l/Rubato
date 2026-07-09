@@ -26,9 +26,9 @@ check("closes_with_paper", rec["ok"])
 print("[3] user_defined 无重复、格式正确")
 ud = spec["user_defined_symbols"]
 check("no_duplicates", len(ud) == len(set(ud)), f"{len(ud)} vs {len(set(ud))}")
-check("ts_format", all(s.startswith("<|t") for s in spec["timestamps"][:5]))
-check("midi_vel_range", "<|v1|>" in spec["midi"] and "<|v127|>" in spec["midi"])
-check("midi_pedal", "<|ped1|>" in spec["midi"] and "<|ped0|>" in spec["midi"])
+check("ts_format", spec["timestamps"][0] == "<|0.00|>" and spec["timestamps"][-1] == "<|39.99|>")
+check("midi_vel_range", "<|vel:1|>" in spec["midi"] and "<|vel:127|>" in spec["midi"])
+check("midi_pedal", "<|CC64:on|>" in spec["midi"] and "<|CC64:off|>" in spec["midi"])
 check("prompt_switches", all(x in spec["prompt"] for x in
       ["<|sot|>","<|eot|>","<|score|>","<|spell|>","<|ts|>"]))
 

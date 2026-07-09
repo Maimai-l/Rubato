@@ -189,10 +189,11 @@ def batch_sequence_loss(log_probs: torch.Tensor, labels: torch.Tensor,
 
 def build_ts_token_ids(tokenizer, n_bins: int = 4000) -> torch.Tensor:
     """从 SentencePiece tokenizer 建 bin -> token id 映射(训练启动时建一次)。"""
-    ids = [tokenizer.piece_to_id(f"<|t{i}|>") for i in range(n_bins)]
+    from rubato.intermo.core import ts_glyph
+    ids = [tokenizer.piece_to_id(ts_glyph(i)) for i in range(n_bins)]
     unk = tokenizer.unk_id() if hasattr(tokenizer, "unk_id") else 0
     missing = sum(1 for i in ids if i == unk)
     if missing:
         raise ValueError(f"{missing}/{n_bins} 个时间戳 token 不在词表内 —— "
-                         "tokenizer 训练时 user_defined_symbols 未含全部 <|tN|>")
+                         "tokenizer 训练时 user_defined_symbols 未含全部时间戳字形")
     return torch.tensor(ids, dtype=torch.long)

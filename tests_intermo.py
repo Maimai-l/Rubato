@@ -137,10 +137,10 @@ ir = ScoreIR(
 tmap = TimeMap([(F(0), 0.0), (F(2, 4), 2.0)])
 tast = project(ir, "TAST", tmap)
 import re
-stripped = re.sub(r" <\|t\d+\|>", "", tast)
+stripped = re.sub(r" <\|\d+\.\d{2}\|>", "", tast)
 check("tast_strip_eq_a2s", stripped == project(ir, "A2S"), f"\n    {tast}\n    {stripped}")
 n_units = len(text_to_units(project(ir, "A2S")))
-n_ts = len(re.findall(r"<\|t\d+\|>", tast))
+n_ts = len(re.findall(r"<\|\d+\.\d{2}\|>", tast))
 check("ts_per_unit", n_ts == n_units, f"{n_ts} vs {n_units}")
 
 # 3.3 lite 与 A2S 音高集合一致(MIDI 投影)
@@ -173,8 +173,8 @@ amt, stats = perf_to_amt(
            {"pitch": 64, "on": 0.505, "off": 1.20, "vel": 78},
            {"pitch": 60, "on": 1.30, "off": 1.302, "vel": 90}],  # 触发最短音长
     pedal=[(0.50, True), (1.25, False)])
-check("amt_has_vel_ts", "<|v82|>" in amt and "<|t50|>" in amt, amt)
-check("amt_pedal", "<|ped1|>" in amt and "<|ped0|>" in amt, amt)
+check("amt_has_vel_ts", "<|vel:82|>" in amt and "<|0.50|>" in amt, amt)  # bin 50 = 0.50s
+check("amt_pedal", "<|CC64:on|>" in amt and "<|CC64:off|>" in amt, amt)
 check("amt_min_dur_floor", stats["min_dur_floored"] == 1, stats)
 check("amt_dyck", not [x for x in validate_units(text_to_units(amt))
                        if "DYCK" in x], validate_units(text_to_units(amt)))

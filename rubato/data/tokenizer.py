@@ -47,8 +47,9 @@ def build_vocab_spec(spec_path: str | Path | None = None) -> dict:
 
 def _generate_spec() -> dict:
     """按 R-S2.3 冻结字形重新生成(与 configs/vocab_spec.json 一致)。"""
-    timestamps = [f"<|t{i}|>" for i in range(4000)]
-    midi = [f"<|v{i}|>" for i in range(1, 128)] + ["<|ped1|>", "<|ped0|>"]
+    from rubato.intermo.core import ts_glyph, vel_glyph, pedal_glyph
+    timestamps = [ts_glyph(i) for i in range(4000)]              # <|0.00|>..<|39.99|>
+    midi = [vel_glyph(i) for i in range(1, 128)] + [pedal_glyph(1), pedal_glyph(0)]
     beat = ["*"]
     prompt = ["<|sot|>", "<|eot|>", "<|pad|>",
               "<|score|>", "<|noscore|>", "<|spell|>", "<|nospell|>",

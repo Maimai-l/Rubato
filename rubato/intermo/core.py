@@ -19,8 +19,10 @@ DECISIONS(冻结的自由选择,变更须同步规格文档):
   D-06 落在小节线时刻的事件归属【修正,匹配论文 Fig.1】:offset(闭合前一小节)挂在小节线【前】
        的 interval 单元;onset(开启新小节)挂在小节线单元上。此前把两者都挂到小节线上+发空 interval,
        与论文不一致(影响 tokenizer 学到的 interval-piece 分布),已改。
-  D-07 时间戳 = <|t{0..3999}|>(10ms bin),TAST 中每个单元后恰一枚;单调钳制(bin>=前一枚)
-  D-08 力度 = <|v{1..127}|> 紧跟对应 onset;踏板 = <|ped1|>/<|ped0|> 置于单元 moment 最前
+  D-07 时间戳字形 = <|0.00|>..<|39.99|>(秒·两位小数,10ms 粒度 4000 个,与论文一致);
+       TAST 中每个单元后恰一枚;单调钳制(bin>=前一枚)
+  D-08 力度 = <|vel:N|>(N=1..127)紧跟对应 onset;踏板 = <|CC64:on|>/<|CC64:off|> 置于单元 moment 最前
+       (与论文 \midivel 一致)
   D-09 AMT 最短音长 = 1 bin(off_bin >= on_bin+1),量化下限计数上报
   D-10 首小节(弱起)与末小节允许短于声明拍号;内部小节必须精确等于
 """
@@ -192,6 +194,29 @@ def ir_to_units(ir: ScoreIR, lenient_measures: bool = False) -> list[Unit]:
     return units
 
 
+# ---------------------------------------------------------------- 字形(与论文一致)
+# 时间戳:秒·两位小数 <|0.00|>..<|39.99|>(10ms 粒度,4000 个);论文 \stamp{0.00}→<|0.00|>
+# 力度:  <|vel:N|>(N=1..127);踏板:<|CC64:on|>/<|CC64:off|>(论文 \midivel)
+TS_BIN_MS = 10
+TS_N_BINS = 4000
+
+
+def ts_glyph(bin_: int) -> str:
+    return f"<|{bin_ * TS_BIN_MS / 1000.0:.2f}|>"
+
+
+def ts_bin_from_glyph(sec_str: str) -> int:
+    return int(round(float(sec_str) * 1000.0 / TS_BIN_MS))
+
+
+def vel_glyph(v: int) -> str:
+    return f"<|vel:{v}|>"
+
+
+def pedal_glyph(down: int) -> str:
+    return "<|CC64:on|>" if down else "<|CC64:off|>"
+
+
 # ---------------------------------------------------------------- 单元流 → 文本
 
 def units_to_text(units: list[Unit], midi_pitch: bool = False,
@@ -207,7 +232,7 @@ def units_to_text(units: list[Unit], midi_pitch: bool = False,
         else:
             s = ""                                          # AMT:无乐谱结构,无头单元
         if u.pedal is not None:                            # D-08
-            s += f"<|ped{u.pedal}|>"
+            s += pedal_glyph(u.pedal)
         # moment:staff 低→高;每 staff 内 off 先 on 后(已在 ir_to_units 排序)
         for staff in ("PL", "PR", None):                   # None = AMT 无谱表
             offs = [e for e in u.offs if e[0] == staff]
@@ -224,12 +249,12 @@ def units_to_text(units: list[Unit], midi_pitch: bool = False,
                 s += f"N{p}" if midi_pitch and not isinstance(p, SPitch) else (
                      f"N{p.midi}" if midi_pitch else p.glyph(True))
                 if with_vel and vel is not None:
-                    s += f"<|v{vel}|>"
+                    s += vel_glyph(vel)
         atoms.append(s)
         if with_ts:
             if u.ts_bin is None:
                 raise SerializeError("with_ts 但单元缺 ts_bin")
-            atoms.append(f"<|t{u.ts_bin}|>")
+            atoms.append(ts_glyph(u.ts_bin))
     return " ".join(atoms)
 
 
@@ -241,11 +266,11 @@ class ParseError(Exception):
 
 _BAR_RE = re.compile(r"^\|(\d+)/(\d+)k(0|#[1-7]|-[1-7])")
 _FRAC_RE = re.compile(r"^(\d+)/(\d+)")
-_TS_RE = re.compile(r"^<\|t(\d{1,4})\|>$")
+_TS_RE = re.compile(r"^<\|(\d+\.\d{2})\|>$")          # 时间戳:秒·两位小数
 _MOMENT_RE = re.compile(
     r"(PL:|PR:)"
-    r"|<\|v(\d{1,3})\|>"
-    r"|<\|ped([01])\|>"
+    r"|<\|vel:(\d{1,3})\|>"                            # 力度
+    r"|<\|CC64:(on|off)\|>"                            # 踏板
     r"|([A-G])(--|##|-|#)?([0-8])"
     r"|([a-g])(--|##|-|#)?([0-8])"
     r"|N(\d{1,3})"
@@ -270,7 +295,7 @@ def text_to_units(text: str) -> list[Unit]:
         if m:
             if not units:
                 raise ParseError("时间戳前无单元")
-            units[-1].ts_bin = int(m.group(1))
+            units[-1].ts_bin = ts_bin_from_glyph(m.group(1))
             continue
         mb = _BAR_RE.match(atom)
         if mb:
@@ -300,7 +325,7 @@ def text_to_units(text: str) -> list[Unit]:
                     raise ParseError("velocity 无所属 onset")
                 u.ons[pending_on] = (u.ons[pending_on][0], u.ons[pending_on][1], int(g[1]))
             elif g[2]:
-                u.pedal = int(g[2])
+                u.pedal = 1 if g[2] == "on" else 0
             elif g[3]:                                   # 拼写 onset
                 u.ons.append((staff_state, SPitch(g[3], GLYPH_ALTER[g[4] or ""], int(g[5])), None))
                 pending_on = len(u.ons) - 1

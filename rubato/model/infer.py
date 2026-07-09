@@ -55,11 +55,11 @@ def build_tast_prompt() -> list[str]:
     return list(DIALECT_PROMPT["TAST"])
 
 
-_TS_RE = re.compile(r"\s*<\|t\d+\|>")
+_TS_RE = re.compile(r"\s*<\|\d+\.\d{2}\|>")           # 时间戳:秒·两位小数
 
 
 def strip_timestamps(tast_text: str) -> str:
-    """R-S12.1.4:剥离所有 <|tN|> 时间戳 token,得纯 A2S。"""
+    """R-S12.1.4:剥离所有时间戳 token(<|0.00|> 形式),得纯 A2S。"""
     return _TS_RE.sub("", tast_text).strip()
 
 
@@ -76,11 +76,11 @@ def truncate_after_20s(tast_text: str, threshold_bin: int = 2000) -> str:
       3. 仍未闭合的音符(跨切点延音)在小节线 j 处补 offset —— Dyck 闭合、D-05 终止小节线均满足。
     解析失败时退化为正则粗截(后续 validate 会兜底)。
     """
-    from rubato.intermo.core import units_to_text
+    from rubato.intermo.core import units_to_text, ts_bin_from_glyph
 
     def _regex_fallback() -> str:
-        for m in re.finditer(r"<\|t(\d+)\|>", tast_text):
-            if int(m.group(1)) > threshold_bin:
+        for m in re.finditer(r"<\|(\d+\.\d{2})\|>", tast_text):
+            if ts_bin_from_glyph(m.group(1)) > threshold_bin:
                 head = tast_text[:m.start()]
                 bars = list(_BAR_UNIT_RE.finditer(head))
                 return head[:bars[-1].start()].strip() if bars else head.strip()

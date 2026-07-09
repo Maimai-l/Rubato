@@ -37,7 +37,7 @@ p = build_tast_prompt()
 check("tast_prompt", p == ["<|sot|>","<|score|>","<|spell|>","<|ts|>","<|nomidi|>"], p)
 
 print("[4] 剥戳(R-S12.1.4)")
-tast = "|4/4k0PR:C4 <|t0|> 1/1 <|t100|> |4/4k0c4"
+tast = "|4/4k0PR:C4 <|0.00|> 1/1 <|1.00|> |4/4k0c4"
 stripped = strip_timestamps(tast)
 check("timestamps_removed", "<|t" not in stripped, stripped)
 check("content_preserved", "PR:C4" in stripped and "|4/4k0c4" in stripped, stripped)
@@ -46,14 +46,14 @@ check("stripped_valid", not validate_a2s(stripped), validate_a2s(stripped))
 
 print("[5] >20s 截断(R-S12.1.2)")
 # bin 2000 = 20s;超过的时间戳触发截断
-tast_long = "|4/4k0PR:C4 <|t0|> 1/1 <|t1000|> |4/4k0c4D4 <|t1500|> 1/1 <|t2500|> |4/4k0d4E4 <|t2600|> 1/1"
+tast_long = "|4/4k0PR:C4 <|0.00|> 1/1 <|10.00|> |4/4k0c4D4 <|15.00|> 1/1 <|25.00|> |4/4k0d4E4 <|26.00|> 1/1"
 truncated = truncate_after_20s(tast_long, threshold_bin=2000)
 # t2500 > 2000 → 在它之前截断,E4 那段(t2600)应被切掉
-check("truncated_at_20s", "t2600" not in truncated, truncated)
+check("truncated_at_20s", "26.00" not in truncated, truncated)
 check("keeps_before_20s", "PR:C4" in truncated, truncated)
 
 print("[6] 无超阈值时间戳 → 不截断")
-tast_short = "|4/4k0PR:C4 <|t0|> 1/1 <|t100|> |4/4k0c4"
+tast_short = "|4/4k0PR:C4 <|0.00|> 1/1 <|1.00|> |4/4k0c4"
 check("no_truncate", truncate_after_20s(tast_short, 2000) == tast_short.strip())
 
 print("[7] stub 行为(model=None)")
