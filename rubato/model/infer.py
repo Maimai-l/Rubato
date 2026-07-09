@@ -152,17 +152,24 @@ def single_window_infer(model, audio_window, sr: int, tokenizer,
     truncate=False 用于【最后一窗】:其 20-40s 区间没有后续窗兜底,截断=直接丢内容。
     返回该窗的 A2S 文本(已按需截断、已剥戳)。
     """
+    tast = single_window_tast(model, audio_window, sr, tokenizer, beam_size, truncate)
+    return strip_timestamps(tast) if tast else _EMPTY_A2S
+
+
+def single_window_tast(model, audio_window, sr: int, tokenizer,
+                       beam_size: int = 4, truncate: bool = True) -> str:
+    """
+    单窗 TAST 解码,返回截断后的【带时间戳】TAST 文本(剥戳后过 validate 才采用);失败返回 ''。
+    保留时间戳是自适应 hop 的关键——下一窗起点 = 本窗最后小节线的时间戳。
+    """
     prompt = build_tast_prompt()
 
     def _decode(beam):
-        # 形态1: model.generate(audio, prompt, num_beams)
         if hasattr(model, "generate"):
             out = model.generate(audio_window, prompt=prompt, num_beams=beam)
             return out if isinstance(out, str) else tokenizer.decode(out)
-        # 形态2: model.transcribe([audio])
         if hasattr(model, "transcribe"):
             return model.transcribe([audio_window], num_beams=beam)[0]
-        # 形态3: 直接调用
         return str(model(audio_window, prompt=prompt))
 
     for beam in (beam_size, 1):          # beam=4,失败退 greedy
@@ -171,10 +178,21 @@ def single_window_infer(model, audio_window, sr: int, tokenizer,
         except Exception:
             continue
         tast = truncate_after_20s(raw) if truncate else raw   # >20s = EOS(末窗除外)
-        a2s = strip_timestamps(tast)     # 剥戳
-        if not validate_a2s(a2s):        # 合法即采用
-            return a2s
-    return _EMPTY_A2S                    # 两次都不合法 → 占位空谱(计入 n_fail)
+        if not validate_a2s(strip_timestamps(tast)):          # 剥戳后合法即采用
+            return tast
+    return ""                            # 两次都不合法 → 空(计入 n_fail)
+
+
+def _last_barline_sec(tast_text: str, ts_ms: int = 10) -> float | None:
+    """截断后 TAST 里最后一个小节线单元的时间戳(秒)—— 自适应 hop 的下一窗起点。"""
+    try:
+        units = text_to_units(tast_text)
+    except Exception:
+        return None
+    for u in reversed(units):
+        if u.bar is not None and u.ts_bin is not None:
+            return u.ts_bin * ts_ms / 1000.0
+    return None
 
 
 # ---------------------------------------------------------------- 主入口
@@ -193,22 +211,55 @@ def infer_a2s(model, audio, tokenizer, sr: int = 16000) -> str:
 
 
 def _infer_impl(model, audio, tokenizer, sr: int) -> str:
-    """真实推理流程(R-S12.1/12.3)。"""
-    windows = split_audio(audio, sr)
-    if len(windows) == 1:                # R-S12.3:短音频单窗,不截断
-        return single_window_infer(model, windows[0][1], sr, tokenizer, truncate=False)
-    # 长音频:逐窗解码 → 收集各窗 A2S → 小节线合并。
-    # 末窗 truncate=False:20-40s 区间无后续窗兜底,截断即丢失全曲结尾。
-    window_a2s = []
-    for wi, (start, seg) in enumerate(windows):
-        is_last = wi == len(windows) - 1
-        a2s = single_window_infer(model, seg, sr, tokenizer, truncate=not is_last)
-        if a2s and a2s != _EMPTY_A2S:
-            window_a2s.append(a2s)
-    if not window_a2s:
+    """
+    R-S12.1/12.3 自适应 hop 推理(修复固定 20s hop 与"截断到最后小节线"互相拆台的架构问题):
+    每窗 40s 编码(右侧看未来),解码 TAST 截断到 20s 前最后一条小节线;
+    【下一窗从该小节线的时间戳起】—— 窗间无缝、无内容 gap、无重叠,且窗起点恒在小节线(与训练
+    数据的小节对齐分布一致)。合并退化为 IR 层平凡拼接(overlap=0)+ 接缝延音融合(Dyck 跨窗延续);
+    merge_ref 的重叠检测(精确/Jaccard 模糊)整个退役,顺带消除自相似音乐里模糊去重误删真实重复小节。
+    """
+    import numpy as np
+    from rubato.model.merge_ref import a2s_to_ir, _concat_ir
+    from rubato.intermo.core import project
+
+    n = len(audio)
+    win = int(40 * sr)
+    default_hop = int(20 * sr)           # 解码失败/无小节线时的兜底 hop
+    t_start = 0
+    acc_ir = None
+    n_fail = 0
+    guard = 0
+    max_windows = max(4, n // max(default_hop, 1) + 8)
+
+    while t_start < n and guard < max_windows:
+        guard += 1
+        seg = audio[t_start:t_start + win]
+        is_last = (t_start + win >= n)
+        tast = single_window_tast(model, seg, sr, tokenizer, truncate=not is_last)
+        if not tast:                     # 解码失败:按默认 hop 前进(计 n_fail),不静默错位/死循环
+            n_fail += 1
+            t_start += default_hop
+            continue
+        a2s_w = strip_timestamps(tast)
+        try:
+            ir_w = a2s_to_ir(a2s_w)
+        except Exception:
+            n_fail += 1
+            t_start += default_hop
+            continue
+        # IR 层平凡拼接(无重叠)+ 接缝延音融合;不做脆弱的重叠/模糊匹配
+        acc_ir = ir_w if acc_ir is None else _concat_ir(acc_ir, ir_w, overlap_hint=0)
+        if is_last:
+            break
+        last_sec = _last_barline_sec(tast)
+        t_start += int(round(last_sec * sr)) if (last_sec and last_sec > 0) else default_hop
+
+    if acc_ir is None:
         return _EMPTY_A2S
-    merged = merge_windows(window_a2s)
-    return merged if not validate_a2s(merged) else (window_a2s[0] or _EMPTY_A2S)
+    try:
+        return project(acc_ir, "A2S")    # IR 层拼接产物恒合法,不再有"退回第一窗"的丢内容兜底
+    except Exception:
+        return _EMPTY_A2S
 
 
 # ---------------------------------------------------------------- AMT 推理(eval hook 用)
