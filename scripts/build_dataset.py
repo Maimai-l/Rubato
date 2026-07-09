@@ -93,7 +93,32 @@ def resolve_audio(utt_id: str, kind: str, row: dict):
         if ref:
             d = _flac_dur(ref)
             return (ref, d) if d is not None else None
-        return None                                            # 见 docstring:需补 nasap↔flac 映射
+        # 【EXECUTOR】nASAP→MAESTRO FLAC 映射：从 ASAP metadata CSV 的
+        # maestro_audio_performance 列找到 WAV 名→对应 FLAC 在 work/maestro_audio/
+        import pandas as pd
+        xml_rel = row.get("xml_score", "")
+        if xml_rel and not hasattr(resolve_audio, "_nasap_map"):
+            # 首次调用建映射:xml_score → maestro FLAC path
+            csv_path = ROOT / "asap-dataset" / "asap-dataset" / "metadata.csv"
+            m = {}
+            if csv_path.exists():
+                adf = pd.read_csv(str(csv_path))
+                for _, r in adf.iterrows():
+                    xr = str(r.get("xml_score", "") or "")
+                    ma = str(r.get("maestro_audio_performance", "") or "")
+                    if xr and ma and "{maestro}" in ma:
+                        # {maestro}/2006/...wav → work/maestro_audio/...flac
+                        wav_name = Path(ma.replace("{maestro}/", "")).with_suffix(".flac").name
+                        flac_path = str(WORK / "maestro_audio" / wav_name)
+                        if Path(flac_path).exists():
+                            m[xr] = flac_path
+            resolve_audio._nasap_map = m
+        mapping = getattr(resolve_audio, "_nasap_map", {})
+        flac = mapping.get(xml_rel)
+        if flac:
+            d = _flac_dur(flac)
+            return (flac, d) if d is not None else None
+        return None
     return None
 
 
