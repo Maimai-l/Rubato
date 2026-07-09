@@ -170,12 +170,9 @@ def build_xmlid_map(part) -> dict:
     partitura Part → {note.id: 乐谱位置 Fraction(全音符单位)}。
     对齐 TSV 的 xml_id 指向乐谱音符,需要它们的乐谱起始位置作锚点横坐标。
     """
-    qmap = part.quarter_durations()
     import numpy as np
-    if np.ndim(qmap) == 2:
-        dpq = int(qmap[0][1])
-    else:
-        dpq = int(qmap[0][1]) if len(qmap) else 480
+    qmap = np.atleast_2d(part.quarter_durations())   # 防单条记录时返回一维数组
+    dpq = int(qmap[0][1]) if qmap.size else 480
     whole = dpq * 4
     out = {}
     for n in part.notes_tied if hasattr(part, "notes_tied") else part.notes:

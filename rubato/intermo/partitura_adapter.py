@@ -23,10 +23,11 @@ def part_to_ir(part, stats: dict | None = None) -> ScoreIR:
     stats = stats if stats is not None else {}
 
     # 每四分音符的 division 数;变 divisions 剔除(A-2)
-    qmap = part.quarter_durations()
-    if len(qmap) == 0:
+    # np.atleast_2d:部分 partitura 版本单条记录时返回一维数组,直接 qmap[0][1] 会索引失败
+    qmap = np.atleast_2d(part.quarter_durations())
+    if qmap.size == 0:
         raise AdapterError("无 divisions 信息")
-    dpq_values = {int(q) for _, q in qmap} if np.ndim(qmap) == 2 else {int(qmap[0][1])}
+    dpq_values = {int(q) for _, q in qmap}
     if len(dpq_values) != 1:
         raise AdapterError(f"变 divisions: {dpq_values}")
     dpq = dpq_values.pop()
@@ -50,12 +51,15 @@ def part_to_ir(part, stats: dict | None = None) -> ScoreIR:
             stats["zero_dur_dropped"] = stats.get("zero_dur_dropped", 0) + 1
             continue
         seen.setdefault((staff, p), []).append([on, off])
-    # 同 (staff,pitch) 重叠/相接合一(unison 与声部交叠)
+    # 同 (staff,pitch) 【严格重叠】才合一(声部交叠 unison);【相接】(前 offset==后 onset)
+    # 保留为两个音符 —— 那是"释放再重按同音"(re-articulation),InterMo 的一等公民
+    # (banner 例:a-3c4f4A-3C4F4 释放并重按同一和弦)。用 <= 会把相连同音八分并成一个
+    # 四分,把重奏织体(重复和弦伴奏型,钢琴里极常见)静默抹掉——故用严格 <。
     for (staff, p), ivals in seen.items():
         ivals.sort()
         cur = ivals[0]
         for iv in ivals[1:]:
-            if iv[0] <= cur[1]:                      # 重叠或相接 → 合一
+            if iv[0] < cur[1]:                       # 严格重叠 → 合一;相接(==)保留为两个音
                 cur[1] = max(cur[1], iv[1])
                 merged += 1
             else:

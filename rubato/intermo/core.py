@@ -12,8 +12,13 @@ DECISIONS(冻结的自由选择,变更须同步规格文档):
   D-02 拼写音高字形 = [A-Ga-g](--|-|#|##)?[0-8],大写=onset 小写=offset(论文字形)
   D-03 MIDI 音高字形 = N{0..127} onset / n{0..127} offset(lite 与 AMT 共用)
   D-04 小节线字形 = |{m}/{n}k{sig},sig ∈ {0, #1..#7, -1..-7}(五度圈数)
-  D-05 终止小节线:文档最后一个单元必须是小节线(携带末尾 offset),复用最后小节的签名
-  D-06 落在小节线时刻的事件归属小节线单元;若其前有时间推进,先发一个空 moment 的补齐 interval
+  D-05 终止小节线【与论文 Fig.1 不一致,有意为之】:论文序列以最后一个 interval 单元收尾、
+       无终止小节线;本实现强制补一个终止小节线(复用末小节签名),以便 score_end 可从序列恢复、
+       保证 parse(serialize(ir))==ir 的往返契约。代价:与官方发布数据做序列级 diff 时结尾多一个
+       空小节线 token。若需与官方数据互操作,再改为省略终止小节线(需放宽 units_to_ir/validate)。
+  D-06 落在小节线时刻的事件归属【修正,匹配论文 Fig.1】:offset(闭合前一小节)挂在小节线【前】
+       的 interval 单元;onset(开启新小节)挂在小节线单元上。此前把两者都挂到小节线上+发空 interval,
+       与论文不一致(影响 tokenizer 学到的 interval-piece 分布),已改。
   D-07 时间戳 = <|t{0..3999}|>(10ms bin),TAST 中每个单元后恰一枚;单调钳制(bin>=前一枚)
   D-08 力度 = <|v{1..127}|> 紧跟对应 onset;踏板 = <|ped1|>/<|ped0|> 置于单元 moment 最前
   D-09 AMT 最短音长 = 1 bin(off_bin >= on_bin+1),量化下限计数上报
@@ -159,17 +164,30 @@ def ir_to_units(ir: ScoreIR, lenient_measures: bool = False) -> list[Unit]:
     prev = Fraction(0)
     for p in points:
         is_bar = (p in bar_at) or (p == ir.score_end)
+        offs = sorted(offs_at.get(p, []), key=lambda e: (e[0], _pitch_key(e[1])))
+        ons = sorted([(s, pt, None) for s, pt in ons_at.get(p, [])],
+                     key=lambda e: (e[0], _pitch_key(e[1])))
         if is_bar:
-            if p > prev:                                   # D-06:补齐 interval,空 moment
-                units.append(Unit(frac=p - prev, bar=None, time=p))
-            m = bar_at.get(p, ir.measures[-1])             # D-05:终止小节线复用签名
+            # D-06(修正,匹配论文 Fig.1):落在小节线时刻的 offset 属于小节线【前】的
+            # interval 单元(闭合前一小节);小节线单元只携带新小节的 onset。
+            # (论文:...1/8PL:a-3c4f4PR:c5 |3/4k-4B4... offset 在小节线前,onset 在小节线上)
+            if p > prev:
+                closing = Unit(frac=p - prev, bar=None, time=p)
+                closing.offs = offs
+                units.append(closing)
+                offs_on_bar = []
+            else:
+                offs_on_bar = offs                        # p==prev(仅 p=0 首小节线):无前置 interval
+            m = bar_at.get(p, ir.measures[-1])             # D-05:终止小节线复用签名(见 DECISIONS)
             u = Unit(frac=None, bar=(m.num, m.den, m.fifths), time=p)
+            u.offs = offs_on_bar
+            u.ons = ons
+            units.append(u)
         else:
             u = Unit(frac=p - prev, bar=None, time=p)
-        u.offs = sorted(offs_at.get(p, []), key=lambda e: (e[0], _pitch_key(e[1])))
-        u.ons = sorted([(s, pt, None) for s, pt in ons_at.get(p, [])],
-                       key=lambda e: (e[0], _pitch_key(e[1])))
-        units.append(u)
+            u.offs = offs
+            u.ons = ons
+            units.append(u)
         prev = p
     return units
 
@@ -328,10 +346,10 @@ def units_to_ir(units: list[Unit]) -> ScoreIR:
 def validate_units(units: list[Unit], allow_pickup: bool = True,
                    lenient_measures: bool = False) -> list[str]:
     """
+    返回违规清单(空=通过)。三类:Dyck、小节求和、时间戳单调。
     lenient_measures=True:华彩/延长小节模式。小节 interval 和只需自洽(>0),
     不要求 == 声明拍号。Dyck 与时间戳检查不变。与 ir_to_units(lenient_measures=True) 配对。
     """
-    """返回违规清单(空=通过)。三类:Dyck、小节求和、时间戳单调。"""
     v = []
     open_keys = set()
     for u in units:
