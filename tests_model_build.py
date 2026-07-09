@@ -27,6 +27,17 @@ t_amt, _ = build_target_sequence("AMT", ["x"])
 check("amt_noscore_midi", "<|noscore|>" in t_amt and "<|midi|>" in t_amt)
 t_lite, _ = build_target_sequence("A2S_lite", ["x"])
 check("lite_nospell", "<|nospell|>" in t_lite)
+# 补齐方言:TAST_lite / AMT_lite / DBD 的 prompt 开关互异且齐全
+t_tl, _ = build_target_sequence("TAST_lite", ["x"])
+check("tast_lite_prompt", "<|score|>" in t_tl and "<|nospell|>" in t_tl and "<|ts|>" in t_tl and "<|nomidi|>" in t_tl)
+t_al, _ = build_target_sequence("AMT_lite", ["x"])
+check("amt_lite_prompt", "<|noscore|>" in t_al and "<|ts|>" in t_al and "<|nomidi|>" in t_al and "<|midi|>" not in t_al)
+t_dbd, _ = build_target_sequence("DBD", ["x"])
+check("dbd_prompt_beat", "<|beat|>" in t_dbd and "<|noscore|>" in t_dbd and "<|nomidi|>" in t_dbd)
+# 各方言 prompt 多重集互异(模型可区分)
+from rubato.model.build import DIALECT_PROMPT
+sigs = {d: tuple(sorted(p)) for d, p in DIALECT_PROMPT.items()}
+check("all_prompts_distinct", len(set(sigs.values())) == len(sigs), sigs)
 
 print("[3] 域提示可选")
 t_dom, m_dom = build_target_sequence("A2S", ["x"], domain="real")

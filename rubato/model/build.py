@@ -21,12 +21,20 @@ from rubato.platform import read_text
 
 # ---------------------------------------------------------------- 目标序列(R-S10.4,纯逻辑)
 
-# dialect → prompt 开关序列(与 vocab_spec 的 prompt token 对应)
+# dialect → prompt 开关序列(与 vocab_spec 的 prompt token 对应)。
+# 八方言四族(每族 full/lite),由 prompt 开关唯一区分:
+#   score/noscore(有无乐谱结构)、spell/nospell(拼写/MIDI 音高)、
+#   ts/nots(有无时间戳)、midi/nomidi(有无力度踏板词)、beat(仅 DBD)。
+# 各方言的 prompt token 多重集互异(模型据此条件化输出)。DBD_lite 的精确形式
+# 依论文 Fig.2 待定(见 core.ir_to_dbd_units 说明),暂不入训练 prompt 表。
 DIALECT_PROMPT = {
-    "A2S":      ["<|sot|>", "<|score|>", "<|spell|>", "<|nots|>", "<|nomidi|>"],
-    "A2S_lite": ["<|sot|>", "<|score|>", "<|nospell|>", "<|nots|>", "<|nomidi|>"],
-    "TAST":     ["<|sot|>", "<|score|>", "<|spell|>", "<|ts|>", "<|nomidi|>"],
-    "AMT":      ["<|sot|>", "<|noscore|>", "<|nospell|>", "<|ts|>", "<|midi|>"],
+    "A2S":       ["<|sot|>", "<|score|>", "<|spell|>", "<|nots|>", "<|nomidi|>"],
+    "A2S_lite":  ["<|sot|>", "<|score|>", "<|nospell|>", "<|nots|>", "<|nomidi|>"],
+    "TAST":      ["<|sot|>", "<|score|>", "<|spell|>", "<|ts|>", "<|nomidi|>"],
+    "TAST_lite": ["<|sot|>", "<|score|>", "<|nospell|>", "<|ts|>", "<|nomidi|>"],
+    "AMT":       ["<|sot|>", "<|noscore|>", "<|nospell|>", "<|ts|>", "<|midi|>"],
+    "AMT_lite":  ["<|sot|>", "<|noscore|>", "<|nospell|>", "<|ts|>", "<|nomidi|>"],
+    "DBD":       ["<|sot|>", "<|noscore|>", "<|nospell|>", "<|ts|>", "<|nomidi|>", "<|beat|>"],
 }
 
 
@@ -259,9 +267,24 @@ def resize_decoder_vocab(model, new_vocab: int, old_vocab: int | None = None) ->
 
 # ---------------------------------------------------------------- 主构建(本地,NeMo 路线)
 
+def reinit_all_parameters(model) -> int:
+    """
+    从头训(from_scratch)用:重置模型【全部】模块的参数(不只词表)。
+    逐模块调其 reset_parameters()(nn.Linear/Embedding/LayerNorm/Conv 等都有);
+    返回被重置的模块数。用于把 canary 架构剥成随机初始化,对齐论文"trained from scratch"。
+    """
+    n = 0
+    for m in model.modules():
+        if hasattr(m, "reset_parameters") and callable(m.reset_parameters):
+            m.reset_parameters()
+            n += 1
+    return n
+
+
 def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
                 frontend_wav_paths: list[str] | None = None,
-                backbone_ref: int | None = None):
+                backbone_ref: int | None = None,
+                from_scratch: bool = False):
     """
     R-S10.5 主路线:NeMo 直用。
     步骤(本地执行,每步带断言):
@@ -272,12 +295,19 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
       5. hash 核对 encoder 权重已载入
       6. 参数量断言 ∈ 180M±2%(A-S10.1)
     返回 (model, report)。此函数需 GPU/NeMo 环境,沙盒不跑。
+
+    from_scratch(偏离项 D1 的开关):
+      False(缺省,热启动)—— 载 canary encoder 权重,只重置词表相关权重,encoder 用
+        hash 核对确认【已载入】。省算力,但偏离论文的从头训。
+      True(对齐论文)—— restore 仅取架构,随后 reinit_all_parameters 把【全部】权重
+        随机初始化,encoder 用 hash 核对确认【已改变】(与 ckpt 不同)。此时训练应改用
+        统一学习率(train.build_optimizer 的差分 lr 是为热启动设计,从头训宜 lr_encoder==lr_decoder)。
     """
     from nemo.collections.asr.models import EncDecMultiTaskModel
     import torch
 
-    report = {}
-    # 1. restore
+    report = {"from_scratch": from_scratch}
+    # 1. restore(热启动取权重;从头训只借架构)
     model = EncDecMultiTaskModel.restore_from(nemo_path, map_location="cpu")
     ckpt_state = {k: v.clone() for k, v in model.state_dict().items()}
 
@@ -288,6 +318,9 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
                       "frontend": frontend_spec_from_cfg(cfg)}
     assert enc_layers == 17, f"R-S10.1 违反:encoder 应 17 层,得 {enc_layers}"
 
+    if from_scratch:
+        report["reinit_modules"] = reinit_all_parameters(model)
+
     # 3+4. 换词表 + 重置 embedding/softmax(R-S10.2:全新初始化,prompt 随之)。
     #    主路径:通用换形(resize_decoder_vocab)—— 自研训练环直喂 token id,
     #    不依赖 NeMo 内部 tokenizer/prompt 表,绕开 canary aggregate-tokenizer 的
@@ -297,11 +330,16 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
     new_vocab = sp.get_piece_size()
     report["vocab_swap"] = resize_decoder_vocab(model, new_vocab)
 
-    # 5. encoder hash 核对(R-S10.2)
+    # 5. encoder hash 核对(R-S10.2)。热启动:权重必须【一致】(确认载入);
+    #    从头训:权重必须【改变】(确认已随机化,防止意外沿用预训练 encoder)。
     new_state = model.state_dict()
     report["encoder_verify"] = verify_encoder_loaded(new_state, ckpt_state, "encoder")
-    assert report["encoder_verify"]["ok"], \
-        f"R-S10.2 违反:encoder 权重未正确载入 {report['encoder_verify']}"
+    if from_scratch:
+        assert not report["encoder_verify"]["ok"], \
+            "from_scratch 但 encoder 权重与 ckpt 仍一致 —— reinit 未生效,会误用预训练 encoder"
+    else:
+        assert report["encoder_verify"]["ok"], \
+            f"R-S10.2 违反:encoder 权重未正确载入 {report['encoder_verify']}"
 
     # 5b. 前端一致性(R-S10.3)—— 强制接入(问题5修复:此前 verify_frontend 已写但未调用)
     if frontend_wav_paths:

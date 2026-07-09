@@ -40,9 +40,20 @@
 
 **砍掉**:DBD、DBD_plus(节拍任务,对 A2S 耦合弱,小节监督已含在 A2S 内)、TAST_lite、AMT_lite(冗余)。若追求极限精简,进一步可砍 TAST(保 A2S/A2S_lite/AMT),但将失去 §S12 的分窗机制,需另行设计终止准则——不推荐。
 
+> **更新(能力已补齐,默认仍关)**:上述"砍掉"是**训练混比的缺省选择**,不再是"做不了"。
+> TAST_lite / AMT_lite / DBD 的投影与 prompt 已实现(`core.project` / `perf_to_amt(lite=)` /
+> `ir_to_dbd_units`;`build.DIALECT_PROMPT` 含 7 方言;`tests_dialects.py`)。PDMX→AMT 通路
+> 也已打通(`core.score_ir_to_events` + `perf_to_amt`)。要对齐论文全 8 方言/PDMX-AMT,
+> 只需把它们并入 `DIALECT_MIX` 与标签生成,无需改架构。DBD_lite 的 full/lite 精确切分待 Fig.2 确认。
+
 **词表布局仍按论文全量保留**【不变量】:4000 时间戳 + 129 MIDI + 1 beat(占位不用)+ 40 prompt + 256 byte-fallback + 3 特殊符 + 3571 可学习语义 = 8000。理由:保持论文核账检查有效、embedding 行数便宜、未来加回 DBD 无痛。
 
 **与论文的偏离清单(冻结)**:D1 热启动(encoder 载 canary 权重,非 from-scratch);D2 音源替换(5 具名免费源 × 16 程序化录音预设);D3 dialect 裁剪(上表);D4 评测缩水(无 ATEPP 全量);D5 编码器帧率接受 canary 默认(见 R-S10.3,不追论文的 40ms)。
+
+> **更新(D1/D3 已降级为开关)**:D1 现为 `build_model(from_scratch=)` 开关——缺省热启动,
+> `True` 则全权重随机化对齐论文(encoder hash 核对反向断言"已改变")。D3 见上方方言更新。
+> 两者的"偏离"现在只是**缺省值**,不是能力缺口;真正剩下的取舍是**算力/规模**(从头训贵一个量级、
+> PDMX-AMT 多一条渲染链),代码不拦。
 
 ---
 

@@ -110,6 +110,7 @@ class Unit:
     ons: list = field(default_factory=list)    # [(staff, SPitch|int, vel|None)]
     pedal: int | None = None         # AMT 专用: 1/0
     ts_bin: int | None = None        # TAST/AMT 专用
+    beat: bool = False               # DBD 专用:该 interval 末端是拍点(非小节首拍)→ 发 '*'
 
 
 def _sig_glyph(fifths: int) -> str:
@@ -231,6 +232,8 @@ def units_to_text(units: list[Unit], midi_pitch: bool = False,
             s = f"{u.frac.numerator}/{u.frac.denominator}"
         else:
             s = ""                                          # AMT:无乐谱结构,无头单元
+        if u.beat:                                          # DBD:拍点标记(interval 后、moment 前)
+            s += "*"
         if u.pedal is not None:                            # D-08
             s += pedal_glyph(u.pedal)
         # moment:staff 低→高;每 staff 内 off 先 on 后(已在 ir_to_units 排序)
@@ -311,6 +314,9 @@ def text_to_units(text: str) -> list[Unit]:
             else:                                        # AMT 无头单元:整体是 moment
                 u = Unit(frac=None, bar=None, time=t)
                 rest = atom
+        if rest.startswith("*"):                          # DBD 拍点标记(interval 后)
+            u.beat = True
+            rest = rest[1:]
         pos = 0
         pending_on = None
         for mm in _MOMENT_RE.finditer(rest):
@@ -453,25 +459,122 @@ def stamp_units(units: list[Unit], tmap: TimeMap, ts_ms: int = 10, n_bins: int =
     return clamped
 
 
-def project(ir: ScoreIR, dialect: str, tmap: TimeMap | None = None) -> str:
-    units = ir_to_units(ir)
-    if dialect == "A2S":
-        return units_to_text(units)
-    if dialect == "A2S_lite":
-        return units_to_text(units, midi_pitch=True)
-    if dialect == "TAST":
+def project(ir: ScoreIR, dialect: str, tmap: TimeMap | None = None,
+            beats: list | None = None) -> str:
+    """
+    InterMo → 方言文本。八方言分四族(每族 full/lite):
+      A2S / A2S_lite   —— 乐谱结构,无戳(PDMX 大规模)。
+      TAST / TAST_lite —— 乐谱结构 + 时间戳(带/不带拼写)。需 tmap。
+      AMT / AMT_lite   —— 仅 moment + 时间戳(走 perf_to_amt,不经此函数)。
+      DBD / DBD_lite   —— 仅节拍/小节 + 时间戳,无音高。需 tmap;beats 可选覆盖网格。
+    lite = 去拼写(MIDI 音高);AMT 的 lite = 去力度/踏板;DBD 见 ir_to_dbd_units。
+    """
+    if dialect in ("A2S", "A2S_lite"):
+        return units_to_text(ir_to_units(ir), midi_pitch=(dialect == "A2S_lite"))
+    if dialect in ("TAST", "TAST_lite"):
         if tmap is None:
-            raise SerializeError("TAST 需要 TimeMap")
+            raise SerializeError(f"{dialect} 需要 TimeMap")
+        units = ir_to_units(ir)
+        stamp_units(units, tmap)
+        return units_to_text(units, midi_pitch=(dialect == "TAST_lite"), with_ts=True)
+    if dialect in ("DBD", "DBD_lite"):
+        if tmap is None:
+            raise SerializeError(f"{dialect} 需要 TimeMap")
+        units = ir_to_dbd_units(ir, beats=beats, lite=(dialect == "DBD_lite"))
         stamp_units(units, tmap)
         return units_to_text(units, with_ts=True)
-    raise ValueError(f"未知 dialect {dialect}(AMT 走 perf_to_amt)")
+    raise ValueError(f"未知 dialect {dialect}(AMT/AMT_lite 走 perf_to_amt)")
+
+
+def _derive_beats(ir: ScoreIR) -> list:
+    """从小节拍号推导拍点网格:n/d 拍 → 每 1/d 一拍,小节首拍为下拍(downbeat)。
+    返回 [(score_pos: Fraction, is_downbeat: bool)](按位置升序,含小节首下拍)。
+    真实数据应传入 nASAP 人工标注的拍点(project(..., beats=...)),此处是无标注时的乐理缺省。"""
+    ir = ir.normalized()
+    beats = []
+    ms = ir.measures
+    for i, m in enumerate(ms):
+        end = ms[i + 1].start if i + 1 < len(ms) else ir.score_end
+        step = Fraction(1, m.den)
+        pos = m.start
+        first = True
+        while pos < end:
+            beats.append((pos, first))     # 小节首拍=downbeat,其余=普通拍
+            first = False
+            pos += step
+    return beats
+
+
+def ir_to_dbd_units(ir: ScoreIR, beats: list | None = None,
+                    lite: bool = False) -> list[Unit]:
+    """
+    DBD(Downbeat & Beat Detection):去掉所有音高,只保留节拍/小节骨架 + 时间戳。
+      - downbeat(小节首拍)→ 小节线单元 |n/dk<sig>(DBD_lite:去拍号/调号,退化为普通拍点)。
+      - 其余拍点 → interval + '*'。
+      - 每两个相邻拍点间发一个 metric interval(1/d),小节内 interval 和 = 拍号(自包含)。
+    beats 可传 nASAP 人工标注 [(score_pos, is_downbeat)];缺省从拍号推导。
+    lite=True:不发小节线签名(只有拍流,无下拍/拍号)——DBD 的 lite 变体(训练用)。
+    """
+    ir = ir.normalized()
+    if beats is None:
+        beats = _derive_beats(ir)
+    beats = sorted(beats, key=lambda b: b[0])
+    bar_at = {m.start: m for m in ir.measures}
+    units: list[Unit] = []
+    prev = Fraction(0)
+    for pos, is_down in beats:
+        frac = pos - prev
+        if is_down and not lite:
+            # 下拍:closing interval(闭合上一小节)+ 小节线单元(与 ir_to_units 一致)
+            if frac > 0:
+                units.append(Unit(frac=frac, bar=None, time=pos))   # 闭合 interval,无 '*'
+            m = bar_at.get(pos, ir.measures[-1])
+            units.append(Unit(frac=None, bar=(m.num, m.den, m.fifths), time=pos))
+        else:
+            # 普通拍点(或 lite 下的所有拍点):interval + '*'
+            u = Unit(frac=frac if frac > 0 else Fraction(1, ir.measures[0].den),
+                     bar=None, time=pos)
+            u.beat = True
+            units.append(u)
+        prev = pos
+    # 收尾:最后一拍点 → score_end 的 closing interval;non-lite 再补终止小节线(D-05,与 A2S 一致)
+    if prev < ir.score_end:
+        units.append(Unit(frac=ir.score_end - prev, bar=None, time=ir.score_end))
+    if not lite:
+        m = ir.measures[-1]
+        units.append(Unit(frac=None, bar=(m.num, m.den, m.fifths), time=ir.score_end))
+    return units
+
+
+def score_ir_to_events(ir: ScoreIR, sec_per_whole: float = 2.0,
+                       default_vel: int = 64) -> list[dict]:
+    """
+    乐谱 IR → 恒速"演奏"事件 [{pitch(MIDI), on, off, vel}](秒)。
+    这是 PDMX(纯乐谱、无真实演奏)进入 AMT/AMT_lite 通路的桥:非表现性(恒定 tempo)
+    渲染下,AMT 目标 = 乐谱音符按 sec_per_whole 定时。表现性渲染(VirtuosoNet)则改用
+    其产出的演奏 MIDI 直接喂 perf_to_amt。default_vel:乐谱无力度时的缺省(论文合成用)。
+    渲染音频必须用【同一】sec_per_whole/力度,才与此目标对齐。
+    """
+    ir = ir.normalized()
+    out = []
+    for n in ir.notes:
+        pitch = n.pitch.midi if isinstance(n.pitch, SPitch) else int(n.pitch)
+        out.append({"pitch": pitch,
+                    "on": float(n.onset) * sec_per_whole,
+                    "off": float(n.offset) * sec_per_whole,
+                    "vel": default_vel})
+    return out
 
 
 def perf_to_amt(notes: list[dict], pedal: list[tuple[float, bool]] = (),
-                ts_ms: int = 10, n_bins: int = 4000) -> tuple[str, dict]:
+                ts_ms: int = 10, n_bins: int = 4000,
+                lite: bool = False) -> tuple[str, dict]:
     """
     演奏事件 → AMT 文本。notes: [{pitch, on, off, vel}](秒);pedal: [(sec, down)]。
     返回 (text, stats)。D-09 最短音长 1 bin。
+    lite=True:AMT_lite 变体——只发带时间戳的音高事件,【不发力度、不发踏板】
+    (论文:"AMT_lite produces non-quantized pitch events with timing";full 才加 129
+     力度/踏板 MIDI 词)。lite 下 pedal 参数被忽略。
     """
     to_bin = lambda s: max(0, min(int(round(s / (ts_ms / 1000.0))), n_bins - 1))
     floor_count = 0
@@ -487,10 +590,12 @@ def perf_to_amt(notes: list[dict], pedal: list[tuple[float, bool]] = (),
         fb = to_bin(nt["off"])
         if fb <= ob:
             fb, floor_count = ob + 1, floor_count + 1
-        unit(ob).ons.append((None, int(nt["pitch"]), int(nt["vel"])))
+        vel = None if lite else int(nt["vel"])
+        unit(ob).ons.append((None, int(nt["pitch"]), vel))
         unit(fb).offs.append((None, int(nt["pitch"])))
-    for sec, down in pedal:
-        unit(to_bin(sec)).pedal = 1 if down else 0
+    if not lite:                                            # lite 无踏板
+        for sec, down in pedal:
+            unit(to_bin(sec)).pedal = 1 if down else 0
 
     units = []
     for b in sorted(per_bin):
@@ -500,6 +605,6 @@ def perf_to_amt(notes: list[dict], pedal: list[tuple[float, bool]] = (),
         u.ts_bin = b
         units.append(u)
     text = " ".join(
-        units_to_text([u], midi_pitch=True, with_ts=True, with_vel=True) for u in units
+        units_to_text([u], midi_pitch=True, with_ts=True, with_vel=not lite) for u in units
     )
     return text, {"min_dur_floored": floor_count, "n_units": len(units)}

@@ -87,22 +87,28 @@ python scripts/gen_amt_labels.py
 
 ---
 
-## 2. 装配 tokenizer 语料（四方言合一）
+## 2. 装配 tokenizer 语料（**只 A2S + A2S_lite**，对齐论文 §3.2）
 
-tokenizer 语料 = **训练侧全部非空方言文本，每条一行**（A2S + A2S_lite + TAST + AMT）。
-`s5` 已经把 PDMX 的 A2S/A2S_lite 写进 `a2s_corpus.txt`；nASAP 的 TAST 和 MAESTRO 的 AMT 还在
-各自的 labels.jsonl 里，需要抽出来。用下面这段一次性装配（无需新脚本）：
+> **更正（重要）**：论文 §3.2 明确 UnigramLM **只在 A2S 和 A2S_lite 文本上拟合**
+> （"fit on A2S and A2S$_{lite}$ text, with timestamps and prompt tokens added as
+> predefined vocabulary"）。时间戳/力度/踏板/beat 都是 **预定义 user_defined_symbols**，
+> UnigramLM 不会去 merge 它们；把 TAST/AMT 文本塞进语料只会**扰动 merge 的频率统计**、
+> 偏离论文，不会带来新的可学 piece。所以 tokenizer 语料 **只收 A2S + A2S_lite**
+> （来自 PDMX **和** nASAP —— nASAP 也产 A2S/A2S_lite）。TAST/AMT/DBD 文本用于**训练模型**，
+> 不用于**训练 tokenizer**。
+
+`s5` 已把 PDMX 的 A2S/A2S_lite 写进 `a2s_corpus.txt`；nASAP 的 A2S/A2S_lite 在其 labels.jsonl 里，
+需要抽出来一起并入。用下面这段一次性装配（无需新脚本）：
 
 ```python
-# assemble_corpus.py —— 把所有 labels.jsonl 的非空方言文本抽成语料行
-import json, glob, io
+# assemble_corpus.py —— 只抽 A2S + A2S_lite 成 tokenizer 语料行(对齐论文 §3.2)
+import json, io
 OUT = r"D:\vscode_projects\ee_download\work\tok_corpus.txt"
 LABEL_JSONLS = [
-    r"D:\vscode_projects\ee_download\work\pdmx_a2s_labels.jsonl",
-    # nASAP labels.jsonl 路径,
-    # MAESTRO AMT labels.jsonl 路径,
+    r"D:\vscode_projects\ee_download\work\pdmx_a2s_labels.jsonl",   # PDMX A2S/A2S_lite
+    # nASAP labels.jsonl 路径,                                       # nASAP 也含 A2S/A2S_lite
 ]
-DIALECTS = ("A2S", "A2S_lite", "TAST", "AMT")
+DIALECTS = ("A2S", "A2S_lite")          # ← 只这两个;TAST/AMT/DBD 不进 tokenizer 语料
 n = 0
 with io.open(OUT, "w", encoding="utf-8") as w:
     for path in LABEL_JSONLS:
@@ -117,8 +123,11 @@ with io.open(OUT, "w", encoding="utf-8") as w:
 print("corpus lines:", n, "->", OUT)
 ```
 
-> 注意：**tokenizer 语料不做 work_key 去重**。去重只服务 train/val/test 隔离，
+> 注意 1：**tokenizer 语料不做 work_key 去重**。去重只服务 train/val/test 隔离，
 > 拿它砍 tokenizer 语料 = 白白丢 distinct 子串、把词表压小。论文没这么干。
+>
+> 注意 2：`s5` 的 `a2s_corpus.txt` 已是 A2S+A2S_lite；若直接用它 + nASAP 的 A2S/A2S_lite，
+> 效果等同上面脚本。别把 TAST/AMT 混进来。
 
 ---
 
@@ -175,22 +184,53 @@ print(cov)
 - [x] `dialect_sampler` 支持注入 mix + 输出小池**过采样倍数报告**（`RubatoDataset.last_mix_report`），AMT 小池反复采样不再静默。
 - [x] `evaluate.note_f1` 增加 **onset+offset** 变体（offset_ratio=0.2），对论文 Table 3 不再系统性偏乐观。
 
-### §一 与论文的偏离（需**你/用户拍板**的设计决策，不是 bug）
-这些当前按 SPEC 的 deviation 记录，但外部 review 认为与论文正面冲突，请确认是否要改回论文做法：
+### §一 与论文的偏离 —— 我已把**能力都补上**（代码沙盒已验证），开关留给你
 
-1. **PDMX 不喂 AMT**：论文有 PDMX AMT（436k）。PDMX 是纯乐谱，要产 AMT 需先渲染成 MIDI/音频再抽事件。
-   - 决策：要不要把 PDMX 也渲染进 AMT 通路？（工作量：接一条 score→MIDI→AMT 的渲染链）
-2. **DBD / *_lite / TAST_lite / AMT_lite 方言未实现**（记为 deviation D3）。review 视其为论文能力缺失。
-   - 决策：补齐还是保持精简方言集？
-3. **热启动 vs 从头训**（deviation D1）：我们从 Canary-180M warm-start，论文从头训。
-   - 决策：保持 warm-start（省算力、已记为有意偏离）还是对齐论文从头训？
+之前这三条我推给"用户拍板"。这轮按"做所有力所能及的"，我把**机器都造好了**，
+你只需在配置里拨开关；不再是"缺失"，而是"默认关、可开"。
 
-> 这三条我不擅自改——它们改变训练规模与数据通路，属于你和用户的规划决策。上面每条都给了取舍，等你定。
+1. **PDMX → AMT（论文 436k，之前为 0）—— 能力已实现。**
+   - `core.score_ir_to_events(ir, sec_per_whole, default_vel)`：乐谱 IR → 恒速演奏事件；
+     接 `perf_to_amt(...)` 即得 PDMX 的 AMT / `perf_to_amt(..., lite=True)` 得 AMT_lite。
+   - `DIALECT_PROMPT` 已含 `AMT_lite`；`build_target_sequence("AMT",...)` 可训。
+   - **执行端要做**：非表现性渲染的音频用**同一** `sec_per_whole`/`default_vel`，AMT 目标才与音频对齐；
+     表现性(VirtuosoNet)渲染则用 VN 产出的演奏 MIDI 直接喂 `perf_to_amt`（已有）。
+2. **补齐方言 TAST_lite / AMT_lite / DBD —— 已实现（DBD_lite 待定）。**
+   - `project(ir,"TAST_lite",tmap)` / `perf_to_amt(...,lite=True)` / `project(ir,"DBD",tmap,beats=...)`。
+   - `DIALECT_PROMPT` 已含三者；`tests_dialects.py`(28 项) + `tests_model_build.py` 已锁。
+   - **DBD_lite**：论文 Fig.2 对 DBD 的 full/lite 精确切分没有文字定义，我按『下拍+拍号 vs 纯拍流』
+     做了 `core.ir_to_dbd_units(...,lite=True)` 的合理实现，但**没有**放进训练 prompt 表——
+     等你看一眼 Fig.2 图示确认后再定是否入训。这是唯一一个我留白的点。
+   - **执行端要做**：DBD 的拍点最好用 **nASAP 人工标注**传 `beats=[(score_pos,is_downbeat),...]`；
+     没标注时 `project` 会从拍号按 `1/den` 推导（乐理缺省，见 `_derive_beats`）。
+3. **热启动 vs 从头训（D1）—— 已做成开关。**
+   - `build_model(..., from_scratch=False)`：缺省热启动（载 canary encoder，hash 核对**已载入**）。
+   - `from_scratch=True`：`reinit_all_parameters` 把**全部**权重随机化，hash 核对**已改变**（防误用预训练 encoder）。
+   - **执行端要做**：若开 `from_scratch=True`，训练把差分 lr 关掉（`lr_encoder == lr_decoder`）——
+     差分 lr 是给热启动降载 encoder 用的，从头训应统一 lr。
+
+> 剩下真正要你/用户拍板的只有两点**规模/算力**取舍，代码不拦：
+> (a) PDMX 要不要真的开 AMT 渲染（+一条渲染链的算力）；(b) 从头训还是热启动（算力差一个量级）。
+> 能力都在，随时可开。
 
 ---
 
 ## 6. 一句话流程
 
-拉最新分支 → 删旧语料/词表 → s5(全池) + s7 + gen_amt → 装配 `tok_corpus.txt`（不去重）→
+拉最新分支 → 删旧语料/词表 → s5(全池) + s7 + gen_amt → 装配 `tok_corpus.txt`（**只 A2S+A2S_lite**，不去重）→
 `train_unigram(vocab=8000)` → 过两条验收门（vocab≈8000 且 split_rate<0.30）→ 才 encode 标签、训模型。
 任何一步数据量"莫名变少"就停下抓 bug，别接受降级。
+
+---
+
+## 7. 本轮新增能力速查（执行端可直接调用）
+
+| 能力 | 入口 | 说明 |
+|---|---|---|
+| PDMX→AMT | `core.score_ir_to_events` + `perf_to_amt` | 乐谱恒速→演奏事件→AMT；`lite=True` 出 AMT_lite |
+| TAST_lite | `project(ir,"TAST_lite",tmap)` | TAST 去拼写(MIDI 音高)+时间戳 |
+| AMT_lite | `perf_to_amt(notes,lite=True)` | 音高事件+时间戳，无力度/踏板 |
+| DBD | `project(ir,"DBD",tmap,beats=None)` | 拍点/小节+时间戳，无音高；`beats` 可传 nASAP 标注 |
+| DBD_lite | `core.ir_to_dbd_units(ir,lite=True)` | 纯拍流(待 Fig.2 确认，未入训练 prompt) |
+| 从头训 | `build_model(...,from_scratch=True)` | 全权重随机化，对齐论文 |
+| 方言 prompt | `build.DIALECT_PROMPT` | 已含 7 方言(除 DBD_lite)，多重集互异 |
