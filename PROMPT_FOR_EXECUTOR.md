@@ -69,8 +69,15 @@ EXECUTOR_CORRECTIONS.md → LOCAL_VERIFICATION.md。读完先复述"哪个源喂
   卡住不降 → 打印 model.forward 返回类型,确认 resolve_log_probs 取到 4 元组第 0 个、
   loss.requires_grad==True。别看到"跑通"就说通过——必须是 loss<0.05 这个数字。
 
+第1.5步 装配数据集(此前缺失的胶水,必做):
+  三份 labels.jsonl(pdmx/nasap/maestro)schema 不一致且不带音频路径,没有现成代码喂进 RubatoDataset。
+  已补:rubato/data/assemble.py + scripts/build_dataset.py。先干跑验证:
+    python scripts/build_dataset.py --dry-run
+  判据:每源 kept>0、no_audio 不占大头、加总守恒。nASAP 若 kept=0,是 s7 标签没带音频引用——
+  按 build_dataset.py 里 resolve_audio 的【EXECUTOR】注释补 nASAP↔FLAC 映射(改这里,提交进仓库)。
+
 第2步 全量训练:四路数据按混比 A2S.35/A2S_lite.15/TAST.20/AMT.30,
-  rubato.data.dataset.RubatoDataModule + rubato.model.train.train()。
+  去掉 --dry-run 用 scripts/build_dataset.py 直接建 RubatoDataModule + train()(或自己按它的写法拼)。
   数据必须全部备齐再开,绝不边渲染边训练。
   (可选,对齐论文更全:PDMX→AMT、TAST_lite/AMT_lite/DBD 方言、从头训——能力都已就绪,
    开关与调用见 CORPUS_REGEN.md §5/§7;开哪些是算力取舍,由你/用户定。)

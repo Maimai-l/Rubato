@@ -44,7 +44,21 @@ python -c "import json;s=json.load(open('configs/vocab_spec.json',encoding='utf-
 
 顺序无强依赖，但建议按下表。**每一步都要看产出统计，任何一步"处理数远小于输入数"都要停下排查，不许静默吞。**
 
-### 1.1 PDMX → A2S / A2S_lite（`scripts/s5_pdmx_a2s_labels.py`）
+### 1.0 先产 manifest —— 用对脚本(有坑)
+
+PDMX 过滤有【三个】s3 脚本,别跑错:
+- **`scripts/s3_filter_pdmx.py`** ← 【就用这个】。它才真正写出 `work/manifest_pieces.jsonl`
+  (过 metadata/license/work_key_or_fallback,缺 composer 用 `__nometa__` 兜底不丢)。
+- `scripts/s3_full_filter.py` ← **只写统计 report,不产 manifest**。名字像"全量过滤"但它是诊断用的,
+  跑它你会以为过滤完了、其实没有 manifest(这正是 s7 踩过的同一个坑:算了不落盘)。别拿它当产 manifest 的。
+- **`scripts/s3_minhash_leakage.py`** ← 【必须在 s3_filter 之后、s5 之前跑一次】。它按内容(MinHash)
+  剔除跨数据集近重复(nASAP/ASAP 泄漏),**覆盖写**回 `manifest_pieces.jsonl`。
+  ⚠ 跳过它 = **s5 用空 blacklist、没有任何泄漏防护**(s5/s5_parallel 都传空 blacklist,
+  依赖的就是 manifest 已被 minhash 洗过)。顺序错 = 测试集污染,评测数字全废。
+
+正确顺序:`s3_filter_pdmx.py` → `s3_minhash_leakage.py` →(下面)`s5`。
+
+### 1.1 PDMX → A2S / A2S_lite（`scripts/s5_pdmx_a2s_labels.py` 或并行版 `s5_parallel.py`）
 
 这是 tokenizer 语料的大头。**关键：吃全 manifest（~53k 曲），不是被 composer 过滤剩下的 16k。**
 
@@ -170,6 +184,29 @@ print(cov)
 
 ---
 
+## 3.5 装配数据集（此前缺失的胶水，别跳）
+
+三份 labels.jsonl 落盘后,【没有】现成代码把它们 + 音频喂进 RubatoDataset —— 而且三份 schema 不一样
+(maestro 用 `midi_file`/`amt_text`,pdmx/nasap 用 `utt_id`/`AMT`),且都不带音频路径。
+这层胶水现在补上了:`rubato/data/assemble.py` + `scripts/build_dataset.py`。
+
+**先干跑验证装配(无 GPU 也能跑)**:
+
+```bash
+python scripts/build_dataset.py --dry-run
+# 打印每源 kept / no_audio / no_dialect / bad_schema,加总守恒。
+# 盯:每源 kept 都 >0;no_audio 不能占绝大多数(占大头=音频路径没对上,先修 resolve_audio)。
+```
+
+`scripts/build_dataset.py` 里 `resolve_audio()` 的三处路径约定(pdmx 渲染产物 / maestro FLAC via CSV /
+nASAP↔FLAC)带 **【EXECUTOR】** 注释 —— 按你的真实目录核对。特别是 **nASAP**:s7 的标签行目前
+不带音频引用,`resolve_audio` 会把 nASAP 全判 no_audio。要么在 s7 标签行里补上 `audio_path`,
+要么在 `resolve_audio` 里按你的 nASAP→MAESTRO-FLAC 映射补全。dry-run 的 `nasap kept=0` 就是这个信号。
+
+装配 OK(kept 合理)后,去掉 `--dry-run` 即建模型 + 训练(见 §5 从头训开关)。
+
+---
+
 ## 4. 反"丢数据"总标准（贯穿全程）
 
 论文用**相同的数据集**达到 Table 3 的水平。所以任何"复现比论文少一大截数据"的现象，
@@ -224,8 +261,9 @@ print(cov)
 
 ## 6. 一句话流程
 
-拉最新分支 → 删旧语料/词表 → s5(全池) + s7 + gen_amt → 装配 `tok_corpus.txt`（**只 A2S+A2S_lite**，不去重）→
-`train_unigram(vocab=8000)` → 过两条验收门（vocab≈8000 且 split_rate<0.30）→ 才 encode 标签、训模型。
+拉最新分支 → 删旧语料/词表 → **s3_filter_pdmx → s3_minhash_leakage** → s5(全池) + s7(带 --out-labels) + gen_amt →
+装配 `tok_corpus.txt`（**只 A2S+A2S_lite**，不去重）→ `train_unigram(vocab=8000)` → 过两条验收门（vocab≈8000 且 split_rate<0.30）→
+**`build_dataset.py --dry-run` 验装配**（每源 kept>0）→ 才建模型、训练。
 任何一步数据量"莫名变少"就停下抓 bug，别接受降级。
 
 ---
@@ -241,3 +279,4 @@ print(cov)
 | DBD_lite | `core.ir_to_dbd_units(ir,lite=True)` | 纯拍流(待 Fig.2 确认，未入训练 prompt) |
 | 从头训 | `build_model(...,from_scratch=True)` | 全权重随机化，对齐论文 |
 | 方言 prompt | `build.DIALECT_PROMPT` | 已含 7 方言(除 DBD_lite)，多重集互异 |
+| 装配数据集 | `data.assemble.assemble` / `scripts/build_dataset.py --dry-run` | 三份 labels(schema 不一)+音频 → RubatoDataset;不静默计数 |
