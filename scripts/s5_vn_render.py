@@ -126,9 +126,11 @@ def _slice_audio(whole_path: str, t0: float, t1: float, out_path: str) -> str | 
 
 
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
-        allow_humanize_fallback=False, seed=20260706, limit=None):
+        allow_humanize_fallback=False, seed=20260706, limit=None, offset=0):
     import partitura
     pieces = list(read_jsonl(manifest))
+    if offset:
+        pieces = pieces[offset:]
     if limit:
         pieces = pieces[:limit]
     out_audio_dir = Path(out_audio_dir); out_audio_dir.mkdir(parents=True, exist_ok=True)
@@ -220,6 +222,8 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default=str(ROOT / "work" / "manifest_pieces.jsonl"))
+    ap.add_argument("--offset", type=int, default=0)
+    ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--sources", default="configs/sources.yaml")
     ap.add_argument("--presets", default="configs/recording_presets.yaml")
     ap.add_argument("--out-labels", default=str(ROOT / "work" / "pdmx_perf_labels.jsonl"))
@@ -232,6 +236,7 @@ def main():
     sources_cfg = yaml.safe_load(open(args.sources, encoding="utf-8"))
     presets_cfg = yaml.safe_load(open(args.presets, encoding="utf-8"))
     run(args.manifest, sources_cfg, presets_cfg, args.out_labels, args.out_corpus,
+        args.out_audio_dir, offset=args.offset,
         args.out_audio_dir, allow_humanize_fallback=args.allow_humanize_fallback,
         limit=args.limit or None)
 
