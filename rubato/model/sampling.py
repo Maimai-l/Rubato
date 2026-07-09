@@ -8,11 +8,14 @@ DIALECT_MIX = {"A2S": 0.35, "A2S_lite": 0.15, "TAST": 0.20, "AMT": 0.30}
 
 
 def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
-                    mix: dict | None = None):
+                    mix: dict | None = None, report: dict | None = None):
     """
     R-S11.2:按混比采样 (utt_id, dialect),不按数据集自然占比。
     available_by_utt: {utt_id: [可用 dialect]}。
     返回一个 epoch 的采样列表 [(utt_id, dialect)],总量 ≈ utt 数。
+    mix:可从配置注入(DIALECT_MIX 只是缺省),便于按数据实况调混比。
+    report:若传入 dict,填充每个 dialect 的 {pool_size, quota, oversample_ratio}——
+      小池被有放回过采样多少倍是数据多样性风险(AMT 池小却配大额=同曲反复),必须可见不静默。
 
     修复说明:旧实现"逐 utt 按其可用 dialect 的相对权重选一个"——当可用性分布偏斜时
     (MAESTRO 只有 AMT、占语料大头),epoch 的 dialect 分布=数据自然占比,直接违反
@@ -37,6 +40,9 @@ def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
         while len(take) < quota:                           # 小池按混比过采样(有放回)
             take.append(rng.choice(pool))
         out.extend((u, d) for u in take)
+        if report is not None:
+            report[d] = {"pool_size": len(pool), "quota": quota,
+                         "oversample_ratio": round(quota / max(len(pool), 1), 2)}
     rng.shuffle(out)
     return out
 

@@ -37,26 +37,40 @@ def notes_to_intervals(notes: list[dict]):
 
 
 def note_f1(ref_notes: list[dict], est_notes: list[dict],
-            onset_tolerance: float = 0.05) -> dict:
+            onset_tolerance: float = 0.05, offset_ratio: float = 0.2,
+            offset_min_tolerance: float = 0.05) -> dict:
     """
     R-S13.1:note F1,onset 50ms 容差。用 mir_eval.transcription。
-    返回 {precision, recall, f1, n_ref, n_est}。
+    返回 {precision, recall, f1, n_ref, n_est, precision_off, recall_off, f1_off}。
+
+    论文 Table 3 的 note F1 是两套并列的:onset-only(只对 onset+pitch)与
+    onset+offset(还要求 offset 在 max(offset_min_tolerance, offset_ratio×时长) 内)。
+    只报 onset-only 会系统性地【偏乐观】——offset 完全错也算命中。这里两套都算,
+    f1 仍为 onset-only(向后兼容既有调用),f1_off 为带 offset 的严格版,供论文对照。
     """
     import mir_eval
-    import numpy as np
     ref_int, ref_p = notes_to_intervals(ref_notes)
     est_int, est_p = notes_to_intervals(est_notes)
     if len(ref_int) == 0 and len(est_int) == 0:
-        return {"precision": 1.0, "recall": 1.0, "f1": 1.0, "n_ref": 0, "n_est": 0}
+        return {"precision": 1.0, "recall": 1.0, "f1": 1.0, "n_ref": 0, "n_est": 0,
+                "precision_off": 1.0, "recall_off": 1.0, "f1_off": 1.0}
     if len(ref_int) == 0 or len(est_int) == 0:
         return {"precision": 0.0, "recall": 0.0, "f1": 0.0,
-                "n_ref": len(ref_int), "n_est": len(est_int)}
+                "n_ref": len(ref_int), "n_est": len(est_int),
+                "precision_off": 0.0, "recall_off": 0.0, "f1_off": 0.0}
     # onset-only 匹配(不看 offset,pitch 需一致)
     p, r, f, _ = mir_eval.transcription.precision_recall_f1_overlap(
         ref_int, ref_p, est_int, est_p,
         onset_tolerance=onset_tolerance, offset_ratio=None)
+    # onset+offset 匹配(offset 也要在容差内)
+    po, ro, fo, _ = mir_eval.transcription.precision_recall_f1_overlap(
+        ref_int, ref_p, est_int, est_p,
+        onset_tolerance=onset_tolerance, offset_ratio=offset_ratio,
+        offset_min_tolerance=offset_min_tolerance)
     return {"precision": round(p, 4), "recall": round(r, 4), "f1": round(f, 4),
-            "n_ref": len(ref_int), "n_est": len(est_int)}
+            "n_ref": len(ref_int), "n_est": len(est_int),
+            "precision_off": round(po, 4), "recall_off": round(ro, 4),
+            "f1_off": round(fo, 4)}
 
 
 # ---------------------------------------------------------------- bootstrap CI(R-S13.1)

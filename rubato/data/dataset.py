@@ -16,6 +16,7 @@ batch 契约(与 rubato/model/train.py:training_step_logic 一致):
      spm 真实模型、tiling 的音频补零×预设链次序(R-S4.5)。见 LOCAL_VERIFICATION.md D 步。
 """
 from __future__ import annotations
+import random
 import re
 from pathlib import Path
 
@@ -218,7 +219,8 @@ class RubatoDataset:
     """
     def __init__(self, utts: list[dict], labels: dict, tokenizer,
                  seed: int = 20260706, sr: int = 16000,
-                 alpha: float = 0.25, train: bool = True):
+                 alpha: float = 0.25, train: bool = True,
+                 dialect_mix: dict | None = None):
         self.utts = {u["utt_id"]: u for u in utts}
         self.labels = labels
         self.tok = tokenizer
@@ -226,6 +228,8 @@ class RubatoDataset:
         self.sr = sr
         self.alpha = alpha
         self.train = train
+        self.dialect_mix = dialect_mix          # None → sampling.DIALECT_MIX 缺省;可从配置注入
+        self.last_mix_report: dict = {}         # 每 epoch 的池大小/配额/过采样倍数,给日志看
         self._plan: list[tuple[str, str]] = []
         self.set_epoch(0)
 
@@ -243,7 +247,10 @@ class RubatoDataset:
         self.epoch = epoch
         av = self._available()
         if self.train:
-            self._plan = dialect_sampler(av, self.seed, epoch)
+            self.last_mix_report = {}
+            self._plan = dialect_sampler(av, self.seed, epoch,
+                                         mix=self.dialect_mix,
+                                         report=self.last_mix_report)
         else:
             # eval:每 utt 每可用 dialect 各一次(确定性,不采样)
             self._plan = [(u, d) for u, ds in sorted(av.items()) for d in ds]
@@ -293,7 +300,13 @@ class RubatoDataModule:
         meta = self.train_ds.sample_meta()
         idx_of = {(u, d): i for i, (u, d) in enumerate(self.train_ds._plan)}
         samples = [{"utt_id": u, "dialect": d, "dur_s": s} for u, d, s in meta]
-        for batch_samples in bucket_batches(samples, self.max_batch_sec):
+        batches = bucket_batches(samples, self.max_batch_sec)
+        # bucket_batches 按时长排序装桶,返回顺序恒为短→长。若照此逐 epoch 产出,
+        # 等于固定的长度课程且跨 epoch 零随机 —— 会给优化引入方向性偏置。
+        # 桶【内部】保持长度同质(算力效率),只把桶的【顺序】按 epoch 确定性打乱。
+        rng = random.Random((self.train_ds.seed ^ (epoch * 0x9E3779B1)) & 0xFFFFFFFF)
+        rng.shuffle(batches)
+        for batch_samples in batches:
             items = []
             for s in batch_samples:
                 i = idx_of[(s["utt_id"], s["dialect"])]

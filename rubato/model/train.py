@@ -30,7 +30,19 @@ def build_optimizer(model, cfg: dict):
     for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
-        (enc_params if name.startswith("encoder") else other_params).append(p)
+        # 声学 encoder 归组:匹配点分路径里独立的 'encoder' 段(命中 'encoder.*' 与
+        # 'model.encoder.*',但不误收 'transf_encoder.*' 那个解码侧模块)。
+        # 旧写法 name.startswith("encoder") 在 NeMo 把模型包一层(名字变 'model.encoder.')
+        # 时会【静默】把 encoder 全划进 other_params,热启动差分 lr 失效且不报错。
+        is_enc = "encoder" in name.split(".")
+        (enc_params if is_enc else other_params).append(p)
+
+    # 热启动的核心就是给 encoder 降载 lr;encoder 组为空 = 差分 lr 名存实亡,必须炸响不静默。
+    if not enc_params:
+        sample = [n for n, _ in model.named_parameters()][:12]
+        raise ValueError(
+            "build_optimizer:未匹配到任何 encoder 参数,差分学习率会退化为全模型同 lr。"
+            f"请检查参数命名(样本 {sample})并调整归组规则。")
 
     opt = torch.optim.AdamW([
         {"params": enc_params, "lr": cfg.get("lr_encoder", 1e-4)},

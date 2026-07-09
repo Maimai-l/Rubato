@@ -81,19 +81,20 @@ def _normalize_xmlid(xid: str) -> str:
 
 
 def _build_match_index(xmlid_pos: dict) -> dict:
-    """为宽松匹配建索引:归一化 id → 原 id(冲突时保留首个)。"""
+    """为宽松匹配建索引:归一化 id → 原 id(冲突时保留首个)。
+    不再建 __tail__ 末段索引 —— 末段碰撞率高、会【静默错配】(错锚点比丢锚点危害大,
+    TimeMap 会平滑地错),已删(见 review 三)。"""
     idx = {}
     for k in xmlid_pos:
         nk = _normalize_xmlid(k)
         idx.setdefault(nk, k)
-        # 也索引末段(如 'a-b-c' → 'c'),覆盖 TSV 只给局部 id 的情况
-        tail = k.split("-")[-1]
-        idx.setdefault(f"__tail__{tail}", k)
     return idx
 
 
 def match_xmlid(align_id: str, xmlid_pos: dict, match_idx: dict) -> str | None:
-    """多策略把对齐记录的 xml_id 映射到乐谱位置表的键。返回命中的键或 None。"""
+    """多策略把对齐记录的 xml_id 映射到乐谱位置表的键。返回命中的键或 None。
+    只保留【确定性】策略(精确 / 剥和弦序号 / 归一化);删了高碰撞的末段兜底,
+    宁可丢锚点也不静默错配。"""
     if align_id in xmlid_pos:                         # 1. 精确
         return align_id
     stripped = _strip_chord_suffix(align_id)          # 2. 剥和弦序号:'n2-1'→'n2'(真实 nASAP 主路径)
@@ -105,10 +106,28 @@ def match_xmlid(align_id: str, xmlid_pos: dict, match_idx: dict) -> str | None:
     nk2 = _normalize_xmlid(stripped)
     if nk2 in match_idx:                              # 4. 剥和弦序号后再归一化
         return match_idx[nk2]
-    tail = align_id.split("-")[-1]
-    if f"__tail__{tail}" in match_idx:                # 5. 末段相等(其他方言兜底)
-        return match_idx[f"__tail__{tail}"]
     return None
+
+
+def _longest_nondecreasing_idx(vals: list) -> list:
+    """最长非降子序列的下标(O(n²) DP,nASAP 单曲锚点数有界,足够)。"""
+    n = len(vals)
+    if n == 0:
+        return []
+    dp = [1] * n
+    par = [-1] * n
+    best = 0
+    for i in range(n):
+        for j in range(i):
+            if vals[j] <= vals[i] and dp[j] + 1 > dp[i]:
+                dp[i], par[i] = dp[j] + 1, j
+        if dp[i] > dp[best]:
+            best = i
+    out, k = [], best
+    while k != -1:
+        out.append(k)
+        k = par[k]
+    return out[::-1]
 
 
 # ---------------------------------------------------------------- TimeMap 构建(R-S7.2)
@@ -143,17 +162,16 @@ def build_timemap(alignment: list[dict], xmlid_pos: dict,
         by_pos[pos] = min(sec, by_pos[pos]) if pos in by_pos else sec
     anchors = sorted(by_pos.items(), key=lambda kv: kv[0])
 
-    # 演奏时间单调化:回跳点剔除(保留单调不降的最长前缀式过滤)
-    mono = []
-    last_sec = float("-inf")
-    for pos, sec in anchors:
-        if sec < last_sec:
-            stats["dropped_nonmonotone"] += 1
-            continue
-        mono.append((pos, sec))
-        last_sec = sec
+    # 演奏时间单调化:回跳点剔除。改用【最长非降子序列】而非贪心前缀 ——
+    # 贪心前缀在开头有个别错锚(演奏时间偏大)时会误删其后全部正确锚点(见 review 三);
+    # LIS 保留全局最多的自洽锚点,单个离群点不再连累后续。
+    secs = [sec for _pos, sec in anchors]
+    keep = set(_longest_nondecreasing_idx(secs))
+    mono = [anchors[i] for i in range(len(anchors)) if i in keep]
+    stats["dropped_nonmonotone"] = len(anchors) - len(mono)
 
     stats["anchors"] = len(mono)
+    # 锚点密度门:锚点太少 → TimeMap 线性外插会把整曲时间轴拉歪,宁可不产图。
     if len(mono) < min_anchors:
         return None, stats
 
