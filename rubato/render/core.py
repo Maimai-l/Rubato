@@ -29,6 +29,41 @@ def _pick(weights: dict, u: float):
     return next(iter(weights))
 
 
+def events_to_midi(events: list[dict], pedal: list, out_path: str,
+                    tempo_bpm: float = 120.0, ppq: int = 480) -> str:
+    """
+    演奏事件(秒)→ MIDI 文件。S5(VN/humanize)把演奏事件渲成音频前的一步:
+    humanize_events / VN 产出 [{pitch,on,off,vel}] + pedal[(sec,down)] → .mid,
+    再交给 render_midi_to_wav44。用固定 tempo 把秒换算成 tick(秒本身已含表现性时序,
+    tempo 只是 tick 标度,不改听感)。踏板写 CC64。
+    """
+    import mido
+    tpb = ppq
+    spb = 60.0 / tempo_bpm                              # 秒/拍
+    def sec_to_tick(s): return int(round(s / spb * tpb))
+    ev = []                                            # (tick, order, msg)
+    for n in events:
+        ev.append((sec_to_tick(n["on"]), 1, mido.Message(
+            "note_on", note=int(n["pitch"]), velocity=int(n.get("vel", 64)))))
+        ev.append((sec_to_tick(n["off"]), 0, mido.Message(
+            "note_off", note=int(n["pitch"]), velocity=0)))
+    for s, down in pedal:
+        ev.append((sec_to_tick(s), 0, mido.Message(
+            "control_change", control=64, value=127 if down else 0)))
+    ev.sort(key=lambda x: (x[0], x[1]))                # 同 tick:off/CC 先于 on
+    mid = mido.MidiFile(ticks_per_beat=tpb)
+    track = mido.MidiTrack(); mid.tracks.append(track)
+    track.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(tempo_bpm)))
+    prev = 0
+    for tick, _o, msg in ev:
+        msg.time = max(0, tick - prev)
+        prev = tick
+        track.append(msg)
+    pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    mid.save(out_path)
+    return out_path
+
+
 def assign_source_and_preset(utt_id: str, sources_cfg: dict, presets_cfg: dict):
     """返回 (source_id, preset_id),可复现。"""
     seed = presets_cfg.get("seed", 0)

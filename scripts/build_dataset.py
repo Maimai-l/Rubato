@@ -24,10 +24,13 @@ from rubato.data.assemble import assemble, partition_by_split
 ROOT = Path(r"D:\vscode_projects\ee_download")
 WORK = ROOT / "work"
 
-# 三份 labels.jsonl(与 s5/s7/gen_amt 的输出对齐)
+# labels.jsonl 来源(与 s5/s5_vn/s7/gen_amt 的输出对齐)。
+#   pdmx_perf(s5_vn_render):表现性音频 + TAST,行内带 audio_path。← 有它就优先,含 TAST。
+#   pdmx_a2s(s5 文本):仅 A2S/A2S_lite 文本(TAST=null),需配 S4 直排音频。
 SOURCES = [
-    {"path": str(WORK / "pdmx_a2s_labels.jsonl"), "kind": "pdmx",    "domain": "synth"},
-    {"path": str(WORK / "nasap_labels.jsonl"),    "kind": "nasap",   "domain": "real"},
+    {"path": str(WORK / "pdmx_perf_labels.jsonl"), "kind": "pdmx", "domain": "synth"},
+    {"path": str(WORK / "pdmx_a2s_labels.jsonl"),  "kind": "pdmx", "domain": "synth"},
+    {"path": str(WORK / "nasap_labels.jsonl"),     "kind": "nasap",   "domain": "real"},
     {"path": str(WORK / "maestro_amt_labels.jsonl"), "kind": "maestro", "domain": "real"},
 ]
 
@@ -75,10 +78,19 @@ def resolve_audio(utt_id: str, kind: str, row: dict):
                 若 nasap 标签行未带音频引用,这里返回 None 会把 nasap 全判 no_audio ——
                 需要在 s7 的标签行里加上 audio 引用,或在此按你的 nasap↔flac 映射补全。
     """
+    # 行内已带 audio_path(s5_vn_render / s7 写入)→ 直接用,最可靠。
+    ref = row.get("audio_path")
+    if ref:
+        d = _flac_dur(ref)
+        return (ref, d) if d is not None else None
     if kind == "pdmx":
-        p = WORK / "pdmx_audio" / f"{utt_id}.flac"
-        d = _flac_dur(str(p))
-        return (str(p), d) if d is not None else None
+        # 无 audio_path = 文本 s5 的行 → 找 S4 直排音频(仅 A2S/A2S_lite,该行 TAST 本就为 null)。
+        for ext in (".opus", ".flac"):
+            p = WORK / "pdmx_audio" / f"{utt_id}{ext}"
+            d = _flac_dur(str(p))
+            if d is not None:
+                return (str(p), d)
+        return None
     if kind == "maestro":
         mid = row.get("midi_file")
         audio_rel = _maestro_csv_map().get(mid)

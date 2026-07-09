@@ -26,7 +26,19 @@
 - `write_text/write_jsonl`:都 `mkdir(parents=True)`,目录缺失会建而非静默失败。✓
 - `s3_filter_pdmx` / `s3_minhash_leakage`:都真写 manifest。✓
 
+## 第二轮(用户追问"为什么不用 VN/PDMX 了")
+
+| # | 隐患 | 严重度 | 状态 |
+|---|---|---|---|
+| 7 | **VirtuosoNet + humanize 从未实现**:SPEC 设计了 S5(表现性渲染 R-S5.1-5.9)+ humanize 兜底(R-S5.7),但**全树无代码**,只有 S4 直排落地。后果:PDMX 只能供 A2S/A2S_lite,**TAST 恒 null**,音频全恒速节拍器味,模型学不到"从表现性演奏恢复乐谱"(论文 PDMX-TAST 511k 全缺) | 高 | 补 `rubato/render/humanize.py`(R-S5.7,`tests_humanize.py` 15 项)+ `render.events_to_midi` + `scripts/s5_vn_render.py`(humanize 默认 / VN 钩子 / R-S5.9 回落) |
+| 8 | **我的"精简路径"文档把 PDMX 渲染漏成"可跳过"**:CORPUS_REGEN 只写文本/tokenizer 半程,没带 S4/S5 音频渲染;kickoff 又承诺了四方言混比(含 PDMX-TAST),而脚本产不出 —— 承诺与能力对不上 | 高 | CORPUS_REGEN 补 §1.1b(S4+S5 渲染 + audio↔TAST 同源不变量);EXECUTOR_KICKOFF 改成"PDMX 必须渲染";点明 humanize 是 CPU 兜底、VN 可选 |
+| 9 | **audio↔TAST 必须同源**:若用 §1.1 的恒速估算 TAST 配 S4 直排音频,时间戳与音频不匹配 = 训练噪声 | 中(隐蔽) | 钉死:TAST 只在渲染处(s5_vn_render)产,与音频用同一 tmap;文本 s5 故意 TAST=null 并注释说明 |
+
+**对用户问题的正面回答**:不是"不用 VN/PDMX"—— 设计一直要用。真相是 (a) VN/humanize 根本没被实现过(只 S4),
+(b) 我的精简文档把 PDMX 音频渲染漏成了可选。两处都已纠:humanize 补齐并测,VN 驱动写好(执行端 py312 跑),
+文档把"PDMX 必须渲染 + audio↔TAST 同源"钉死。
+
 ## 结论
-报出来的 s7 是这一类里"最先被踩到"的一个,不是唯一。真正会拦住训练的是 #4(胶水缺失),
-已补齐并测。#2/#3 是过程顺序坑,靠文档点名 + 顺序钉死消除。所有改动只碰脚本/文档/新增纯逻辑模块,
-19→21 个测试套件全绿。
+s7 是这一类里"最先被踩到"的一个,不是唯一。会拦住训练的是 #4(装配胶水)和 #7(S5 从未实现);
+两者都已补齐并测。#2/#3/#8/#9 是过程/文档坑,靠点名脚本 + 钉死顺序与不变量消除。
+所有改动只碰脚本/文档/新增带测纯逻辑模块,测试 20→22 套件全绿。
