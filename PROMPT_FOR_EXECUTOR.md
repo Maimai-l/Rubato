@@ -48,8 +48,9 @@ EXECUTOR_CORRECTIONS.md → LOCAL_VERIFICATION.md。读完先复述"哪个源喂
   0b. `scripts/s5_pdmx_a2s_labels.py`(全 manifest,overlap)产 A2S/A2S_lite 文本 →
       并入 nASAP 的 A2S/A2S_lite,装配 `tok_corpus.txt`(**只 A2S+A2S_lite,不去重**,见 CORPUS_REGEN §2)。
   0b'. **PDMX 渲染音频(训练用,别漏,见 CORPUS_REGEN §1.1b)**:
-      S4 直排(`s4_batch_render.py`)+ S5 表现性(`s5_vn_render.py --engine humanize`,产音频+匹配 TAST)。
-      不渲染 = PDMX 训练 0 贡献。VN 想上再 `--engine vn`(接 vn_perform 钩子)。
+      S4 直排(`s4_batch_render.py`)+ S5【你本地的 VirtuosoNet】(`s5_vn_render.py`,调 virtuoso CLI,
+      `--csv`→tmap→表现性音频+匹配 TAST)。不渲染 = PDMX 训练 0 贡献。
+      humanize 仅 VN 失败兜底(`--allow-humanize-fallback`,R-S5.9),默认不用。
   0c. `rubato.data.tokenizer.train_unigram(corpus_files, model_prefix, vocab_size=8000)`
       (user_defined 从 vocab_spec.json 自动注入)。
       判据(两条并列全中):① vocab **逼近 8000** 且 reconcile ok==True(learnable==3571),

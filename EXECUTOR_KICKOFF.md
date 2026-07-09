@@ -12,9 +12,10 @@
 这轮的范围(照此,别扩张):
 - 热启动:build_model(from_scratch=False,默认)。不要从头训。
 - 四方言混比:A2S .35 / A2S_lite .15 / TAST .20 / AMT .30。
-- **PDMX 是主力源,必须渲染音频进训练**:S4 直排(A2S/A2S_lite)+ S5 `s5_vn_render.py --engine humanize`
-  (表现性音频 + 匹配 TAST)。humanize 是纯 CPU,不需要 VN;要更像论文再开 `--engine vn`。
+- **PDMX 是主力源,必须渲染音频进训练**:S4 直排(A2S/A2S_lite)+ S5 用【你本地的 VirtuosoNet】
+  (`scripts/s5_vn_render.py`,调你的 `virtuoso` CLI,`--csv` 拿时间建 tmap → 表现性音频 + 匹配 TAST)。
   【别漏这步 —— 不渲染 PDMX = 丢掉最大的源,只剩 nASAP+MAESTRO。】
+  humanize 仅在 VN 挂掉的曲上兜底(`--allow-humanize-fallback`,SPEC R-S5.9),默认不用。
 - 先不碰的只有:PDMX→AMT、TAST_lite/AMT_lite/DBD —— 那些是额外对齐项,能力已就绪但这轮不铺开。
 
 执行顺序:

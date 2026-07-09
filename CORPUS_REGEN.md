@@ -83,23 +83,25 @@ python scripts/s5_pdmx_a2s_labels.py
 这一步此前被我的文档漏掉了,补回:
 
 - **S4 直排(恒速)**:`scripts/s4_batch_render.py` / `s4_parallel.py` → PDMX 直排音频 → 配 §1.1 的 A2S/A2S_lite。
-- **S5 表现性(含 TAST)**:`scripts/s5_vn_render.py` → 每段取一份【演奏】→ 渲音频 + **匹配的 TAST**。
-  - `--engine humanize`(默认,纯 CPU,SPEC R-S5.7):OU 速度 + onset/力度抖动,tmap 是真值。
-  - `--engine vn`(SPEC R-S5.1-5.6 主路径,需 py312 的 VirtuosoNet):在 `s5_vn_render.py` 的
-    `vn_perform()` 里接你的 `InferenceModel`(**【EXECUTOR】** 钩子);VN 失败自动回落 humanize(R-S5.9)。
+- **S5 表现性(含 TAST)—— 用你本地的 VirtuosoNet**:`scripts/s5_vn_render.py`。
+  它调你的 `virtuoso` CLI(VIRTUOSO_GUIDE §2/§4)`--csv` 拿音符级时间(xml_idx,start,…),
+  据此建 tmap(SPEC R-S5.6 主路径,复用 `build_timemap`),再把 VN 演奏 MIDI 渲成音频、按段切。
 
 ```bash
-python scripts/s5_vn_render.py --engine humanize \
+python scripts/s5_vn_render.py \
   --out-labels work/pdmx_perf_labels.jsonl --out-corpus work/a2s_corpus.txt \
   --out-audio-dir work/pdmx_audio
-# 产:每段 work/pdmx_audio/<utt>.opus + 标签行(含 audio_path + A2S/A2S_lite/【TAST】)。看末行 TAST=... 应 >0。
+# 产:每段 work/pdmx_audio/<utt>.opus + 标签行(含 audio_path + A2S/A2S_lite/【TAST】)。看末行 vn_ok / TAST 应 >0。
+# CLI 每曲一次;要复用 172MB 模型实例(R-S5.1)可把 vn_infer 换成 GUIDE §5 的 InferenceModel 循环。
 ```
 
-> **关键不变量:TAST 时间戳与音频必须同源(同一 tmap)。** 所以 TAST 只能在渲染处(§1.1b)产,
-> 不能用 §1.1 的恒速估算 —— 那与真实音频不匹配,拿去训 = 时间戳噪声。这就是为何 §1.1 的 TAST=null。
+> **关键不变量:TAST 时间戳与音频必须同源(同一 tmap)。** 所以 TAST 只在渲染处产(用 VN 的 CSV 时间),
+> 不能用 §1.1 的恒速估算 —— 那与真实音频不匹配 = 时间戳噪声。这就是 §1.1 的 TAST 恒 null 的原因。
 >
-> **VirtuosoNet 之前从没被实现过**(SPEC 设计了 S5 但只有 S4 落地)。humanize 是钦定的 CPU 兜底,
-> 现已补上并测(`tests_humanize.py`),没有 VN 也能让 PDMX 供 TAST + 表现性时序。要更接近论文再开 `--engine vn`。
+> **为什么之前"没有 VN 管线":SPEC 设计了 S5(R-S5.1-5.9)却从未落地脚本,历史上只有 S4 直排。**
+> `s5_vn_render.py` 现在补上,直接调你本地的 virtuoso(不是重写它)。
+> humanize(`rubato/render/humanize.py`)**只是 SPEC R-S5.9 的失败兜底**(VN 超时/非零退出/无 CSV 的曲),
+> 用 `--allow-humanize-fallback` 才启用,默认关。它不是 VN 的替代,VN 就是管线。
 
 ### 1.2 nASAP → A2S / A2S_lite / TAST（`scripts/s7_full_nasap.py`）
 
