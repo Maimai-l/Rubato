@@ -182,17 +182,25 @@ print("corpus lines:", n, "->", OUT)
 
 ## 3. 重训 tokenizer + 验收门
 
+> **vocab 上不去的根因已用 code 定位并修好(拉最新代码即可,别自己调参)**:
+> SentencePiece 默认 `split_by_number=True` / `split_by_unicode_script=True` 会在
+> "字母↔数字/脚本"边界硬切,把 `C4→C,4`、`1/16→1,/,16`、`F#3→F,#,3` 砸碎 ——
+> 实测 achievable vocab 从 8000 塌到 427/5148、字形 100% 分裂。`train_unigram` 现在已把这两个
+> (加 `split_digits`)关掉,沙盒验证 vocab 直接 8000 / learnable 3571 / 字形全原子 / 往返无损。
+> **不要**用 `split_by_whitespace=False` 绕(那会让 piece 跨小节线,破坏并行解码);保持 True。
+> `check_glyph_coverage` 也修了(不再把词首符 `▁` 误当分裂,否则会假报 split_rate≈0.9)。
+
 ```python
 from rubato.data.tokenizer import train_unigram, check_glyph_coverage, reconcile
 res = train_unigram(
     corpus_files=[r"D:\vscode_projects\ee_download\work\tok_corpus.txt"],
     model_prefix=r"D:\vscode_projects\ee_download\work\rubato_spm",
-    vocab_size=8000,                # 与论文同量级语料 → 8000 应可达
+    vocab_size=8000,                # 拉最新代码后应稳定命中 8000
     spec_path="configs/vocab_spec.json",
 )
-print(res)
+print(res)                          # 期望 vocab_size=8000, fell_back=False, warning=None
 cov = check_glyph_coverage(r"D:\vscode_projects\ee_download\work\rubato_spm.model")
-print(cov)
+print(cov)                          # 期望 split_rate<0.30
 ```
 
 **验收（两条并列，都要过）：**

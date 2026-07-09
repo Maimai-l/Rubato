@@ -82,21 +82,18 @@ def train_unigram(corpus_files: list[str], model_prefix: str,
       byte_fallback / character_coverage=1.0 / split_by_whitespace
     user_defined_symbols 从 vocab_spec 注入(R-S9.3)。
 
-    ⚠ 词表可达性(问题#3 复盘,已纠偏):A2S 文本的【可学习 piece 上限由语料的
-    distinct 子串数决定】。论文用【同一个 PDMX】达到 3571 可学习 piece / vocab 8000。
-    我们把 composer 弱智过滤去掉后 PDMX 池已恢复到 ~53k 曲(不是早期误判的 12-20k),
-    语料规模与论文同量级 —— 所以 vocab 8000 是【应当可达】的目标,不是奢望。
-    → 因此:若 allow_fallback 真的触发(SentencePiece 报 "vocab_size too high, set <= N"),
-      在【全池】语料下这是【红旗】,不是"缩水固有结果"——几乎一定是语料又在某处被丢:
-      查 s5 是否吃了全 manifest(53k 而非 16k)、是否误按 work_key 给 tokenizer 语料去重、
-      是否漏并 nASAP A2S/A2S_lite。先排查再谈回退,不要合理化一个偏小的词表。
-    → allow_fallback 只是【不让流程硬卡死】的安全网,不是可接受的终态;一旦触发必须
-      连同实际 distinct 子串数上报,由用户判断是数据 bug 还是真到规模上限。
-    → 验收看两条并列:①vocab 逼近 8000(与论文同量级语料应达到);
-      ②check_glyph_coverage 的 split_rate<0.30(常见字形原子)。两条都要,不是二选一。
-    → 扩/保语料的正确做法:①并入 nASAP A2S/A2S_lite/TAST 文本(论文语料含它);
-      ②重叠切段(segment_score_overlap);③tokenizer 语料用【未按 work_key 去重】的
-      训练侧全部曲(work_key 去重只服务 train/val/test 隔离,绝不用来砍 tokenizer 语料)。
+    ⚠ 词表上不去的【真正根因,已用 code 定位】(问题#3 终案):
+    不是语料不够,而是 SentencePiece 的两个默认切分把 InterMo 的原子字形砸碎——
+      split_by_number(默认 True):在"字母↔数字"边界硬切 → C4→C,4;F#3→F,#,3;
+      split_by_unicode_script(默认 True):在脚本边界硬切,同样砸 C4/1/16。
+    实测(diag_tok.py):同一份语料,只开着这两个默认 → achievable vocab 塌到 427/5148、
+    每个音高字形 100% 分裂;把这两个关掉(本函数已关)→ vocab 直接到 8000、learnable=3571、
+    C4/F#3/1/16/|3/4k-4/PR:C4/N60 全部单 piece、往返无损。
+    InterMo 是闭合 ASCII 字母表,音高/interval/小节线本就是连续 alnum+标点串,绝不能按数字/脚本切。
+    → 所以现在 vocab 8000 是【应当且已验证可达】的。若仍触发 fallback,才回头查语料
+      (s5 是否吃全 manifest、是否误按 work_key 去重、是否漏并 nASAP A2S/A2S_lite)。
+    → 验收两条并列:①vocab 达 8000(learnable==3571);②check_glyph_coverage 的
+      split_rate<0.30(该函数已修:不再把 SentencePiece 词首符 '▁' 误计为分裂)。
     """
     import sentencepiece as spm
     spec = build_vocab_spec(spec_path)
@@ -110,7 +107,14 @@ def train_unigram(corpus_files: list[str], model_prefix: str,
             "normalization_rule_name": "identity",
             "byte_fallback": True,
             "character_coverage": 1.0,
-            "split_by_whitespace": True,
+            "split_by_whitespace": True,     # 论文:pretokenized at interval boundaries(单元内合并,跨单元不合并)
+            # 【关键修复】SentencePiece 默认 split_by_number / split_by_unicode_script = True,
+            # 会在"字母↔数字/脚本"边界硬切,把 InterMo 的原子字形砸碎:C4→C,4;1/16→1,/,16;F#3→F,#,3。
+            # 后果实测:achievable vocab 从 8000 塌到 ~427/5148,且每个音高字形 100% 分裂(split_rate≈0.94)。
+            # InterMo 是闭合 ASCII 字母表,音高/interval/小节线本就是连续 alnum+标点串,必须关掉这两个切分。
+            "split_by_number": False,
+            "split_by_unicode_script": False,
+            "split_digits": False,
             "user_defined_symbols": spec["user_defined_symbols"],
             "train_extremely_large_corpus": True,
             "unk_id": 0, "bos_id": 1, "eos_id": 2,
@@ -135,11 +139,10 @@ def train_unigram(corpus_files: list[str], model_prefix: str,
     rec = reconcile(got, len(spec["user_defined_symbols"]))
     warning = None
     if got != vocab_size:
-        warning = (f"⚠ 实际词表 {got} < 目标 {vocab_size}(语料 distinct 子串不足)。"
-                   f"论文用同一 PDMX 达到 3571 可学习 piece;全池语料下出现此回退是【红旗】,"
-                   f"极可能语料又在某处被丢:核对 s5 是否吃全 manifest(~53k 而非 16k)、"
-                   f"tokenizer 语料是否被误按 work_key 去重、是否漏并 nASAP A2S/A2S_lite/TAST。"
-                   f"请连同 distinct 子串数一并上报,不要把偏小词表当作可接受终态。")
+        warning = (f"⚠ 实际词表 {got} < 目标 {vocab_size}。已确认根因是 split_by_number/"
+                   f"split_by_unicode_script 砸碎字形(本函数已关这两个)——若关掉后仍回退,"
+                   f"才是语料问题:核对 s5 是否吃全 manifest(~53k)、是否误按 work_key 去重、"
+                   f"是否漏并 nASAP A2S/A2S_lite。请连同 distinct 子串数上报,别把偏小词表当终态。")
     return {"vocab_size": got, "requested": vocab_size, "fell_back": fell_back,
             "reconcile": rec, "warning": warning}
 
@@ -171,13 +174,17 @@ def check_glyph_coverage(spm_model_path: str, probes: list[str] | None = None) -
     probes = probes or _PROBE_GLYPHS
     single, split, examples = 0, 0, []
     for g in probes:
-        pieces = sp.encode(g, out_type=str)
+        raw = sp.encode(g, out_type=str)
+        # 剔除 SentencePiece 的词首边界符 '▁'(U+2581):它是 add_dummy_prefix 加的,
+        # 不是字形碎片。旧实现把 ['▁','C4'] 当成 2 片 → 误报"分裂"(即便 C4 本身是单 piece)。
+        pieces = [p.lstrip("▁") for p in raw]
+        pieces = [p for p in pieces if p]
         if len(pieces) == 1:
             single += 1
         else:
             split += 1
             if len(examples) < 10:
-                examples.append({g: pieces})
+                examples.append({g: raw})
     return {"n_probes": len(probes), "single_piece": single, "split": split,
             "split_rate": round(split / max(len(probes), 1), 3),
             "examples_split": examples}
