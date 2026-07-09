@@ -125,6 +125,14 @@ def process_piece(xml_path: str, alignment_rows: list[dict]) -> tuple[list[dict]
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--offset", type=int, default=0)
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--out-labels", type=str, default="")
+    ap.add_argument("--out-corpus", type=str, default="")
+    args = ap.parse_args()
+
     print("=" * 70)
     print("S7 nASAP Full Dataset Processing")
     print("=" * 70)
@@ -138,6 +146,13 @@ def main():
     pieces = df[has_maestro].copy()
     print(f"Total rows: {len(df)}")
     print(f"Rows with maestro_audio_performance: {len(pieces)}")
+
+    # Apply offset/limit for parallel chunking
+    if args.offset or args.limit:
+        start = args.offset
+        end = args.offset + args.limit if args.limit else len(pieces)
+        pieces = pieces.iloc[start:end]
+        print(f"Chunk: rows {start}-{end} ({len(pieces)} pieces)")
 
     # Results tracking
     results = {
@@ -226,6 +241,21 @@ def main():
                 results["successful"] += 1
                 results["total_segments"] += len(label_rows)
 
+                # Write labels
+                if args.out_labels:
+                    results.setdefault("_label_fh", open(args.out_labels, "a", encoding="utf-8"))
+                    for lr in label_rows:
+                        results["_label_fh"].write(json.dumps(lr, ensure_ascii=False) + "\n")
+
+                # Write corpus (A2S + A2S_lite)
+                if args.out_corpus:
+                    results.setdefault("_corpus_fh", open(args.out_corpus, "a", encoding="utf-8"))
+                    for lr in label_rows:
+                        for d in ("A2S", "A2S_lite"):
+                            t = lr.get(d)
+                            if t and t.strip():
+                                results["_corpus_fh"].write(t.strip() + "\n")
+
                 # Count A2S chars
                 for lr in label_rows:
                     a2s = lr.get("A2S", "")
@@ -313,6 +343,12 @@ def main():
           f"(dropped_nomap={results['timemap_stats']['dropped_no_scorepos']}, "
           f"nonmonotone={results['timemap_stats']['dropped_nonmonotone']}, "
           f"anchors={results['timemap_stats']['anchors']})")
+    # Close file handles
+    if "_label_fh" in results:
+        results["_label_fh"].close()
+    if "_corpus_fh" in results:
+        results["_corpus_fh"].close()
+
     print(f"\nReport written to: {REPORT_PATH}")
 
 
