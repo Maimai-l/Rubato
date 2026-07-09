@@ -35,19 +35,27 @@ EXECUTOR_CORRECTIONS.md → LOCAL_VERIFICATION.md。读完先复述"哪个源喂
 
 ## 执行计划(严格按序,每步给我看硬判据数字 + push 到仓库,再进下一步)
 
-第0步 修地基(最重要,不做完不许训练):
+第0步 修地基(最重要,不做完不许训练)——**完整分步照 `CORPUS_REGEN.md` 做,这里只给纲要**:
+
+  ⚠ 前提:此前你跑的 ~18 万行语料与那版 tokenizer **已作废(stale)**。之后合入了三处
+     改文本字形/切分的修正(adapter `<` 再触键、D-06 小节线形式、字形对齐论文),
+     A2S/A2S_lite/TAST/AMT 文本全变了。**必须先重生成语料再训 tokenizer**,细节见 CORPUS_REGEN.md §0。
+
   0a. S3 全量过滤 PDMX → manifest_pieces.jsonl。过 pdmx.metadata_filter / license_ok /
-      work_key 去重 / build_blacklist(nASAP test + ASAP-Beyer 曲目进黑名单)。目标 12k–20k 曲。
-  0b. 对 0a 选出的曲(每 work_key 一首,不是随机 1000)跑 S4 渲染(Salamander 超时已修,
-      sfizz_flags 生效)+ scripts/s5_pdmx_a2s_labels.py 产 A2S 标签。
-      判据:work/a2s_corpus.txt ≥ 30 万行(当前 47,817 行 = 差约 10 倍)。
-  0c. rubato.data.tokenizer.train_unigram(corpus_files, model_prefix, vocab_size=8000)
-      (没有 user_defined_spec 参数;user_defined 从 vocab_spec.json 自动注入)。
-      判据:vocab==8000 且 reconcile ok==True learnable==3571 且
-      check_glyph_coverage.split_rate<0.30。三条全中才算过;达不到=语料还不够,回 0b 加曲。
-  0d. 用 0c 的真 8000 tokenizer 重新 build_model(canary, tokenizer, vocab_spec,
-      frontend_wav_paths=[3段真实wav])。判据:encoder_verify.ok==True、frontend 无结构错、
-      参数量 backbone 与原始 canary 一致。
+      work_key 去重 / build_blacklist(nASAP test + ASAP-Beyer 曲目进黑名单)。
+      **目标 ~5 万曲(composer 弱智过滤已删,`work_key_or_fallback` 兜底缺 meta 的曲)。
+      若只剩 1 万几 = 过滤又复活了,停下排查,别接受。**
+  0b. 对 0a 选出的曲跑 S4 渲染 + `scripts/s5_pdmx_a2s_labels.py`(全 manifest,overlap)产 A2S/A2S_lite。
+      再并入 nASAP 的 A2S/A2S_lite,装配 `tok_corpus.txt`(**只 A2S+A2S_lite,不去重**,见 CORPUS_REGEN §2)。
+  0c. `rubato.data.tokenizer.train_unigram(corpus_files, model_prefix, vocab_size=8000)`
+      (user_defined 从 vocab_spec.json 自动注入)。
+      判据(两条并列全中):① vocab **逼近 8000** 且 reconcile ok==True(learnable==3571),
+      ② check_glyph_coverage.split_rate<0.30。**触发 fallback(vocab 明显<8000)= 红旗**:
+      论文用同一 PDMX 达到 3571,几乎一定是语料又被丢了(0a 没吃全池 / 误去重 / 漏并 nASAP)——
+      回 CORPUS_REGEN §3 排查,**不要合理化偏小词表**。
+  0d. 用 0c 的真 8000 tokenizer `build_model(canary, tokenizer, vocab_spec,
+      frontend_wav_paths=[3段真实wav])`。判据:encoder_verify.ok==True、frontend 无结构错、
+      参数量 backbone 与原始 canary 一致。(从头训:`build_model(..., from_scratch=True)`,见 CORPUS_REGEN §5。)
 
 第0'步 修 #6(与第0步并行):
   跑 nASAP 管线,用 rubato.data.nasap_timemap.diagnose_match(alignment, xmlid_pos) 看匹配率。
@@ -64,6 +72,8 @@ EXECUTOR_CORRECTIONS.md → LOCAL_VERIFICATION.md。读完先复述"哪个源喂
 第2步 全量训练:四路数据按混比 A2S.35/A2S_lite.15/TAST.20/AMT.30,
   rubato.data.dataset.RubatoDataModule + rubato.model.train.train()。
   数据必须全部备齐再开,绝不边渲染边训练。
+  (可选,对齐论文更全:PDMX→AMT、TAST_lite/AMT_lite/DBD 方言、从头训——能力都已就绪,
+   开关与调用见 CORPUS_REGEN.md §5/§7;开哪些是算力取舍,由你/用户定。)
 
 ## 禁止事项
 - ❌ 用 <8000 的 tokenizer 建模型/训练(地基坏,全作废)
@@ -78,7 +88,7 @@ EXECUTOR_CORRECTIONS.md → LOCAL_VERIFICATION.md。读完先复述"哪个源喂
 - 一切对真实数据格式的适配(xml_id 桥接、路径映射、metadata schema)【必须 commit + push 进仓库】,
   不能只留本地——否则规划端下次更新会覆盖它(上个 agent 的 xml_id 修复就这么丢过)。
 - 数据产物(work/、labels、tokenizer.model、音频)不进 git,只留本地。
-- 收到规划端更新后先 git pull,再重跑 15 个 tests_*.py 确认没回退,再继续。
+- 收到规划端更新后先 git pull,再重跑全部 19 个 tests_*.py(应全绿,共 343 项)确认没回退,再继续。
 - 用脚本文件跑涉及模型的代码,不要 python -c 一行(NeMo 一行模式有 get_nemo_transformer 报错)。
 
 ## 汇报方式
