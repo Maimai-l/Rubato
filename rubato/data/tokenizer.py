@@ -82,18 +82,21 @@ def train_unigram(corpus_files: list[str], model_prefix: str,
       byte_fallback / character_coverage=1.0 / split_by_whitespace
     user_defined_symbols 从 vocab_spec 注入(R-S9.3)。
 
-    ⚠ 缩水规模的真实约束(问题#3 复盘):A2S 文本的【可学习 piece 上限由语料的
-    distinct 子串数决定】。缩水池(SPEC D4:12-20k 曲 → ~6万段 → ~56-90k 行)只能支撑
-    远少于 3571 的可学习 piece,vocab==8000 不可达,SentencePiece 会直接报
-    "vocab_size too high, set <= N"。这不是 bug,是缩水规模的固有结果。
-    → 真正该看的验收是 check_glyph_coverage 的 split_rate<0.30(常见字形是否原子),
-      不是 vocab==8000。词表小(~5k)但字形原子 = 模型可用,只是序列略长。
-    → allow_fallback=True:目标词表过高时自动回退到 SentencePiece 报的上限重训,
-      返回实际词表 + 显式 warning,不让流程卡死。
-    → 扩语料的安全杠杆(想逼近 8000):①并入 nASAP A2S/A2S_lite 文本(论文语料含它,
-      白拿 ~18M chars);②重叠切段(segment_score_overlap);③tokenizer 语料用【未按
-      work_key 去重】的训练侧全部曲(去重是给 train/val/test 隔离用的,不是给 tokenizer
-      语料用的)。仍不够则是缩水规模上限,需用户决策(见 EXECUTOR_CORRECTIONS §6b)。
+    ⚠ 词表可达性(问题#3 复盘,已纠偏):A2S 文本的【可学习 piece 上限由语料的
+    distinct 子串数决定】。论文用【同一个 PDMX】达到 3571 可学习 piece / vocab 8000。
+    我们把 composer 弱智过滤去掉后 PDMX 池已恢复到 ~53k 曲(不是早期误判的 12-20k),
+    语料规模与论文同量级 —— 所以 vocab 8000 是【应当可达】的目标,不是奢望。
+    → 因此:若 allow_fallback 真的触发(SentencePiece 报 "vocab_size too high, set <= N"),
+      在【全池】语料下这是【红旗】,不是"缩水固有结果"——几乎一定是语料又在某处被丢:
+      查 s5 是否吃了全 manifest(53k 而非 16k)、是否误按 work_key 给 tokenizer 语料去重、
+      是否漏并 nASAP A2S/A2S_lite。先排查再谈回退,不要合理化一个偏小的词表。
+    → allow_fallback 只是【不让流程硬卡死】的安全网,不是可接受的终态;一旦触发必须
+      连同实际 distinct 子串数上报,由用户判断是数据 bug 还是真到规模上限。
+    → 验收看两条并列:①vocab 逼近 8000(与论文同量级语料应达到);
+      ②check_glyph_coverage 的 split_rate<0.30(常见字形原子)。两条都要,不是二选一。
+    → 扩/保语料的正确做法:①并入 nASAP A2S/A2S_lite/TAST 文本(论文语料含它);
+      ②重叠切段(segment_score_overlap);③tokenizer 语料用【未按 work_key 去重】的
+      训练侧全部曲(work_key 去重只服务 train/val/test 隔离,绝不用来砍 tokenizer 语料)。
     """
     import sentencepiece as spm
     spec = build_vocab_spec(spec_path)
@@ -132,10 +135,11 @@ def train_unigram(corpus_files: list[str], model_prefix: str,
     rec = reconcile(got, len(spec["user_defined_symbols"]))
     warning = None
     if got != vocab_size:
-        warning = (f"实际词表 {got} < 目标 {vocab_size}(语料 distinct 子串不足)。"
-                   f"这是缩水规模固有结果,不是 bug。请以 check_glyph_coverage 的 "
-                   f"split_rate<0.30 为准;若字形原子则模型可用。要逼近 8000 需扩语料"
-                   f"(并入 nASAP A2S、重叠切段、不按 work_key 去重语料)或用户决策扩池。")
+        warning = (f"⚠ 实际词表 {got} < 目标 {vocab_size}(语料 distinct 子串不足)。"
+                   f"论文用同一 PDMX 达到 3571 可学习 piece;全池语料下出现此回退是【红旗】,"
+                   f"极可能语料又在某处被丢:核对 s5 是否吃全 manifest(~53k 而非 16k)、"
+                   f"tokenizer 语料是否被误按 work_key 去重、是否漏并 nASAP A2S/A2S_lite/TAST。"
+                   f"请连同 distinct 子串数一并上报,不要把偏小词表当作可接受终态。")
     return {"vocab_size": got, "requested": vocab_size, "fell_back": fell_back,
             "reconcile": rec, "warning": warning}
 
