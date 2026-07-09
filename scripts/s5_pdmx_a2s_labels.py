@@ -165,18 +165,28 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
 
 
 if __name__ == "__main__":
-    # 本地路径(用户 Windows 环境)。
-    ROOT = Path(r"D:\vscode_projects\ee_download")
-    MANIFEST = ROOT / "work" / "manifest_pieces.jsonl"
-    XML_ROOT = ROOT / "work" / "xml_norm"  # fallback: absolute xml_raw paths used
-    OUT_LABELS = ROOT / "work" / "pdmx_a2s_labels.jsonl"
-    OUT_CORPUS = ROOT / "work" / "a2s_corpus.txt"
-    OUT_REPORT = ROOT / "reports" / "s5_pdmx_a2s.json"
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--manifest", type=str, default="")
+    ap.add_argument("--out-labels", type=str, default="")
+    ap.add_argument("--out-corpus", type=str, default="")
+    ap.add_argument("--out-report", type=str, default="")
+    ap.add_argument("--min-measures", type=int, default=2)
+    ap.add_argument("--max-measures", type=int, default=16)
+    ap.add_argument("--overlap", type=int, default=1)
+    ap.add_argument("--limit", type=int, default=0)
+    args = ap.parse_args()
 
-    # MinHash already handled cross-dataset leakage; work_key blacklist as auxiliary.
+    ROOT = Path(r"D:\vscode_projects\ee_download")
+    MANIFEST = Path(args.manifest) if args.manifest else ROOT / "work" / "manifest_pieces.jsonl"
+    XML_ROOT = ROOT / "work" / "xml_norm"
+    OUT_LABELS = Path(args.out_labels) if args.out_labels else ROOT / "work" / "pdmx_a2s_labels.jsonl"
+    OUT_CORPUS = Path(args.out_corpus) if args.out_corpus else ROOT / "work" / "a2s_corpus.txt"
+    OUT_REPORT = Path(args.out_report) if args.out_report else ROOT / "reports" / "s5_pdmx_a2s.json"
+
     blacklist = build_blacklist(nasap_test_works=[], asap_beyer_works=[])
 
-    # Use overlap 2-16 for maximum tokenizer corpus coverage
     run(str(MANIFEST), str(XML_ROOT), str(OUT_LABELS), str(OUT_CORPUS),
         str(OUT_REPORT), blacklist=blacklist,
-        min_measures=2, max_measures=16, overlap=True)
+        min_measures=args.min_measures, max_measures=args.max_measures,
+        overlap=bool(args.overlap), limit=args.limit if args.limit else None)
