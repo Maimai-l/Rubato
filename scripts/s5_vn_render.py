@@ -47,14 +47,14 @@ def vn_infer(xml_path: str, composer: str, out_mid: str, timeout_s: float = 300.
     调本地 virtuoso CLI 产表现性演奏 MIDI + CSV(GUIDE §2.4)。成功返回 CSV 路径,失败返回 None。
     R-S5.2:--pedal(bool_pedal) --no-plot;--csv 导出音符级时间。R-S5.9:超时/非零退出 → None。
     """
-    cmd = ["virtuoso", xml_path, "-c", composer, "--pedal", "--no-plot", "--csv", "-o", out_mid]
+    cmd = [r"D:\ProgramData\envs\py312\Scripts\virtuoso.exe", xml_path, "-c", composer, "--pedal", "--no-plot", "--csv", "-o", out_mid]
     try:
         subprocess.run(cmd, check=True, timeout=timeout_s,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
         return None
-    # GUIDE §2.4:CSV 与 MIDI 同级,名为 {midi名}_midi_notes.csv
-    csv_path = str(Path(out_mid).with_suffix("")) + "_midi_notes.csv"
+    # GUIDE §2.4:CSV 与 MIDI 同级,名为 {midi文件名}_midi_notes.csv (不剥 .mid 后缀)
+    csv_path = str(out_mid) + "_midi_notes.csv"
     return csv_path if Path(csv_path).exists() and Path(out_mid).exists() else None
 
 
@@ -119,8 +119,10 @@ def _slice_audio(whole_path: str, t0: float, t1: float, out_path: str) -> str | 
     if b - a < int(0.2 * sr):
         return None
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    sf.write(out_path, audio[a:b], sr)
-    return out_path
+    # soundfile 不支持 .opus 写;统一用 .wav 落盘(后续 build_dataset 的 resolve_audio 会搜 .wav)
+    wav_path = str(Path(out_path).with_suffix('.wav'))
+    sf.write(wav_path, audio[a:b], sr)
+    return wav_path
 
 
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
