@@ -41,13 +41,17 @@ python scripts/s5_vn_render.py               # 全量;.done 标记的曲自动�
 #   ~1GB/5s 泄漏主机内存(RTX50/WDDM 驱动侧,Python 收不回),放子进程里、RSS 超 4GB 就 kill 重开,
 #   OS 全额回收,主进程恒平。Windows 默认已开,你什么都不用做。看打印的"子进程模式"行 + 每 25 曲的
 #   [mem] 主进程 RSS(应【平】,不再爬)。
+# 【音源权重已按解码后大小算】FLAC 音源解码成 PCM 后 sfizz 实际 RSS ≈ 文件大小×2(你实测
+#   ExperienceNY 6.9GB→12GB),权重已 ×2 修正 → ExperienceNY 同时只跑 1 个,不再放行 2 个炸掉。
+# 【音源亲和】任务已按音源分组连续渲染:大 FLAC 页缓存保持热、加载快,同时段并发同质。
 # 还炸内存?只调环境变量,别改代码:
+#   set SF_DECODE_FACTOR=2.5       # 压缩音源解码倍率估计(默认2.0;实测 RSS 更高就调大)
 #   set S5_VN_RSS_CAP_GB=3         # VN 子进程超 3GB 就回收(默认4;越小越稳、重载略勤)
 #   set S5_RESERVE_GB=8            # 多留系统内存
 #   set S5_TASKS_PER_CHILD=8       # 渲染 worker 回收更勤(默认16)
 #   set S5_VN_INFER_TIMEOUT=300    # 单曲 VN 卡死超时(秒),超时杀重开、该曲续跑重试
-# 两层都封了:VN 主进程(子进程回收)+ 渲染 worker(预算准入 + max_tasks_per_child)。若还炸,把
-#   memtrace 表(python scripts/memtrace.py)贴回来。
+# 三层都封了:VN 子进程(RSS cap,推理卡死时监控也能砍)+ 渲染 sfizz(解码后权重准入)
+#   + 渲染 worker(max_tasks_per_child 回收)。若还炸,把 memtrace 表贴回来。
 
 # 第6步 nASAP(必须带输出参数,否则不落 labels)
 python scripts/s7_full_nasap.py --out-labels work/nasap_labels.jsonl --out-corpus work/a2s_corpus.txt

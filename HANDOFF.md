@@ -20,22 +20,26 @@
   【主进程 VirtuosoNet】。预算只管 worker 准入、回收只回收 worker,**都管不到主进程**。平滑爬升=主进程泄漏。
 
 ## 已 push 的修复(按提交)
-- `e61bc4f` **VN OOM 真修**:`VNSubprocess` —— VN 模型驻【可回收子进程】,RSS 超 cap 即 kill 重开
-  (`S5_VN_RSS_CAP_GB` 默4;`S5_VN_INFER_TIMEOUT` 卡死超时;监控线程盯空闲期)。默认开;
-  `S5_VN_INPROCESS=1` 退回旧内联(仅调试)。`tests_vn_subprocess.py` 7 ok(假子进程+注入 RSS,无需 GPU)。
-- `8590ebc` **GBK 止血**:`harden_stdout`+`quiet_wandb`;`tests_console` 7 ok。
-- `e7d074b` 续跑按【真有标签】判定,不靠 .done(旧 CLI 的 7514 个 .done 不再静默丢曲)。
-- `0a650e6` 渲染 worker 回收 + 读一次切片 + CSV/no_grad 清理。
+- `最新` **三修**(依据 s5_vn_worker_oom.md + memtrace.csv):
+  ① `_slice_audio` NameError(拆函数漏 import soundfile,段级音频全写不出)——规划端引入的 bug,已修+回归;
+  ② **VNSubprocess 监控被锁死**:memtrace 实锤 25GB 独占进程 = VN 子进程在某曲推理卡住期间泄漏,旧版
+    infer() 全程握锁 → 监控 180s 进不来。重构:等待期不握锁 + gen 代号,监控【推理进行中也能砍】,
+    卡死曲秒级判失败(续跑重试);psutil 缺失从静默 0.0 改为响亮警告。`tests_vn_subprocess` [5] 复现该场景;
+  ③ **音源权重按解码后大小**(执行端发现,属实):FLAC→PCM 约 ×2(ExperienceNY 6.9GB→实测 12GB),
+    `soundfont_weights` 压缩格式 ×`SF_DECODE_FACTOR`(默2.0)→ ExperienceNY 只放行 1 并发。s4 同源统一。
+  另:S4/S5 任务按音源亲和排序(同音源连续渲,页缓存热、并发同质)。
+- `e61bc4f` VNSubprocess(VN 驻可回收子进程);`8590ebc` GBK 止血;`e7d074b` 续跑按真标签;`0a650e6` worker 回收。
 
-## 下一步(唯一动作:真机复验两层都平)
+## 下一步(真机复验)
 ```
 git pull
-python scripts/s5_vn_render.py --limit 400          # 终端1:看"子进程模式"行;每25曲[mem]主进程RSS应【平】
-python scripts/memtrace.py --interval 5             # 终端2:main_VN_RSS_GB 应不再爬
+python scripts/s5_vn_render.py --limit 400          # 终端1
+python scripts/memtrace.py --interval 5             # 终端2
 ```
-判据:`vn_ok>0`、`TAST>0`、跑完不 OOM、结尾 `vn_子进程回收=N次`(N>0 说明回收在起作用)。
-- 若 `main_VN_RSS_GB` 仍缓慢爬(cap 之下的残留)→ `set S5_VN_RSS_CAP_GB=3` 更勤回收,再贴 memtrace。
-- 若渲染 worker 侧涨 → `set S5_TASKS_PER_CHILD=8` 或加大 `S5_RESERVE_GB`。
+判据:`vn_ok>0`、`TAST>0`、跑完不 OOM;memtrace 里【任何单进程】都不该无界爬
+(VN 子进程应呈 ≤cap 的锯齿;sfizz_GB 出现时 ≈ 解码后音源大小、受准入约束)。
+- VN 子进程仍越 cap 长时间不回落 → 贴 memtrace + 终端里 [mem] 行(尤其"psutil 警告"有没有出现)。
+- sfizz 实际 RSS 比权重还大 → `set SF_DECODE_FACTOR=2.5` 再试并贴数。
 
 ## 全绿基线
 所有 `tests_*.py` 通过(`tests_ops` 23、`tests_s5_pipeline` 12、`tests_ops_recycle` 6 等)。
