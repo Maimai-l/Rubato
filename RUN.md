@@ -37,8 +37,13 @@ python scripts/s4_parallel.py               # worker 数按内存自动定;跳�
 python scripts/s5_vn_render.py --limit 20    # 先 20 曲:判据 vn_ok>0、TAST>0;看打印的"渲染内存预算"行
 python scripts/s5_vn_render.py               # 全量;.done 标记的曲自动跳过(可续跑)
 # 【不用传 --vn-checkpoint】——脚本按 GUIDE §1 自动定位 virtuoso 标准权重。
-# 还炸内存?只调环境变量,别改代码:  set S5_RESERVE_GB=8   或   set S5_RENDER_OVERHEAD_GB=1.5
-# 内存预算已把"音源大小 + 每渲染音频缓冲"都算进准入,同时运行的内存和 ≤ 预算,不该再炸;若还炸,贴打印的预算行给我。
+# 【本次 pull 的真正止血点】worker 每 16 曲自动回收重开(清 RSS 棘轮:长命 worker 的堆水位
+#   只涨不还给 OS,越跑越高最后炸——这才是你重启 5 次的根因)。Windows 默认已开,你什么都不用做。
+# 还炸内存?只调环境变量,别改代码:
+#   set S5_RESERVE_GB=8            # 多留系统内存
+#   set S5_RENDER_OVERHEAD_GB=1.5  # 每曲音频缓冲估大一点、更少并发
+#   set S5_TASKS_PER_CHILD=8       # 回收更勤(默认16;越小峰值越低、略慢)
+# 内存预算已把"音源大小 + worker 常驻 + 每渲染音频缓冲"都算进准入,再叠加定期回收清棘轮,不该再炸;若还炸,贴打印的预算行给我。
 
 # 第6步 nASAP(必须带输出参数,否则不落 labels)
 python scripts/s7_full_nasap.py --out-labels work/nasap_labels.jsonl --out-corpus work/a2s_corpus.txt
