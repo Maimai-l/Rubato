@@ -139,8 +139,14 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0, "humanized": 0,
            "utts": 0, "tast": 0, "failures": []}
     t0 = time.time()
+    skipped = 0
     for i, piece in enumerate(pieces):
         pid = piece.get("piece_id", f"p{i}")
+        # 断点续跑:已渲染过则跳过
+        whole_opus = str(out_audio_dir / f"{pid}_whole.opus")
+        if Path(whole_opus).exists() and Path(whole_opus).stat().st_size > 0:
+            skipped += 1
+            continue
         composer = piece.get("vn", {}).get("composer_used") or piece.get("composer") or "Beethoven"
         xml_rel = piece.get("xml_norm") or piece.get("xml_raw")
         if not xml_rel:
@@ -214,7 +220,8 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     if corpus_fh:
         corpus_fh.close()
     rep["elapsed_s"] = round(time.time() - t0, 1)
-    print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} humanized={rep['humanized']} "
+    rep["skipped"] = skipped
+    print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} humanized={rep['humanized']} skipped={skipped} "
           f"utts={rep['utts']} TAST={rep['tast']}")
     return rep
 
@@ -231,13 +238,12 @@ def main():
     ap.add_argument("--out-audio-dir", default=str(ROOT / "work" / "pdmx_audio"))
     ap.add_argument("--allow-humanize-fallback", action="store_true",
                     help="仅在 VN 失败/超时的曲上兜底(SPEC R-S5.9);默认关,VN 失败即计入 failures")
-    ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
     sources_cfg = yaml.safe_load(open(args.sources, encoding="utf-8"))
     presets_cfg = yaml.safe_load(open(args.presets, encoding="utf-8"))
     run(args.manifest, sources_cfg, presets_cfg, args.out_labels, args.out_corpus,
         args.out_audio_dir, offset=args.offset,
-        args.out_audio_dir, allow_humanize_fallback=args.allow_humanize_fallback,
+        allow_humanize_fallback=args.allow_humanize_fallback,
         limit=args.limit or None)
 
 
