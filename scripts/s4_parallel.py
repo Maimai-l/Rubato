@@ -9,22 +9,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rubato.render.core import render_midi_to_wav44, finalize, assign_source_and_preset
+from rubato.ops import pick_workers
 import yaml
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 MANIFEST = ROOT / "work" / "manifest_pieces.jsonl"
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
 OUT_DIR = ROOT / "work" / "pdmx_audio"
-N_WORKERS = 16
+# 内存感知:单个 sfizz+音源 ≈1.5GB,按可用内存自动定 worker 数,封顶 16(不再写死 16 把内存搞爆)。
+N_WORKERS = pick_workers(per_worker_gb=1.5, hard_cap=16)
 N_PIECES = 999999  # render all pieces
+
+_CFG = None
 
 
 def load_configs():
-    with open(CONFIG_DIR / "sources.yaml", 'r', encoding='utf-8') as f:
-        sources = yaml.safe_load(f)
-    with open(CONFIG_DIR / "recording_presets.yaml", 'r', encoding='utf-8') as f:
-        presets = yaml.safe_load(f)
-    return sources, presets
+    global _CFG
+    if _CFG is None:                    # 每进程只读一次(旧版每个 task 重读 YAML,纯浪费)
+        with open(CONFIG_DIR / "sources.yaml", 'r', encoding='utf-8') as f:
+            sources = yaml.safe_load(f)
+        with open(CONFIG_DIR / "recording_presets.yaml", 'r', encoding='utf-8') as f:
+            presets = yaml.safe_load(f)
+        _CFG = (sources, presets)
+    return _CFG
 
 
 def render_one(args: tuple) -> dict:
