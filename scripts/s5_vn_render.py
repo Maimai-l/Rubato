@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import csv as _csv
 import json
+import os
 import subprocess
 import sys
 import time
@@ -125,87 +126,141 @@ def _slice_audio(whole_path: str, t0: float, t1: float, out_path: str) -> str | 
     return wav_path
 
 
+def _safe_unlink(p):
+    if p and Path(p).exists():
+        try:
+            Path(p).unlink()
+        except OSError:
+            pass
+
+
+def _piece_meta(piece, i):
+    pid = piece.get("piece_id", f"p{i}")
+    xml_rel = piece.get("xml_norm") or piece.get("xml_raw")
+    xml_path = None
+    if xml_rel:
+        xml_path = xml_rel if Path(xml_rel).is_absolute() else str(ROOT / "work" / "xml_norm" / xml_rel)
+    composer = piece.get("vn", {}).get("composer_used") or piece.get("composer") or "Beethoven"
+    return pid, xml_path, composer
+
+
+# ---------------------------------------------------------------- CPU 阶段(worker 并行,慢)
+# worker 全局:由 initializer 每进程设一次(Windows spawn 也安全)。
+_W: dict = {}
+
+
+def _cpu_init(sources_cfg, presets_cfg, out_audio_dir, allow_hum, seed):
+    _W.update(sources=sources_cfg, presets=presets_cfg,
+              out=Path(out_audio_dir), allow_hum=allow_hum, seed=seed)
+
+
+def cpu_stage(mid: dict) -> dict:
+    """
+    CPU 阶段(worker 进程,~5s):载谱 → tmap(VN CSV / humanize)→ 渲染整曲 → 按段切 + 打标签。
+    段级音频落盘;返回 rows 给主进程统一写标签/语料(单写者,免并发写冲突)。
+    """
+    import partitura
+    from rubato.render.humanize import humanize_timemap
+    pid = mid["pid"]; xml_path = mid["xml_path"]
+    perf_mid = mid["perf_mid"]; csv_path = mid["csv_path"]
+    out = _W["out"]
+    res = {"pid": pid, "vn_ok": 0, "vn_fail": 0, "humanized": 0, "rows": [], "fail": None}
+    try:
+        s = partitura.load_musicxml(xml_path)
+        part = s.parts[0] if hasattr(s, "parts") and s.parts else s
+        ir = part_to_ir(part)
+    except Exception as e:
+        _safe_unlink(perf_mid)
+        res["fail"] = f"load:{type(e).__name__}"
+        return res
+
+    tmap = None
+    if csv_path:
+        tmap, _ = csv_to_tmap(csv_path, part)
+    if tmap is None:
+        res["vn_fail"] = 1
+        if not _W["allow_hum"]:
+            _safe_unlink(perf_mid)
+            res["fail"] = "vn_no_tmap"
+            return res
+        tmap = humanize_timemap(ir, seed=_W["seed"], piece_id=pid)   # R-S5.9 兜底
+        res["humanized"] = 1
+        perf_mid = None
+    else:
+        res["vn_ok"] = 1
+
+    whole_audio = str(out / f"{pid}_whole.opus")
+    if perf_mid:
+        try:
+            render_midi(perf_mid, pid, _W["sources"], _W["presets"], whole_audio)
+        except Exception as e:
+            _safe_unlink(perf_mid); _safe_unlink(whole_audio)
+            res["fail"] = f"render:{type(e).__name__}"
+            return res
+
+    bounds = [m.start for m in ir.measures] + [ir.score_end]
+    for si, (sub_ir, (a, b)) in enumerate(
+            segment_score(ir, min_measures=2, max_measures=16, max_sec=40.0, sec_per_whole=2.0)):
+        utt_id = f"pdmxperf_{pid}_{si:03d}"
+        score_off = bounds[a] if a < len(bounds) else bounds[-1]
+        labels, _ = make_labels(sub_ir, "human", tmap=tmap, score_offset=score_off)
+        if not labels.get("A2S"):
+            continue
+        seg_audio = None
+        if perf_mid:
+            t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))
+            seg_audio = _slice_audio(whole_audio, t_lo, t_hi, str(out / f"{utt_id}.opus"))
+        res["rows"].append({"utt_id": utt_id, "piece_id": pid, "kind": "human",
+                            "audio_path": seg_audio,
+                            **{k: labels.get(k) for k in ("A2S", "A2S_lite", "TAST")}, "AMT": None})
+    _safe_unlink(perf_mid); _safe_unlink(whole_audio)   # 清理整曲中间产物,不撑磁盘
+    (out / f"{pid}.done").touch()                       # 断点标记
+    return res
+
+
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
-        allow_humanize_fallback=False, seed=20260706, limit=None, offset=0):
-    import partitura, itertools
-    # 切片在迭代时做,避免大 manifest 多次拷贝撑爆内存
-    all_pieces = read_jsonl(manifest)   # generator
+        allow_humanize_fallback=False, seed=20260706, limit=None, offset=0, n_cpu=0):
+    """
+    GPU/CPU 流水线:主进程顺序跑 VN 推理(GPU,~0.5s),非阻塞把渲染交给 CPU worker 池(~5s),
+    GPU 不再干等 CPU —— CPU 渲染第 N 曲时,GPU 已在推理 N+1...(见 rubato.ops.pipeline_map)。
+    """
+    import itertools
+    from rubato.ops import pick_workers, pipeline_map
+    # 生成器 + islice 应用 offset/limit,避免大 manifest 多次拷贝(执行端的内存优化),最后 materialize 一次
+    gen = read_jsonl(manifest)
     if offset:
-        all_pieces = itertools.islice(all_pieces, offset, None)
+        gen = itertools.islice(gen, offset, None)
     if limit:
-        all_pieces = itertools.islice(all_pieces, limit)
-    pieces = list(all_pieces)
+        gen = itertools.islice(gen, limit)
+    pieces = list(gen)
     out_audio_dir = Path(out_audio_dir); out_audio_dir.mkdir(parents=True, exist_ok=True)
     label_fh = open(out_labels, "a", encoding="utf-8") if out_labels else None
     corpus_fh = open(out_corpus, "a", encoding="utf-8") if out_corpus else None
     rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0, "humanized": 0,
            "utts": 0, "tast": 0, "failures": []}
-    t0 = time.time()
-    rep["skipped_done"] = 0
-    for i, piece in enumerate(pieces):
-        pid = piece.get("piece_id", f"p{i}")
-        # 断点续跑:该曲 .done 标记存在 → 跳过(VN 是最贵的一步,不重跑;标记极小,整曲中间产物随后即删)
-        if (out_audio_dir / f"{pid}.done").exists():
-            rep["skipped_done"] += 1
-            continue
-        composer = piece.get("vn", {}).get("composer_used") or piece.get("composer") or "Beethoven"
-        xml_rel = piece.get("xml_norm") or piece.get("xml_raw")
-        if not xml_rel:
-            continue
-        xml_path = xml_rel if Path(xml_rel).is_absolute() else str(ROOT / "work" / "xml_norm" / xml_rel)
-        try:
-            s = partitura.load_musicxml(xml_path)
-            part = s.parts[0] if hasattr(s, "parts") and s.parts else s
-            ir = part_to_ir(part)
-        except Exception as e:
-            rep["failures"].append({"piece_id": pid, "reason": f"load:{type(e).__name__}"})
-            continue
 
-        # 整曲 VN 推理(R-S5.1:CLI 每曲一次;要复用模型实例可改 InferenceModel,见 GUIDE §5)
+    def gpu_stage(piece):
+        # 主进程:只做 VN 推理(GPU,快)。要复用 172MB 模型实例(R-S5.1)可在此持有 InferenceModel。
+        i = piece.get("_i", 0)
+        pid, xml_path, composer = _piece_meta(piece, i)
+        if not xml_path:
+            return None
         perf_mid = str(out_audio_dir / f"{pid}_perf.mid")
         csv_path = vn_infer(xml_path, composer, perf_mid)
-        tmap = None
-        if csv_path:
-            tmap, diag = csv_to_tmap(csv_path, part)
-        if tmap is None:
-            rep["vn_fail"] += 1
-            if not allow_humanize_fallback:
-                rep["failures"].append({"piece_id": pid, "reason": "vn_no_tmap"})
-                continue
-            from rubato.render.humanize import humanize_timemap
-            tmap = humanize_timemap(ir, seed=seed, piece_id=pid)   # R-S5.9 兜底
-            rep["humanized"] += 1
-            perf_mid = None                                        # 无 VN MIDI,退化(需 humanize 渲染,略)
-        else:
-            rep["vn_ok"] += 1
+        return {"pid": pid, "xml_path": xml_path, "perf_mid": perf_mid, "csv_path": csv_path}
 
-        # 整曲渲染(VN 演奏 MIDI → 音频),再按段切
-        whole_audio = str(out_audio_dir / f"{pid}_whole.opus")
-        if perf_mid:
-            try:
-                render_midi(perf_mid, pid, sources_cfg, presets_cfg, whole_audio)
-            except Exception as e:
-                rep["failures"].append({"piece_id": pid, "reason": f"render:{type(e).__name__}"})
-                continue
+    def done_fn(piece):
+        pid, _, _ = _piece_meta(piece, piece.get("_i", 0))
+        return (out_audio_dir / f"{pid}.done").exists()
 
-        segs = segment_score(ir, min_measures=2, max_measures=16, max_sec=40.0, sec_per_whole=2.0)
-        bounds = [m.start for m in ir.measures] + [ir.score_end]
-        for si, (sub_ir, (a, b)) in enumerate(segs):
-            utt_id = f"pdmxperf_{pid}_{si:03d}"
-            score_off = bounds[a] if a < len(bounds) else bounds[-1]
-            labels, _ = make_labels(sub_ir, "human", tmap=tmap, score_offset=score_off)
-            if not labels.get("A2S"):
-                continue
-            seg_audio = None
-            if perf_mid:
-                t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds)-1)]))
-                seg_audio = _slice_audio(whole_audio, t_lo, t_hi,
-                                         str(out_audio_dir / f"{utt_id}.opus"))
-            row = {"utt_id": utt_id, "piece_id": pid, "kind": "human",
-                   "audio_path": seg_audio,
-                   **{k: labels.get(k) for k in ("A2S", "A2S_lite", "TAST")}, "AMT": None}
+    def on_result(piece, res):
+        rep["vn_ok"] += res["vn_ok"]; rep["vn_fail"] += res["vn_fail"]
+        rep["humanized"] += res["humanized"]
+        if res.get("fail"):
+            rep["failures"].append({"piece_id": res["pid"], "reason": res["fail"]})
+        for row in res["rows"]:
             rep["utts"] += 1
-            if labels.get("TAST"):
+            if row.get("TAST"):
                 rep["tast"] += 1
             if label_fh:
                 label_fh.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -213,25 +268,24 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
                 for d in ("A2S", "A2S_lite"):
                     if row.get(d):
                         corpus_fh.write(row[d].strip() + "\n")
-        # 清理整曲中间产物(perf.mid + whole.opus)+ 写 .done 断点标记(段级音频已单独落盘)
-        for tmpf in (perf_mid, whole_audio):
-            if tmpf and Path(tmpf).exists() and (tmpf.endswith("_perf.mid") or tmpf.endswith("_whole.opus")):
-                try:
-                    Path(tmpf).unlink()
-                except OSError:
-                    pass
-        (out_audio_dir / f"{pid}.done").touch()
-        if (i + 1) % 50 == 0:
-            print(f"  [{i+1}/{len(pieces)}] vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} "
-                  f"utts={rep['utts']} tast={rep['tast']} skip={rep['skipped_done']} "
-                  f"({(i+1)/(time.time()-t0):.2f} pc/s)")
+
+    for idx, p in enumerate(pieces):
+        p["_i"] = idx
+    n_cpu = n_cpu or pick_workers(per_worker_gb=1.5, hard_cap=os.cpu_count())
+    print(f"S5 VN pipeline: {len(pieces)} pieces, cpu_workers={n_cpu}(渲染,内存感知), "
+          f"GPU 推理与 CPU 渲染重叠")
+    stats = pipeline_map(pieces, gpu_stage, cpu_stage, n_cpu=n_cpu, on_result=on_result,
+                         done_fn=done_fn, key_fn=lambda p: p.get("piece_id"),
+                         initializer=_cpu_init,
+                         initargs=(sources_cfg, presets_cfg, str(out_audio_dir),
+                                   allow_humanize_fallback, seed))
     if label_fh:
         label_fh.close()
     if corpus_fh:
         corpus_fh.close()
-    rep["elapsed_s"] = round(time.time() - t0, 1)
     print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} humanized={rep['humanized']} "
-          f"skipped={rep['skipped_done']} utts={rep['utts']} TAST={rep['tast']}")
+          f"skipped={stats['done_skipped']} dropped={stats['dropped']} "
+          f"utts={rep['utts']} TAST={rep['tast']} cpu_fail={stats['failed']}")
     return rep
 
 
@@ -247,13 +301,14 @@ def main():
     ap.add_argument("--out-audio-dir", default=str(ROOT / "work" / "pdmx_audio"))
     ap.add_argument("--allow-humanize-fallback", action="store_true",
                     help="仅在 VN 失败/超时的曲上兜底(SPEC R-S5.9);默认关,VN 失败即计入 failures")
+    ap.add_argument("--workers", type=int, default=0, help="CPU 渲染并发;0=按内存自动定")
     args = ap.parse_args()
     sources_cfg = yaml.safe_load(open(args.sources, encoding="utf-8"))
     presets_cfg = yaml.safe_load(open(args.presets, encoding="utf-8"))
     run(args.manifest, sources_cfg, presets_cfg, args.out_labels, args.out_corpus,
         args.out_audio_dir, offset=args.offset,
         allow_humanize_fallback=args.allow_humanize_fallback,
-        limit=args.limit or None)
+        limit=args.limit or None, n_cpu=args.workers)
 
 
 if __name__ == "__main__":

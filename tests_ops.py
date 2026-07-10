@@ -14,6 +14,11 @@ def check(name, cond, detail=""):
 def _square(x): return x * x
 def _reciprocal(x): return 1.0 / x
 
+# pipeline 用:cpu_stage 必须顶层;返回 (输入, 处理它的进程 pid) 以证明是并行子进程在跑
+def _cpu_stage(mid):
+    import os
+    return (mid, os.getpid())
+
 
 print("[1] pick_workers:按内存/CPU 定并发,不写死")
 # 32GB 可用、每 worker 1.5GB、留 4GB → (32-4)/1.5≈18,但 CPU=8 封顶 → 8
@@ -60,5 +65,30 @@ check("concat_content", open(merged).read() == "l1\nl2\nl3\n", repr(open(merged)
 print("[5] stream_map 记录失败不崩(一个任务抛错)")
 st3 = stream_map([1, 0, 2], _reciprocal, max_workers=2, on_result=lambda t, r: None, log=lambda *a: None)
 check("failure_counted", st3["failed"] == 1 and st3["ok"] == 2, st3)
+
+print("[6] pipeline_map:GPU 阶段(主进程)与 CPU 阶段(子进程池)重叠")
+from rubato.ops import pipeline_map
+import os as _os
+gpu_pids = set(); results = []
+def gpu(x):
+    gpu_pids.add(_os.getpid())          # GPU 阶段在主进程
+    return None if x % 7 == 0 else x*10  # x 是 7 的倍数 → 丢弃
+def onres(item, res):
+    results.append((item, res))
+st = pipeline_map(range(30), gpu, _cpu_stage, n_cpu=4, on_result=onres,
+                  max_inflight=6, log=lambda *a: None)
+check("gpu_in_main", gpu_pids == {_os.getpid()}, gpu_pids)         # GPU 阶段确实在主进程
+cpu_pids = {r[1][1] for r in results}
+check("cpu_in_children", _os.getpid() not in cpu_pids and len(cpu_pids) >= 2, cpu_pids)  # CPU 在多个子进程
+check("dropped_multiples_of_7", st["dropped"] == len([x for x in range(30) if x%7==0]), st)
+check("ok_count", st["ok"] == 30 - st["dropped"], st)
+# 结果正确:cpu_stage 收到的是 gpu 输出(x*10)
+mids = sorted(r[1][0] for r in results)
+check("pipeline_values", mids == sorted(x*10 for x in range(30) if x%7!=0), mids[:5])
+
+print("[7] pipeline_map 可续跑(done_fn 跳过)")
+st2 = pipeline_map(range(30), gpu, _cpu_stage, n_cpu=4, on_result=lambda i,r: None,
+                   done_fn=lambda x: True, log=lambda *a: None)
+check("pipeline_resume_skips_all", st2["done_skipped"] == 30 and st2["ok"] == 0, st2)
 
 print(f"\n全部通过: {PASS} 项")

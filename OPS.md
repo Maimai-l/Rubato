@@ -27,11 +27,14 @@ python scripts/s4_parallel.py --per-worker-gb 2.0      # 音源更大就调高�
 # 逐条状态: reports/s4_render.jsonl   断了直接重跑上面任一条,跳过已完成
 ```
 
-## S5 表现性渲染(VN,顺序跑,可续跑)
+## S5 表现性渲染(VN)—— GPU/CPU 流水线,不再干等
 ```
 python scripts/s5_vn_render.py --limit 20              # 先 20 曲,确认 vn_ok>0 / TAST>0
-python scripts/s5_vn_render.py                         # 全量;第 0 段已存在的曲自动跳过
-# VN 是 GPU 上单模型,顺序跑;中间产物 perf.mid/whole.opus 每曲用完即删(不撑磁盘)
+python scripts/s5_vn_render.py                         # 全量;.done 标记的曲自动跳过(可续跑)
+python scripts/s5_vn_render.py --workers 8             # 手动定 CPU 渲染并发(内存吃紧就调小)
+# 机制:主进程顺序跑 VN 推理(GPU,~0.5s),非阻塞把渲染(~5s)交给 CPU worker 池 →
+#       CPU 渲染第 N 曲时 GPU 已在推理 N+1...,GPU 不再干等 CPU(旧版顺序跑 GPU 空转 ~90%)。
+# 中间产物 perf.mid/whole.opus 每曲用完即删(不撑磁盘);--workers 默认按内存自动定。
 ```
 
 ## S5 文本标签(PDMX A2S,内存安全、可续跑)

@@ -111,6 +111,78 @@ def stream_map(tasks, fn, *, max_workers: int, key_fn=None, done_fn=None,
     return stats
 
 
+# ---------------------------------------------------------------- GPU/CPU 流水线(重叠两阶段)
+
+def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,
+                 done_fn=None, key_fn=None, max_inflight: int | None = None,
+                 initializer=None, initargs=(), log=print, log_every: int = 50):
+    """
+    两阶段流水线,让【快的 GPU 阶段】和【慢的 CPU 阶段】重叠,GPU 不再干等 CPU。
+      gpu_stage(item) -> mid | None : 主进程【顺序】跑(GPU 单卡,~0.5s)。返回 None = 丢弃该 item。
+      cpu_stage(mid)  -> result     : 进程池【并行】跑(CPU,~5s,吃满多核)。必须是模块顶层函数。
+      on_result(item, result)       : 主进程即时消费(落盘),不在内存累积。
+    机制:主进程跑 gpu_stage(item_N) 后【非阻塞】submit cpu_stage 到池,立刻去 gpu_stage(item_N+1);
+    N 个 CPU worker 在后台渲染。在途 CPU 任务超过 max_inflight(默认 2*n_cpu)时才回收一批,
+    防 GPU 跑太快把队列堆爆内存。done_fn(item)=True 的直接跳过(可续跑)。
+    返回 {total, done_skipped, dropped, ok, failed}。
+    """
+    from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
+    items = list(items)
+    max_inflight = max_inflight or (2 * n_cpu)
+    stats = {"total": len(items), "done_skipped": 0, "dropped": 0, "ok": 0, "failed": 0}
+    done = 0
+
+    def _reap(futs, block):
+        nonlocal done
+        if not futs:
+            return futs
+        if block:
+            got, futs2 = wait(futs, return_when=FIRST_COMPLETED)
+        else:
+            got = [f for f in futs if f.done()]
+            futs2 = set(futs) - set(got)
+        for f in got:
+            it = fut_item[f]
+            try:
+                res = f.result()
+                if on_result is not None:
+                    on_result(it, res)
+                stats["ok"] += 1
+            except Exception as e:
+                stats["failed"] += 1
+                log(f"[pipeline] cpu 阶段失败 {key_fn(it) if key_fn else it}: "
+                    f"{type(e).__name__}: {str(e)[:100]}")
+            done += 1
+            if done % log_every == 0:
+                log(f"[pipeline] {done} 完成 ok={stats['ok']} fail={stats['failed']} "
+                    f"inflight={len(futs2)} mem={available_gb():.1f}GB")
+            del fut_item[f]
+        return set(futs2)
+
+    fut_item = {}
+    inflight = set()
+    with ProcessPoolExecutor(max_workers=n_cpu, initializer=initializer,
+                             initargs=initargs) as ex:
+        for it in items:
+            if done_fn is not None and done_fn(it):
+                stats["done_skipped"] += 1
+                continue
+            mid = gpu_stage(it)                 # GPU,主进程,快
+            if mid is None:
+                stats["dropped"] += 1
+                continue
+            fut = ex.submit(cpu_stage, mid)     # CPU,后台并行,慢
+            fut_item[fut] = it
+            inflight.add(fut)
+            # GPU 跑太快时回收在途,封顶内存;否则非阻塞收一波
+            while len(inflight) >= max_inflight:
+                inflight = _reap(inflight, block=True)
+            inflight = _reap(inflight, block=False)
+        while inflight:                          # 收尾:等所有 CPU 任务完成
+            inflight = _reap(inflight, block=True)
+    return stats
+
+
 # ---------------------------------------------------------------- 流式合并(不吃内存)
 
 def concat_files(chunk_paths, out_path, *, skip_missing: bool = True) -> int:
