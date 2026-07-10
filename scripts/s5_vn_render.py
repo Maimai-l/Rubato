@@ -82,6 +82,28 @@ def _find_vn_checkpoint() -> str | None:
     return None
 
 
+def _labeled_piece_ids(path) -> set:
+    """out_labels 里【真的写过标签行】的 piece_id 集合。
+    【续跑正确性】只有真有标签才算这曲做完 —— 光有 .done 标记【不算】:执行端有 7514 个旧 CLI 跑的
+    .done,若按 .done 跳过,而这些曲的标签没进当前 out_labels,就会把它们【静默丢出训练集】。
+    按标签在不在算数:有标签→跳过(不重复);.done 但无标签→重跑(补回来,不静默丢)。"""
+    ids = set()
+    if not path or not os.path.exists(path):
+        return ids
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                pid = json.loads(line).get("piece_id")
+            except Exception:
+                continue
+            if pid is not None:
+                ids.add(pid)
+    return ids
+
+
 def _main_rss_gb() -> float:
     """主进程(VN 常驻)自身的 RSS(GB)。自诊断关键:worker 回收管不到主进程,
     若这个数随曲数一直涨 = 泄漏在【主进程 VN】,不在 worker —— 一眼看出到底谁在涨。"""
@@ -335,6 +357,12 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         gen = itertools.islice(gen, limit)
     pieces = list(gen)
     out_audio_dir = Path(out_audio_dir); out_audio_dir.mkdir(parents=True, exist_ok=True)
+    # 【续跑正确性】按"真有标签"判断做没做完,而不是 .done 标记。统计有多少 .done 是无标签空壳(旧 CLI
+    # 遗留),这些会被重跑补回来 —— 明确打印出来,不让任何曲被静默跳过丢出训练集。
+    labeled = _labeled_piece_ids(out_labels)
+    stale = sum(1 for dm in out_audio_dir.glob("*.done") if dm.stem not in labeled)
+    if labeled or stale:
+        print(f"续跑:{len(labeled)} 曲已有标签(跳过);{stale} 个 .done 无对应标签(旧 CLI 遗留,将重跑补回)")
     label_fh = open(out_labels, "a", encoding="utf-8") if out_labels else None
     corpus_fh = open(out_corpus, "a", encoding="utf-8") if out_corpus else None
     rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0, "humanized": 0,
@@ -400,7 +428,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 
     def done_fn(piece):
         pid, _, _ = _piece_meta(piece, piece.get("_i", 0))
-        return (out_audio_dir / f"{pid}.done").exists()
+        return pid in labeled     # 真有标签才算做完(不靠 .done,避免旧 CLI 遗留标记静默丢曲)
 
     def on_result(piece, res):
         rep["vn_ok"] += res["vn_ok"]; rep["vn_fail"] += res["vn_fail"]
