@@ -23,6 +23,9 @@ OUT_DIR = ROOT / "work" / "pdmx_audio"
 RESERVE_GB   = float(os.environ.get("S4_RESERVE_GB", "4"))     # 留给系统/主进程
 MEM_FACTOR   = float(os.environ.get("S4_MEM_FACTOR", "1.0"))   # <1 = 承认 sfizz 流式、少留内存、更多并发
 MAX_WORKERS  = int(os.environ.get("S4_WORKERS", "0") or 0) or min(os.cpu_count() or 4, 16)
+# 【内存】worker 自身常驻(finalize 整曲音频数组 + heap 水位)计入预算;每 N 曲回收 worker 清 RSS 棘轮。
+BASE_GB      = float(os.environ.get("S4_WORKER_BASE_GB", "0.5"))
+RECYCLE      = int(os.environ.get("S4_TASKS_PER_CHILD", "16" if os.name == "nt" else "0"))
 N_PIECES = 999999  # render all pieces
 
 
@@ -109,7 +112,7 @@ def main():
 
     def weight_fn(task):
         sid, _ = assign_source_and_preset(task[1], sources_cfg, presets_cfg)
-        return src_gb.get(sid, 2.0)                  # 该曲要加载的音源大小(GB)
+        return BASE_GB + src_gb.get(sid, 2.0)        # 音源大小 + worker 自身常驻(GB)
 
     budget = max(2.0, available_gb() - RESERVE_GB)
     print(f"S4 render: {len(tasks)} 曲 | 内存预算 {budget:.1f}GB(可用 {available_gb():.1f} − 留 {RESERVE_GB}) "
@@ -129,6 +132,7 @@ def main():
     t0 = time.time()
     stats = mem_budget_map(tasks, render_one, weight_fn=weight_fn, budget_gb=budget,
                            max_workers=MAX_WORKERS, done_fn=_done, on_result=on_result,
+                           max_tasks_per_child=RECYCLE or None,
                            key_fn=lambda t: t[1], log_every=100)
     rf.close()
     dt = time.time() - t0

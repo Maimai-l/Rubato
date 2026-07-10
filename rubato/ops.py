@@ -111,11 +111,41 @@ def stream_map(tasks, fn, *, max_workers: int, key_fn=None, done_fn=None,
     return stats
 
 
+# ---------------------------------------------------------------- 进程池构造(可选 worker 回收)
+
+def _make_pool(max_workers, initializer=None, initargs=(), max_tasks_per_child=None):
+    """
+    构造 ProcessPoolExecutor;max_tasks_per_child>0 时【每 N 个任务回收重开 worker 进程】。
+    为什么关键:长命 worker 每跑一曲,partitura/lxml/numpy 的峰值分配会把进程 RSS 顶到
+    "历史最大那曲"的水位且【不还给 OS】(glibc/Windows heap 都这样)—— n 个 worker 各自
+    棘轮式涨,宏观上就是"内存像泄漏、越跑越高、最后炸"。定期回收进程 = 把水位清零,RSS 有界。
+    内存预算只管【同时】占用,管不住这种【累积】增长 —— 两者必须都做。
+    注意:CPython 里 max_tasks_per_child 与 fork 启动法不兼容(Windows spawn 天然没问题);
+    Linux 默认 fork 时自动换 forkserver。py<3.11 或不支持时静默退回旧行为(不回收)。
+    """
+    from concurrent.futures import ProcessPoolExecutor
+    kw = dict(max_workers=max_workers, initializer=initializer, initargs=initargs)
+    if max_tasks_per_child:
+        import multiprocessing as mp
+        kw["max_tasks_per_child"] = int(max_tasks_per_child)
+        try:
+            if os.name != "nt" and mp.get_start_method(allow_none=True) in (None, "fork"):
+                kw["mp_context"] = mp.get_context("forkserver")
+        except Exception:
+            pass
+        try:
+            return ProcessPoolExecutor(**kw)
+        except (TypeError, ValueError):
+            kw.pop("max_tasks_per_child", None)
+            kw.pop("mp_context", None)
+    return ProcessPoolExecutor(**kw)
+
+
 # ---------------------------------------------------------------- 内存预算调度(永不 OOM)
 
 def mem_budget_map(tasks, fn, weight_fn, *, budget_gb: float, max_workers: int | None = None,
                    on_result=None, done_fn=None, key_fn=None, initializer=None, initargs=(),
-                   log=print, log_every: int = 50):
+                   max_tasks_per_child=None, log=print, log_every: int = 50):
     """
     并发跑 fn(task),硬保证【同时运行的 task 权重之和 ≤ budget_gb】—— 按内存准入,永不超预算。
     weight_fn(task) -> gb:该 task 的内存占用(如它要加载的音源大小)。异构音源(146MB~6.5GB)
@@ -123,7 +153,7 @@ def mem_budget_map(tasks, fn, weight_fn, *, budget_gb: float, max_workers: int |
     单个 task 权重 > budget 时仍会【单独】跑(否则永远进不来),但同时只此一个。
     done_fn(task)=True 的跳过(可续跑)。返回 {total, done_skipped, ok, failed, peak_gb_est}。
     """
-    from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
+    from concurrent.futures import FIRST_COMPLETED, wait
     tasks = [t for t in tasks if not (done_fn and done_fn(t))]
     max_workers = max_workers or (os.cpu_count() or 4)
     stats = {"total": len(tasks), "done_skipped": 0, "ok": 0, "failed": 0, "peak_gb_est": 0.0}
@@ -132,8 +162,8 @@ def mem_budget_map(tasks, fn, weight_fn, *, budget_gb: float, max_workers: int |
     it = iter(tasks)
     pending = next(it, None)
     done = 0
-    with ProcessPoolExecutor(max_workers=max_workers, initializer=initializer,
-                             initargs=initargs) as ex:
+    with _make_pool(max_workers, initializer=initializer, initargs=initargs,
+                    max_tasks_per_child=max_tasks_per_child) as ex:
         while pending is not None or running:
             # 尽量准入:空闲时允许单个超预算,否则要求 used+w ≤ budget 且未满 worker
             while pending is not None:
@@ -174,7 +204,8 @@ def mem_budget_map(tasks, fn, weight_fn, *, budget_gb: float, max_workers: int |
 def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,
                  done_fn=None, key_fn=None, max_inflight: int | None = None,
                  weight_fn=None, budget_gb: float | None = None,
-                 initializer=None, initargs=(), log=print, log_every: int = 50):
+                 initializer=None, initargs=(), max_tasks_per_child=None,
+                 log=print, log_every: int = 50):
     """
     两阶段流水线,让【快的 GPU 阶段】和【慢的 CPU 阶段】重叠,GPU 不再干等 CPU。
       gpu_stage(item) -> mid | None : 主进程【顺序】跑(GPU 单卡,~0.5s)。返回 None = 丢弃该 item。
@@ -187,7 +218,7 @@ def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,
         自然暂停(反正 CPU 是瓶颈),空出来再继续 —— 重叠不丢、内存不爆。
     done_fn(item)=True 的直接跳过(可续跑)。返回 {total, done_skipped, dropped, ok, failed, peak_gb_est}。
     """
-    from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
+    from concurrent.futures import FIRST_COMPLETED, wait
     items = list(items)
     max_inflight = max_inflight or (2 * n_cpu)
     stats = {"total": len(items), "done_skipped": 0, "dropped": 0, "ok": 0, "failed": 0,
@@ -226,8 +257,8 @@ def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,
         return set(futs2)
 
     inflight = set()
-    with ProcessPoolExecutor(max_workers=n_cpu, initializer=initializer,
-                             initargs=initargs) as ex:
+    with _make_pool(n_cpu, initializer=initializer, initargs=initargs,
+                    max_tasks_per_child=max_tasks_per_child) as ex:
         for it in items:
             if done_fn is not None and done_fn(it):
                 stats["done_skipped"] += 1

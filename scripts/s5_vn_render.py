@@ -95,8 +95,12 @@ class VNEngine:
 
     def infer(self, xml_path: str, composer: str):
         """一曲前向(复用已载模型)。返回 (mid_path, csv_path) 或 (None, None)。"""
+        import torch
         before = set(self.out_dir.glob("*.mid"))
-        self.model.infer_xml(xml_path=xml_path, composer_name=composer, qpm_primo=None)
+        # 【内存】no_grad:VN 常驻主进程;若 virtuoso 内部没关 autograd,每曲前向都会把一张
+        # 计算图挂在输出 tensor 上,主进程 RSS 随曲数线性涨。推理永不需要梯度。
+        with torch.no_grad():
+            self.model.infer_xml(xml_path=xml_path, composer_name=composer, qpm_primo=None)
         # 定位本曲产物:优先 GUIDE §2.3 命名,兜底取本次新增的 .mid(不受命名版本差异影响)
         stem, parent = Path(xml_path).stem, Path(xml_path).parent.name
         mid = self.out_dir / f"{parent}_{stem}_by_isgn_{composer}.mid"
@@ -162,13 +166,19 @@ def render_midi(midi_path: str, utt_id: str, sources_cfg, presets_cfg, out_path:
     return out_path
 
 
-def _slice_audio(whole_path: str, t0: float, t1: float, out_path: str) -> str | None:
-    """从整曲音频切 [t0,t1] 秒(段级 utt)。返回路径或 None。"""
+def _read_audio(path: str):
+    """整曲音频【只读一次】进内存,供逐段切片复用。返回 (audio, sr) 或 (None, None)。"""
     import soundfile as sf
     try:
-        audio, sr = sf.read(whole_path, dtype="float32")
+        return sf.read(path, dtype="float32")
     except Exception:
-        return None
+        return None, None
+
+
+def _slice_audio(audio, sr: int, t0: float, t1: float, out_path: str) -> str | None:
+    """从【已载入】的整曲音频切 [t0,t1] 秒(段级 utt)。返回路径或 None。
+    【内存修复】旧版每段各自 sf.read 整曲 —— 一首 30 段的曲把整曲反复读 30 次,worker 峰值分配
+    被顶高且 heap 不还 OS(棘轮)。现在 cpu_stage 读一次、把数组传进来。"""
     a, b = max(0, int(t0 * sr)), min(len(audio), int(t1 * sr))
     if b - a < int(0.2 * sr):
         return None
@@ -218,57 +228,64 @@ def cpu_stage(mid: dict) -> dict:
     perf_mid = mid["perf_mid"]; csv_path = mid["csv_path"]
     out = _W["out"]
     res = {"pid": pid, "vn_ok": 0, "vn_fail": 0, "humanized": 0, "rows": [], "fail": None}
-    try:
-        s = partitura.load_musicxml(xml_path)
-        part = s.parts[0] if hasattr(s, "parts") and s.parts else s
-        ir = part_to_ir(part)
-    except Exception as e:
-        _safe_unlink(perf_mid)
-        res["fail"] = f"load:{type(e).__name__}"
-        return res
-
-    tmap = None
-    if csv_path:
-        tmap, _ = csv_to_tmap(csv_path, part)
-    if tmap is None:
-        res["vn_fail"] = 1
-        if not _W["allow_hum"]:
-            _safe_unlink(perf_mid)
-            res["fail"] = "vn_no_tmap"
-            return res
-        tmap = humanize_timemap(ir, seed=_W["seed"], piece_id=pid)   # R-S5.9 兜底
-        res["humanized"] = 1
-        perf_mid = None
-    else:
-        res["vn_ok"] = 1
-
     whole_audio = str(out / f"{pid}_whole.opus")
-    if perf_mid:
+    try:   # 【清理】finally 兜底删所有中间产物 —— 旧版异常路径会把 _perf.mid/_whole.opus/csv 留在盘上
         try:
-            render_midi(perf_mid, pid, _W["sources"], _W["presets"], whole_audio)
+            s = partitura.load_musicxml(xml_path)
+            part = s.parts[0] if hasattr(s, "parts") and s.parts else s
+            ir = part_to_ir(part)
         except Exception as e:
-            _safe_unlink(perf_mid); _safe_unlink(whole_audio)
-            res["fail"] = f"render:{type(e).__name__}"
+            res["fail"] = f"load:{type(e).__name__}"
             return res
 
-    bounds = [m.start for m in ir.measures] + [ir.score_end]
-    for si, (sub_ir, (a, b)) in enumerate(
-            segment_score(ir, min_measures=2, max_measures=16, max_sec=40.0, sec_per_whole=2.0)):
-        utt_id = f"pdmxperf_{pid}_{si:03d}"
-        score_off = bounds[a] if a < len(bounds) else bounds[-1]
-        labels, _ = make_labels(sub_ir, "human", tmap=tmap, score_offset=score_off)
-        if not labels.get("A2S"):
-            continue
-        seg_audio = None
+        tmap = None
+        if csv_path:
+            tmap, _ = csv_to_tmap(csv_path, part)
+            _safe_unlink(csv_path)     # 【清理】CSV 用完即删 —— 旧版从不删,_vn/ 随曲数无限堆积
+            csv_path = None
+        if tmap is None:
+            res["vn_fail"] = 1
+            _safe_unlink(perf_mid)     # 【清理】兜底路径也删 VN 的 mid(旧版置 None 后文件漏在盘上)
+            perf_mid = None
+            if not _W["allow_hum"]:
+                res["fail"] = "vn_no_tmap"
+                return res
+            tmap = humanize_timemap(ir, seed=_W["seed"], piece_id=pid)   # R-S5.9 兜底
+            res["humanized"] = 1
+        else:
+            res["vn_ok"] = 1
+
+        audio = None; sr = 0
         if perf_mid:
-            t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))
-            seg_audio = _slice_audio(whole_audio, t_lo, t_hi, str(out / f"{utt_id}.opus"))
-        res["rows"].append({"utt_id": utt_id, "piece_id": pid, "kind": "human",
-                            "audio_path": seg_audio,
-                            **{k: labels.get(k) for k in ("A2S", "A2S_lite", "TAST")}, "AMT": None})
-    _safe_unlink(perf_mid); _safe_unlink(whole_audio)   # 清理整曲中间产物,不撑磁盘
-    (out / f"{pid}.done").touch()                       # 断点标记
-    return res
+            try:
+                render_midi(perf_mid, pid, _W["sources"], _W["presets"], whole_audio)
+            except Exception as e:
+                res["fail"] = f"render:{type(e).__name__}"
+                return res
+            audio, sr = _read_audio(whole_audio)   # 【内存】整曲【只读一次】,逐段切片复用
+            if audio is None:
+                res["fail"] = "read_audio"
+                return res
+
+        bounds = [m.start for m in ir.measures] + [ir.score_end]
+        for si, (sub_ir, (a, b)) in enumerate(
+                segment_score(ir, min_measures=2, max_measures=16, max_sec=40.0, sec_per_whole=2.0)):
+            utt_id = f"pdmxperf_{pid}_{si:03d}"
+            score_off = bounds[a] if a < len(bounds) else bounds[-1]
+            labels, _ = make_labels(sub_ir, "human", tmap=tmap, score_offset=score_off)
+            if not labels.get("A2S"):
+                continue
+            seg_audio = None
+            if audio is not None:
+                t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))
+                seg_audio = _slice_audio(audio, sr, t_lo, t_hi, str(out / f"{utt_id}.opus"))
+            res["rows"].append({"utt_id": utt_id, "piece_id": pid, "kind": "human",
+                                "audio_path": seg_audio,
+                                **{k: labels.get(k) for k in ("A2S", "A2S_lite", "TAST")}, "AMT": None})
+        (out / f"{pid}.done").touch()                       # 断点标记
+        return res
+    finally:
+        _safe_unlink(perf_mid); _safe_unlink(whole_audio); _safe_unlink(csv_path)
 
 
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
@@ -352,8 +369,12 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     mem_factor = float(os.environ.get("S5_MEM_FACTOR", "1.0"))
     reserve = float(os.environ.get("S5_RESERVE_GB", "4"))
     # 每次渲染除了音源,还占【整曲音频缓冲】(sf.read + 重采样 + 卷积混响 + ffmpeg)≈1GB。
-    # 【必须】把这块也计入权重,否则小音源会放行太多并发、各自的音频缓冲把内存吃爆(这正是之前还炸的原因)。
+    # 【必须】把这块也计入权重,否则小音源会放行太多并发、各自的音频缓冲把内存吃爆。
     overhead = float(os.environ.get("S5_RENDER_OVERHEAD_GB", "1.0"))
+    # 【内存·关键补漏】worker 每跑几曲就回收重开:清掉 partitura/numpy 顶出来的 RSS 棘轮
+    # (预算只管【同时】占用,管不住 worker RSS【随曲数累积】上涨 —— 那才是"越跑越高最后炸"的真凶)。
+    # Windows(spawn)默认开;Linux fork 平台默认关(设 S5_TASKS_PER_CHILD>0 强制开,自动换 forkserver)。
+    recycle = int(os.environ.get("S5_TASKS_PER_CHILD", "16" if os.name == "nt" else "0"))
     src_gb = soundfont_weights(sources_cfg, repo_root, mem_factor=mem_factor)
     budget = max(2.0, available_gb() - reserve)
 
@@ -367,13 +388,14 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 
     n_cpu = n_cpu or (os.cpu_count() or 4)
     print(f"S5 VN pipeline: {len(pieces)} pieces | 渲染内存预算 {budget:.1f}GB(可用 {available_gb():.1f} "
-          f"− 留 {reserve}) | max_workers={n_cpu} | GPU 推理与 CPU 渲染重叠、按音源大小准入不 OOM")
+          f"− 留 {reserve}) | max_workers={n_cpu} | 回收 {recycle or '关'} 曲/进程 | "
+          f"GPU 推理与 CPU 渲染重叠、按音源大小准入不 OOM")
     print(f"  权重 = 音源目录大小 + 每渲染开销 {overhead}GB(音频缓冲)。音源(GB): "
           + ", ".join(f"{k}={v:.1f}" for k, v in sorted(src_gb.items())))
     stats = pipeline_map(pieces, gpu_stage, cpu_stage, n_cpu=n_cpu, on_result=on_result,
                          done_fn=done_fn, key_fn=lambda p: p.get("piece_id"),
                          weight_fn=weight_fn, budget_gb=budget,
-                         initializer=_cpu_init,
+                         initializer=_cpu_init, max_tasks_per_child=recycle or None,
                          initargs=(sources_cfg, presets_cfg, str(out_audio_dir),
                                    allow_humanize_fallback, seed))
     if label_fh:
