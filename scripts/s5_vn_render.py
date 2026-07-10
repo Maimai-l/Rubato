@@ -220,6 +220,8 @@ class VNSubprocess:
         self._lock = _threading.RLock()
         self.proc = None; self.req_q = None; self.resp_q = None
         self.recycles = 0; self.n_infer = 0
+        self.gen = 0                     # 进程代号:每次 kill+重开 +1;在飞推理据此发现"子进程已被换掉"
+        self._rss_warned = False
         self._start()
         self._stop = _threading.Event()
         self._mon = _threading.Thread(target=self._monitor, args=(monitor_sec,), daemon=True)
@@ -231,6 +233,7 @@ class VNSubprocess:
                                      args=(self.req_q, self.resp_q, self.checkpoint, self.out_dir),
                                      daemon=True)
         self.proc.start()
+        self.gen += 1
         status, msg, _ = self.resp_q.get(timeout=self.load_timeout)
         if status != "ready":
             raise RuntimeError(f"VN 子进程加载失败: {msg}")
@@ -242,6 +245,12 @@ class VNSubprocess:
             import psutil
             if self.proc and self.proc.pid:
                 return psutil.Process(self.proc.pid).memory_info().rss / 1e9
+        except ImportError:
+            # 【必须响】psutil 缺失 = RSS cap 监控整个失效 → 泄漏无界。绝不能静默装作 0.0。
+            if not self._rss_warned:
+                self._rss_warned = True
+                print("  [mem][警告] 此环境无 psutil,VN 子进程 RSS 监控失效(泄漏将无界)!"
+                      "请在运行 S5 的 env 里 pip install psutil", flush=True)
         except Exception:
             pass
         return 0.0
@@ -263,25 +272,52 @@ class VNSubprocess:
         self._kill(); self._start(); self.recycles += 1
 
     def _monitor(self, sec):
+        # 【执行端实锤的教训】旧版 infer() 全程握锁等结果:某曲一卡 180s,监控被锁死 180s,
+        # 泄漏的子进程(~1GB/5s)不受 cap 约束地涨到 25GB→OOM。现在 infer 等待期不握锁,
+        # 监控随时能进来【推理进行中也照样砍】超标子进程;在飞的那曲经 gen 变化发现、判失败(续跑重试)。
         while not self._stop.wait(sec):
             with self._lock:
                 if self.proc is not None and self._rss_gb() >= self.rss_cap_gb:
-                    self._recycle()
+                    print(f"  [mem] VN 子进程 RSS 超 {self.rss_cap_gb}GB → 回收重开"
+                          f"(第 {self.recycles + 1} 次)", flush=True)
+                    try:
+                        self._recycle()
+                    except Exception as ex:      # 重载失败也不能让监控线程死掉(死了=永不回收)
+                        print(f"  [mem] VN 子进程重开失败({type(ex).__name__}: {str(ex)[:60]}),"
+                              f"下曲 infer 时再试", flush=True)
 
     def infer(self, xml, composer):
-        with self._lock:
+        with self._lock:                 # 只在收发瞬间握锁;等待期【不握】,让监控能随时回收
             if self.proc is None or not self.proc.is_alive():
                 self._start()
+            gen0, resp_q = self.gen, self.resp_q
             try:
                 self.req_q.put((xml, composer))
-                status, mid, csv = self.resp_q.get(timeout=self.infer_timeout)
-            except (_queue.Empty, EOFError, OSError):
-                self._recycle()          # 卡死/管道坏 → 杀掉重开,本曲失败(续跑重试)
+            except Exception:
                 return None, None
+        deadline = time.time() + self.infer_timeout
+        while True:
+            try:
+                status, mid, csv = resp_q.get(timeout=1.0)     # 1s 心跳轮询,不长期占锁
+                break
+            except _queue.Empty:
+                with self._lock:
+                    if self.gen != gen0:         # 监控在推理中砍了超标子进程 → 本曲判失败,续跑重试
+                        return None, None
+                if time.time() >= deadline:      # 真卡死:自己动手杀重开
+                    with self._lock:
+                        if self.gen == gen0:
+                            try: self._recycle()
+                            except Exception: pass
+                    return None, None
+            except (EOFError, OSError, ValueError):   # 队列随子进程被杀而关闭/失效 → 同 gen 变化处理
+                return None, None
+        with self._lock:
             self.n_infer += 1
-            if self._rss_gb() >= self.rss_cap_gb:    # 推理后也查一次,及时回收
-                self._recycle()
-            return (mid, csv) if status == "ok" else (None, None)
+            if self.gen == gen0 and self._rss_gb() >= self.rss_cap_gb:   # 推理后也查一次,及时回收
+                try: self._recycle()
+                except Exception: pass
+        return (mid, csv) if status == "ok" else (None, None)
 
     def close(self):
         try: self._stop.set()
@@ -358,6 +394,7 @@ def _slice_audio(audio, sr: int, t0: float, t1: float, out_path: str) -> str | N
     """从【已载入】的整曲音频切 [t0,t1] 秒(段级 utt)。返回路径或 None。
     【内存修复】旧版每段各自 sf.read 整曲 —— 一首 30 段的曲把整曲反复读 30 次,worker 峰值分配
     被顶高且 heap 不还 OS(棘轮)。现在 cpu_stage 读一次、把数组传进来。"""
+    import soundfile as sf     # 拆函数时 import 曾漏在 _read_audio 里 → NameError(执行端实测),必须在此
     a, b = max(0, int(t0 * sr)), min(len(audio), int(t1 * sr))
     if b - a < int(0.2 * sr):
         return None
@@ -594,6 +631,16 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 
     for idx, p in enumerate(pieces):
         p["_i"] = idx
+    # 【音源亲和】按分配到的音源排序:同音源的曲连续渲染 → 页缓存热(大 FLAC 不必每曲重读)、
+    # 同时段任务权重同质(准入并发稳定,不再大/小音源混排切碎预算)。hash 分配不变;续跑按标签,不受排序影响。
+    def _piece_source(p):
+        try:
+            pid, _, _ = _piece_meta(p, p.get("_i", 0))
+            sid, _ = assign_source_and_preset(pid, sources_cfg, presets_cfg)
+            return sid
+        except Exception:
+            return "~"
+    pieces.sort(key=lambda p: (_piece_source(p), p.get("piece_id", "")))
 
     # 【内存预算】CPU 渲染阶段和 S4 一样会加载 sfizz 音源(146MB~6.5GB)。按音源大小准入,
     # 同时运行的音源内存和 ≤ 预算 → S5 渲染也【不 OOM】。权重 = 该曲要用的音源目录大小。

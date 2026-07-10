@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 import hashlib
+import os
 import tempfile
 import pathlib
 import numpy as np
@@ -64,23 +65,34 @@ def events_to_midi(events: list[dict], pedal: list, out_path: str,
     return out_path
 
 
-def soundfont_weights(sources_cfg: dict, repo_root, mem_factor: float = 1.0) -> dict:
+# 压缩采样格式:sfizz 加载时解码成 PCM,内存 ≈ 文件大小 × 解码倍率(FLAC 压缩率 ~50-60% → 解码 ~2×)。
+_COMPRESSED_SAMPLE_EXT = {".flac", ".ogg", ".oga", ".opus", ".wv", ".mp3"}
+
+
+def soundfont_weights(sources_cfg: dict, repo_root, mem_factor: float = 1.0,
+                      decode_factor: float | None = None) -> dict:
     """
-    每个音源的【内存权重】(GB)= 其 .sfz 所在目录的样本总大小。这是 sfizz 单次渲染常驻内存的
-    安全上限(sfizz 流式加载,实际 RSS ≤ 目录大小)。给内存预算调度用:大音源(ExperienceNY 6.5GB)
-    自动少并发、小音源(Splendid 146MB)多并发,同时运行的音源内存和 ≤ 预算 → 不 OOM。
-    目录缺失(如沙盒)→ 保守 2.0GB。mem_factor<1:承认流式、少留内存、换更多并发。
+    每个音源的【内存权重】(GB)= 其 .sfz 所在目录样本的【解码后】估计大小:
+    未压缩(wav/aiff)按文件大小;压缩(flac/ogg/…)按 文件大小 × decode_factor
+    (默认 2.0,env SF_DECODE_FACTOR 可调)。
+    【为什么不能按文件大小】执行端实测:ExperienceNY 文件 6.9GB(FLAC)→ sfizz 实际 RSS ~12GB。
+    按文件大小准入会在 22.8GB 预算里放行 2 个并发(6.9×2=13.8 "够"),实际 24GB → OOM。
+    解码后大小才是 sfizz 常驻内存的真实上限。给内存预算调度用:大音源自动少并发、小音源多并发。
+    目录缺失(如沙盒)→ 保守 2.0GB。mem_factor<1:承认流式加载、换更多并发(自担风险)。
     """
+    if decode_factor is None:
+        decode_factor = float(os.environ.get("SF_DECODE_FACTOR", "2.0"))
     out = {}
     for sid, s in sources_cfg.get("sources", {}).items():
         d = (pathlib.Path(repo_root) / s["path"]).parent
         gb = 2.0
         if d.exists():
-            total = 0
+            total = 0.0
             for f in d.rglob("*"):
                 try:
                     if f.is_file():
-                        total += f.stat().st_size
+                        mult = decode_factor if f.suffix.lower() in _COMPRESSED_SAMPLE_EXT else 1.0
+                        total += f.stat().st_size * mult
                 except OSError:
                     pass
             gb = total / 1e9

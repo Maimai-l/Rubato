@@ -33,6 +33,16 @@ def echo_child(req_q, resp_q, checkpoint, out_dir):
         resp_q.put(("ok", f"{xml}.mid", f"{xml}.csv"))
 
 
+def hung_child(req_q, resp_q, checkpoint, out_dir):
+    """假 VN 子进程:ready 后收到请求就【卡死不回】—— 复现执行端"某曲推理卡住+泄漏涨到 25GB"。"""
+    resp_q.put(("ready", None, None))
+    while True:
+        item = req_q.get()
+        if item is None:
+            return
+        time.sleep(3600)     # 卡死:永不回复
+
+
 def main():
     import scripts.s5_vn_render as s5
     ctx = mp.get_context("fork" if os.name != "nt" else "spawn")
@@ -71,6 +81,20 @@ def main():
     vn.infer("x", "Y")
     vn.close()
     check("proc_dead_after_close", vn.proc is None or not vn.proc.is_alive(), "close 后应无存活子进程")
+
+    print("[5] 【执行端 OOM 复现】推理卡死 + RSS 超标:监控【推理进行中】也能砍,infer 快速失败")
+    # 旧版 infer() 全程握锁等结果 → 监控被锁死整个 infer_timeout(180s),泄漏子进程不受 cap 约束
+    # 涨到 25GB(执行端 memtrace 实锤)。新版等待期不握锁:监控发现超标即砍,在飞 infer 秒级失败。
+    vn = s5.VNSubprocess("ckpt", out_dir="/tmp", rss_cap_gb=4.0, monitor_sec=0.3,
+                         infer_timeout=60.0,      # 故意设很长:证明不是靠超时、是靠监控砍
+                         ctx=ctx, child_target=hung_child, rss_fn=lambda p: 9.0)
+    t0 = time.time()
+    r = vn.infer("stuck_piece", "Chopin")
+    dt = time.time() - t0
+    check("hung_infer_fails_fast", r == (None, None), r)
+    check("killed_by_monitor_not_timeout", dt < 15.0, f"{dt:.1f}s(旧版要等满 60s)")
+    check("monitor_recycled_during_infer", vn.recycles >= 1, vn.recycles)
+    vn.close()
 
     print(f"\n全部通过: {PASS} 项")
 

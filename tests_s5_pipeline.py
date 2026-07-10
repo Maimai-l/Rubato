@@ -31,6 +31,17 @@ from rubato.intermo.core import SPitch, Note, Measure, ScoreIR, TimeMap
 FAKE_IR = ScoreIR([Note("PR", SPitch("C",0,4), F(0), F(1))],
                   [Measure(F(0),4,4,0), Measure(F(1),4,4,0)], F(2))
 
+# [0] 先用【真函数】回归 _slice_audio 的 NameError(拆函数时 import soundfile 曾漏掉,执行端实测全崩)
+print("[0] _slice_audio 真函数不再 NameError(注入假 soundfile)")
+_writes = []
+sys.modules["soundfile"] = types.SimpleNamespace(
+    write=lambda p, a, s: _writes.append(p),
+    read=lambda p, dtype=None: ([0.0], 16000))
+_tmp0 = tempfile.mkdtemp()
+_out = s5._slice_audio([0.0] * 16000, 16000, 0.0, 1.0, os.path.join(_tmp0, "seg.opus"))
+check("slice_audio_no_nameerror", _out is not None and _out.endswith(".wav"), _out)
+check("slice_audio_wrote", len(_writes) == 1, _writes)
+
 s5.part_to_ir = lambda part: FAKE_IR
 s5.vn_infer = lambda xml, comp, mid: mid + "_midi_notes.csv"      # 假装 VN 成功产 CSV
 s5.csv_to_tmap = lambda csv, part: (TimeMap([(F(0),0.0),(F(2),16.0)]), {})
