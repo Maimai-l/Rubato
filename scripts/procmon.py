@@ -20,6 +20,18 @@ import argparse
 import os
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+try:
+    from rubato.platform import harden_stdout   # GBK 控制台打印进程名/cmdline 不崩
+except Exception:
+    def harden_stdout(errors="backslashreplace"):
+        for s in (sys.stdout, sys.stderr):
+            try:
+                s.reconfigure(errors=errors)
+            except Exception:
+                pass
 
 DEFAULT_PATTERNS = ("sfizz", "fluidsynth", "virtuoso", "python", "ffmpeg")
 
@@ -144,6 +156,7 @@ def cmd_kill(patterns, pid, yes):
 
 
 def main():
+    harden_stdout()
     ap = argparse.ArgumentParser(description="进程监控/清理")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("list", "watch"):

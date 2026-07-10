@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rubato.render.core import render_midi_to_wav44, finalize, assign_source_and_preset
 from rubato.ops import mem_budget_map, available_gb
+from rubato.platform import harden_stdout   # Windows GBK 控制台:打印 '−' 会崩,先硬化
 import yaml
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
@@ -98,6 +99,7 @@ def _done(task) -> bool:
 
 
 def main():
+    harden_stdout()   # 先硬化控制台编码,任何非 GBK 字符打印不再崩(执行端 GBK Windows)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     sources_cfg, presets_cfg = load_configs()
     src_gb = _source_weights(sources_cfg)
@@ -115,7 +117,7 @@ def main():
         return BASE_GB + src_gb.get(sid, 2.0)        # 音源大小 + worker 自身常驻(GB)
 
     budget = max(2.0, available_gb() - RESERVE_GB)
-    print(f"S4 render: {len(tasks)} 曲 | 内存预算 {budget:.1f}GB(可用 {available_gb():.1f} − 留 {RESERVE_GB}) "
+    print(f"S4 render: {len(tasks)} 曲 | 内存预算 {budget:.1f}GB(可用 {available_gb():.1f} - 留 {RESERVE_GB}) "
           f"| max_workers={MAX_WORKERS} | MEM_FACTOR={MEM_FACTOR}")
     print("  音源权重(GB): " + ", ".join(f"{k}={v:.1f}" for k, v in sorted(src_gb.items())))
     print("  → 大音源少并发、小音源多并发,同时运行的音源和 ≤ 预算,【硬保证不 OOM】。")

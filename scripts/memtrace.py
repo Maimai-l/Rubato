@@ -25,6 +25,17 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+try:
+    from rubato.platform import harden_stdout   # GBK 控制台打印进程名/路径不崩
+except Exception:
+    def harden_stdout(errors="backslashreplace"):
+        for s in (sys.stdout, sys.stderr):
+            try:
+                s.reconfigure(errors=errors)
+            except Exception:
+                pass
+
 
 def _sys_mem():
     try:
@@ -77,6 +88,7 @@ def main():
     ap.add_argument("--match", default="s5_vn_render", help="主进程命令行识别关键字")
     ap.add_argument("--out", default=str(Path("reports") / "memtrace.csv"))
     args = ap.parse_args()
+    harden_stdout()
 
     try:
         import psutil  # noqa

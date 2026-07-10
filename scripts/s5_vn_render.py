@@ -28,9 +28,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# 【必须最先做】关 wandb 的 stdout 拦截 + 硬化控制台编码,否则 Windows GBK 下打印 '−'/作曲家名即崩
+# (执行端 S5 五次全崩在这,VN 一次没跑成)。在 import virtuoso(带出 wandb)之前设好。
+from rubato.platform import read_jsonl, harden_stdout, quiet_wandb
+quiet_wandb()
+harden_stdout()
+
 import yaml
 
-from rubato.platform import read_jsonl
 from rubato.intermo.partitura_adapter import part_to_ir
 from rubato.data.segment import segment_score, make_labels
 from rubato.data.nasap_timemap import build_timemap
@@ -343,6 +348,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     if vn_checkpoint:
         try:
             engine = VNEngine(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"))
+            harden_stdout()   # virtuoso import 带出的 wandb 会重包 stdout,构造后再硬化一次
             print(f"VN: InferenceModel 已加载一次(复用),ckpt={vn_checkpoint}")
         except Exception as e:
             print(f"VN: InferenceModel 构造失败({type(e).__name__}: {str(e)[:80]}),退回 CLI(自动查权重,每曲重载)")
@@ -448,7 +454,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 
     n_cpu = n_cpu or (os.cpu_count() or 4)
     print(f"S5 VN pipeline: {len(pieces)} pieces | 渲染内存预算 {budget:.1f}GB(可用 {available_gb():.1f} "
-          f"− 留 {reserve}) | max_workers={n_cpu} | 回收 {recycle or '关'} 曲/进程 | "
+          f"- 留 {reserve}) | max_workers={n_cpu} | 回收 {recycle or '关'} 曲/进程 | "
           f"GPU 推理与 CPU 渲染重叠、按音源大小准入不 OOM")
     print(f"  权重 = 音源目录大小 + 每渲染开销 {overhead}GB(音频缓冲)。音源(GB): "
           + ", ".join(f"{k}={v:.1f}" for k, v in sorted(src_gb.items())))
