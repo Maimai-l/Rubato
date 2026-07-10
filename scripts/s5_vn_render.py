@@ -77,6 +77,30 @@ def _find_vn_checkpoint() -> str | None:
     return None
 
 
+def _main_rss_gb() -> float:
+    """主进程(VN 常驻)自身的 RSS(GB)。自诊断关键:worker 回收管不到主进程,
+    若这个数随曲数一直涨 = 泄漏在【主进程 VN】,不在 worker —— 一眼看出到底谁在涨。"""
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / 1e9
+    except Exception:
+        return 0.0
+
+
+def _free_gpu_and_gc(full: bool = False):
+    """每曲 VN 前向后清一次:释放 CUDA 缓存(不还就棘轮式涨)+(full 时)gc 断循环引用。
+    主进程随曲数涨的第一道止血;彻底的累积由 _rebuild 定期重建引擎兜底。"""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    if full:
+        import gc
+        gc.collect()
+
+
 class VNEngine:
     """
     按 GUIDE §5 Python API【只加载一次】172MB 模型,循环 infer_xml —— 不再每曲重载(R-S5.1)。
@@ -326,13 +350,43 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     else:
         print("VN: 未定位到标准权重,用 CLI(自动查权重,每曲重载)。若知道 .pt 路径可传 --vn-checkpoint 换成只加载一次。")
 
+    # 【内存·主进程】VN 常驻主进程,pipeline_map 的 worker 回收【管不到主进程】。若 virtuoso 内部
+    #   每曲累积(缓存图/结果缓冲/CUDA 缓存),主进程 RSS 会随曲数一路涨到 OOM —— 这正是"从 60% 一路
+    #   爬到 99%、不停就得重启"的形态。两道止血:①每 GC_EVERY 曲 empty_cache+gc;②每 VN_RECYCLE 曲
+    #   把引擎整个重建(彻底清任何 Python 侧累积)。engine 放进可变盒子,gpu_stage 里替换。
+    gc_every = int(os.environ.get("S5_GC_EVERY", "20"))       # 每 N 曲 empty_cache + gc(便宜,常开)
+    vn_recycle = int(os.environ.get("S5_VN_RECYCLE", "100"))  # 每 N 曲重建 VN 引擎(清主进程累积;0=关)
+    eng = {"m": engine, "seen": 0}
+
+    def _rebuild_vn():
+        import gc
+        old = eng["m"]; eng["m"] = None
+        try:
+            if old is not None and hasattr(old, "model"):
+                del old.model
+        except Exception:
+            pass
+        del old
+        gc.collect(); _free_gpu_and_gc(full=True)
+        if vn_checkpoint:
+            try:
+                eng["m"] = VNEngine(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"))
+            except Exception as ex:   # 重建失败不致命:退回 CLI 直到下次重建点
+                print(f"  [mem] VN 引擎重建失败({type(ex).__name__}: {str(ex)[:60]}),暂退 CLI", flush=True)
+
     def gpu_stage(piece):
         # 主进程:只做 VN 推理(GPU,快)。engine 复用已载模型;无 engine 才用 CLI(每曲重载)。
         pid, xml_path, composer = _piece_meta(piece, piece.get("_i", 0))
         if not xml_path:
             return None
-        if engine is not None:
-            mid, csv_path = engine.infer(xml_path, composer)
+        e = eng["m"]
+        if e is not None:
+            mid, csv_path = e.infer(xml_path, composer)
+            eng["seen"] += 1; n = eng["seen"]
+            if gc_every and n % gc_every == 0:
+                _free_gpu_and_gc(full=True)          # 便宜的定期清理(CUDA 缓存 + 循环引用)
+            if vn_recycle and n % vn_recycle == 0:
+                _rebuild_vn()                         # 主进程累积的兜底:整体重建 VN 引擎清水位
             return {"pid": pid, "xml_path": xml_path, "perf_mid": mid, "csv_path": csv_path}
         perf_mid = str(out_audio_dir / f"{pid}_perf.mid")
         csv_path = vn_infer(xml_path, composer, perf_mid)
@@ -357,6 +411,12 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
                 for d in ("A2S", "A2S_lite"):
                     if row.get(d):
                         corpus_fh.write(row[d].strip() + "\n")
+        # 【自诊断】每 25 曲打印:主进程(VN)RSS + 系统可用。主进程 RSS 涨=泄漏在主进程 VN;
+        #   主进程 RSS 平、系统可用却掉=在 worker(回收应已封住)。把这几行贴回来就知道该拧哪。
+        rep["_done"] = rep.get("_done", 0) + 1
+        if rep["_done"] % 25 == 0:
+            print(f"  [mem] 已完成 {rep['_done']} 曲 | 主进程(VN)RSS={_main_rss_gb():.1f}GB "
+                  f"| 系统可用={available_gb():.1f}GB", flush=True)
 
     for idx, p in enumerate(pieces):
         p["_i"] = idx
