@@ -16,8 +16,13 @@ ROOT = Path(r"D:\vscode_projects\ee_download")
 MANIFEST = ROOT / "work" / "manifest_pieces.jsonl"
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
 OUT_DIR = ROOT / "work" / "pdmx_audio"
-# 内存感知:单个 sfizz+音源 ≈1.5GB,按可用内存自动定 worker 数,封顶 16(不再写死 16 把内存搞爆)。
-N_WORKERS = pick_workers(per_worker_gb=1.5, hard_cap=16)
+# 内存感知定 worker 数。单个 sfizz 渲染的常驻内存【随音源差异很大】:
+# Splendid 146MB ~ Softify 1.8GB / ExperienceNY 6.5GB(多话筒),且慢渲会把内存按住到 timeout_s=600s。
+# 默认按 2.5GB/worker 保守估;真实值【必须实测】——先跑一条(见 N_PIECES 小值或先 --limit 思路),
+# 用 `python scripts/procmon.py watch --pattern sfizz` 看单个 sfizz 的 RSS,再:
+#   Windows:  set S4_WORKERS=6   或  set S4_PER_WORKER_GB=3.0   覆盖,不用改代码。
+_PER_WORKER_GB = float(os.environ.get("S4_PER_WORKER_GB", "2.5"))
+N_WORKERS = int(os.environ.get("S4_WORKERS", "0") or 0) or pick_workers(per_worker_gb=_PER_WORKER_GB, hard_cap=16)
 N_PIECES = 999999  # render all pieces
 
 _CFG = None
