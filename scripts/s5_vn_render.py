@@ -262,7 +262,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     VN 用 InferenceModel【只加载一次】(GUIDE §5),每曲只前向;vn_checkpoint=None 时退回 CLI(每曲重载,慢)。
     """
     import itertools
-    from rubato.ops import pick_workers, pipeline_map
+    from rubato.ops import pipeline_map
     # 生成器 + islice 应用 offset/limit,避免大 manifest 多次拷贝(执行端的内存优化),最后 materialize 一次
     gen = read_jsonl(manifest)
     if offset:
@@ -320,11 +320,31 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 
     for idx, p in enumerate(pieces):
         p["_i"] = idx
-    n_cpu = n_cpu or pick_workers(per_worker_gb=1.5, hard_cap=os.cpu_count())
-    print(f"S5 VN pipeline: {len(pieces)} pieces, cpu_workers={n_cpu}(渲染,内存感知), "
-          f"GPU 推理与 CPU 渲染重叠")
+
+    # 【内存预算】CPU 渲染阶段和 S4 一样会加载 sfizz 音源(146MB~6.5GB)。按音源大小准入,
+    # 同时运行的音源内存和 ≤ 预算 → S5 渲染也【不 OOM】。权重 = 该曲要用的音源目录大小。
+    from rubato.render.core import soundfont_weights, assign_source_and_preset
+    from rubato.ops import available_gb
+    repo_root = Path(__file__).resolve().parent.parent
+    mem_factor = float(os.environ.get("S5_MEM_FACTOR", "1.0"))
+    reserve = float(os.environ.get("S5_RESERVE_GB", "4"))
+    src_gb = soundfont_weights(sources_cfg, repo_root, mem_factor=mem_factor)
+    budget = max(2.0, available_gb() - reserve)
+
+    def weight_fn(mid):
+        try:
+            sid, _ = assign_source_and_preset(mid["pid"], sources_cfg, presets_cfg)
+            return src_gb.get(sid, 2.0)
+        except Exception:
+            return 2.0                       # 取不到音源 → 保守权重,不因此崩
+
+    n_cpu = n_cpu or (os.cpu_count() or 4)
+    print(f"S5 VN pipeline: {len(pieces)} pieces | 渲染内存预算 {budget:.1f}GB(可用 {available_gb():.1f} "
+          f"− 留 {reserve}) | max_workers={n_cpu} | GPU 推理与 CPU 渲染重叠、按音源大小准入不 OOM")
+    print("  音源权重(GB): " + ", ".join(f"{k}={v:.1f}" for k, v in sorted(src_gb.items())))
     stats = pipeline_map(pieces, gpu_stage, cpu_stage, n_cpu=n_cpu, on_result=on_result,
                          done_fn=done_fn, key_fn=lambda p: p.get("piece_id"),
+                         weight_fn=weight_fn, budget_gb=budget,
                          initializer=_cpu_init,
                          initargs=(sources_cfg, presets_cfg, str(out_audio_dir),
                                    allow_humanize_fallback, seed))

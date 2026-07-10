@@ -64,6 +64,30 @@ def events_to_midi(events: list[dict], pedal: list, out_path: str,
     return out_path
 
 
+def soundfont_weights(sources_cfg: dict, repo_root, mem_factor: float = 1.0) -> dict:
+    """
+    每个音源的【内存权重】(GB)= 其 .sfz 所在目录的样本总大小。这是 sfizz 单次渲染常驻内存的
+    安全上限(sfizz 流式加载,实际 RSS ≤ 目录大小)。给内存预算调度用:大音源(ExperienceNY 6.5GB)
+    自动少并发、小音源(Splendid 146MB)多并发,同时运行的音源内存和 ≤ 预算 → 不 OOM。
+    目录缺失(如沙盒)→ 保守 2.0GB。mem_factor<1:承认流式、少留内存、换更多并发。
+    """
+    out = {}
+    for sid, s in sources_cfg.get("sources", {}).items():
+        d = (pathlib.Path(repo_root) / s["path"]).parent
+        gb = 2.0
+        if d.exists():
+            total = 0
+            for f in d.rglob("*"):
+                try:
+                    if f.is_file():
+                        total += f.stat().st_size
+                except OSError:
+                    pass
+            gb = total / 1e9
+        out[sid] = max(0.1, gb * mem_factor)
+    return out
+
+
 def assign_source_and_preset(utt_id: str, sources_cfg: dict, presets_cfg: dict):
     """返回 (source_id, preset_id),可复现。"""
     seed = presets_cfg.get("seed", 0)

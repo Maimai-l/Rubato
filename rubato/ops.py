@@ -173,25 +173,32 @@ def mem_budget_map(tasks, fn, weight_fn, *, budget_gb: float, max_workers: int |
 
 def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,
                  done_fn=None, key_fn=None, max_inflight: int | None = None,
+                 weight_fn=None, budget_gb: float | None = None,
                  initializer=None, initargs=(), log=print, log_every: int = 50):
     """
     两阶段流水线,让【快的 GPU 阶段】和【慢的 CPU 阶段】重叠,GPU 不再干等 CPU。
       gpu_stage(item) -> mid | None : 主进程【顺序】跑(GPU 单卡,~0.5s)。返回 None = 丢弃该 item。
       cpu_stage(mid)  -> result     : 进程池【并行】跑(CPU,~5s,吃满多核)。必须是模块顶层函数。
       on_result(item, result)       : 主进程即时消费(落盘),不在内存累积。
-    机制:主进程跑 gpu_stage(item_N) 后【非阻塞】submit cpu_stage 到池,立刻去 gpu_stage(item_N+1);
-    N 个 CPU worker 在后台渲染。在途 CPU 任务超过 max_inflight(默认 2*n_cpu)时才回收一批,
-    防 GPU 跑太快把队列堆爆内存。done_fn(item)=True 的直接跳过(可续跑)。
-    返回 {total, done_skipped, dropped, ok, failed}。
+    在途 CPU 任务的准入:
+      - 默认按【个数】封顶 max_inflight(默认 2*n_cpu);
+      - 若给 weight_fn(mid)->gb + budget_gb,则按【内存和 ≤ budget】准入(异构音源不 OOM),
+        大音源少并发/小音源多并发,同时运行的音源内存和永远 ≤ budget。GPU 会在 CPU 内存吃满时
+        自然暂停(反正 CPU 是瓶颈),空出来再继续 —— 重叠不丢、内存不爆。
+    done_fn(item)=True 的直接跳过(可续跑)。返回 {total, done_skipped, dropped, ok, failed, peak_gb_est}。
     """
     from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
     items = list(items)
     max_inflight = max_inflight or (2 * n_cpu)
-    stats = {"total": len(items), "done_skipped": 0, "dropped": 0, "ok": 0, "failed": 0}
+    stats = {"total": len(items), "done_skipped": 0, "dropped": 0, "ok": 0, "failed": 0,
+             "peak_gb_est": 0.0}
     done = 0
+    used = 0.0
+    fut_item = {}
+    fut_w = {}
 
     def _reap(futs, block):
-        nonlocal done
+        nonlocal done, used
         if not futs:
             return futs
         if block:
@@ -201,6 +208,7 @@ def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,
             futs2 = set(futs) - set(got)
         for f in got:
             it = fut_item[f]
+            used -= fut_w.pop(f, 0.0)
             try:
                 res = f.result()
                 if on_result is not None:
@@ -213,11 +221,10 @@ def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,
             done += 1
             if done % log_every == 0:
                 log(f"[pipeline] {done} 完成 ok={stats['ok']} fail={stats['failed']} "
-                    f"inflight={len(futs2)} mem={available_gb():.1f}GB")
+                    f"inflight={len(futs2)} used≈{used:.1f}GB mem={available_gb():.1f}GB")
             del fut_item[f]
         return set(futs2)
 
-    fut_item = {}
     inflight = set()
     with ProcessPoolExecutor(max_workers=n_cpu, initializer=initializer,
                              initargs=initargs) as ex:
@@ -229,12 +236,19 @@ def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,
             if mid is None:
                 stats["dropped"] += 1
                 continue
-            fut = ex.submit(cpu_stage, mid)     # CPU,后台并行,慢
-            fut_item[fut] = it
-            inflight.add(fut)
-            # GPU 跑太快时回收在途,封顶内存;否则非阻塞收一波
+            w = max(0.01, float(weight_fn(mid))) if weight_fn else 0.0
+            # 准入:内存预算优先(给了 budget 时),否则按个数。放不下就阻塞回收在途,腾出再提交。
+            if weight_fn and budget_gb is not None:
+                while inflight and used + w > budget_gb:
+                    inflight = _reap(inflight, block=True)
             while len(inflight) >= max_inflight:
                 inflight = _reap(inflight, block=True)
+            fut = ex.submit(cpu_stage, mid)     # CPU,后台并行,慢
+            fut_item[fut] = it
+            fut_w[fut] = w
+            used += w
+            stats["peak_gb_est"] = max(stats["peak_gb_est"], used)
+            inflight.add(fut)
             inflight = _reap(inflight, block=False)
         while inflight:                          # 收尾:等所有 CPU 任务完成
             inflight = _reap(inflight, block=True)
