@@ -59,6 +59,24 @@ def vn_infer(xml_path: str, composer: str, out_mid: str, timeout_s: float = 300.
     return csv_path if Path(csv_path).exists() and Path(out_mid).exists() else None
 
 
+def _find_vn_checkpoint() -> str | None:
+    """按 VIRTUOSO_GUIDE §1 的标准布局自动定位权重,不用用户手传(CLI 本就 --checkpoint 自动查找)。
+    找 virtuoso 包旁的 pretrained_weights/han_measnote_gru/checkpoint_best.pt。找不到返回 None。"""
+    rel = Path("pretrained_weights") / "han_measnote_gru" / "checkpoint_best.pt"
+    try:
+        import virtuoso
+        base = Path(virtuoso.__file__).resolve().parent
+        for up in (base, base.parent, base.parent.parent):
+            if (up / rel).exists():
+                return str(up / rel)
+    except Exception:
+        pass
+    for up in (Path.cwd(), Path.cwd().parent):     # 兜底:从当前目录找
+        if (up / rel).exists():
+            return str(up / rel)
+    return None
+
+
 class VNEngine:
     """
     按 GUIDE §5 Python API【只加载一次】172MB 模型,循环 infer_xml —— 不再每曲重载(R-S5.1)。
@@ -276,15 +294,20 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0, "humanized": 0,
            "utts": 0, "tast": 0, "failures": []}
 
-    # VN 引擎:优先 InferenceModel【只加载一次】(GUIDE §5,不每曲重载 172MB)。构造失败→退回 CLI。
+    # VN 引擎:InferenceModel【只加载一次】(GUIDE §5)。ckpt 不传就【自动定位】virtuoso 标准权重
+    # (你不用传 --vn-checkpoint);找不到才退回 CLI(CLI 本就自动查权重,只是每曲重载)。
+    if not vn_checkpoint:
+        vn_checkpoint = _find_vn_checkpoint()
     engine = None
     if vn_checkpoint:
         try:
             engine = VNEngine(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"))
             print(f"VN: InferenceModel 已加载一次(复用),ckpt={vn_checkpoint}")
         except Exception as e:
-            print(f"VN: 无法构造 InferenceModel({type(e).__name__}: {str(e)[:80]}),退回 CLI 每曲重载")
+            print(f"VN: InferenceModel 构造失败({type(e).__name__}: {str(e)[:80]}),退回 CLI(自动查权重,每曲重载)")
             engine = None
+    else:
+        print("VN: 未定位到标准权重,用 CLI(自动查权重,每曲重载)。若知道 .pt 路径可传 --vn-checkpoint 换成只加载一次。")
 
     def gpu_stage(piece):
         # 主进程:只做 VN 推理(GPU,快)。engine 复用已载模型;无 engine 才用 CLI(每曲重载)。
@@ -328,20 +351,25 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     repo_root = Path(__file__).resolve().parent.parent
     mem_factor = float(os.environ.get("S5_MEM_FACTOR", "1.0"))
     reserve = float(os.environ.get("S5_RESERVE_GB", "4"))
+    # 每次渲染除了音源,还占【整曲音频缓冲】(sf.read + 重采样 + 卷积混响 + ffmpeg)≈1GB。
+    # 【必须】把这块也计入权重,否则小音源会放行太多并发、各自的音频缓冲把内存吃爆(这正是之前还炸的原因)。
+    overhead = float(os.environ.get("S5_RENDER_OVERHEAD_GB", "1.0"))
     src_gb = soundfont_weights(sources_cfg, repo_root, mem_factor=mem_factor)
     budget = max(2.0, available_gb() - reserve)
 
     def weight_fn(mid):
         try:
             sid, _ = assign_source_and_preset(mid["pid"], sources_cfg, presets_cfg)
-            return src_gb.get(sid, 2.0)
+            sf_gb = src_gb.get(sid, 2.0)
         except Exception:
-            return 2.0                       # 取不到音源 → 保守权重,不因此崩
+            sf_gb = 2.0                       # 取不到音源 → 保守
+        return sf_gb + overhead               # 音源 + 每次渲染的音频缓冲开销
 
     n_cpu = n_cpu or (os.cpu_count() or 4)
     print(f"S5 VN pipeline: {len(pieces)} pieces | 渲染内存预算 {budget:.1f}GB(可用 {available_gb():.1f} "
           f"− 留 {reserve}) | max_workers={n_cpu} | GPU 推理与 CPU 渲染重叠、按音源大小准入不 OOM")
-    print("  音源权重(GB): " + ", ".join(f"{k}={v:.1f}" for k, v in sorted(src_gb.items())))
+    print(f"  权重 = 音源目录大小 + 每渲染开销 {overhead}GB(音频缓冲)。音源(GB): "
+          + ", ".join(f"{k}={v:.1f}" for k, v in sorted(src_gb.items())))
     stats = pipeline_map(pieces, gpu_stage, cpu_stage, n_cpu=n_cpu, on_result=on_result,
                          done_fn=done_fn, key_fn=lambda p: p.get("piece_id"),
                          weight_fn=weight_fn, budget_gb=budget,
@@ -371,10 +399,9 @@ def main():
     ap.add_argument("--allow-humanize-fallback", action="store_true",
                     help="仅在 VN 失败/超时的曲上兜底(SPEC R-S5.9);默认关,VN 失败即计入 failures")
     ap.add_argument("--workers", type=int, default=0, help="CPU 渲染并发;0=按内存自动定")
-    ap.add_argument("--vn-checkpoint",
-                    default="pretrained_weights/han_measnote_gru/checkpoint_best.pt",
-                    help="VN 权重 .pt(GUIDE §1 路径);给了就用 InferenceModel 只加载一次(§5)。"
-                         "路径不对会自动退回 CLI 并打印提示;传空串强制用 CLI")
+    ap.add_argument("--vn-checkpoint", default="",
+                    help="通常【不用传】——脚本自动定位 virtuoso 标准权重(GUIDE §1)。"
+                         "仅当你的 .pt 在非标准位置才指定。")
     args = ap.parse_args()
     sources_cfg = yaml.safe_load(open(args.sources, encoding="utf-8"))
     presets_cfg = yaml.safe_load(open(args.presets, encoding="utf-8"))

@@ -2,16 +2,18 @@
 
 > 这是唯一的执行清单。其它 md(CORPUS_REGEN / OPS / SPEC …)是背景资料,跑的时候不用翻。
 
-## 三条铁律(违反=返工 + 拖慢进度)
+## 死规定(违反任何一条 = 你在拖慢进度,停)
 
-1. **代码是最终版、已测。你的活是【跑】+【报数字】,不是改代码。**
-   `scripts/` 和 `rubato/` 里的脚本都通过了 400+ 项测试。**不要编辑、不要重写任何脚本。**
-2. **脚本报错 → 贴完整 traceback 给我,停下等修。** 不要自己改脚本"绕过"——
-   你上次把内存安全的 `s4_parallel.py` 改回 `Pool(16)` + 每 task 重读配置,又把内存搞爆了。
-   自己改脚本 = 引入回归 + 和规划端冲突 + 拖慢整体。有问题我来改,你只管报。
-3. **每步:`git pull` → 跑 → 贴数字 → 等确认 → 下一步。** 不要跳步、不要边渲染边训练。
+1. **禁止改代码。** `scripts/` 和 `rubato/` 是最终版、已过 400+ 测试。你【不许】编辑、重写、
+   "优化"、"简化"任何脚本或 rubato 模块 —— 一个字都不许改。你的唯一职责:**跑命令 + 贴数字**。
+2. **禁止自己造脚本 / 造并发。** 不许写你自己的渲染循环、不许 `multiprocessing.Pool(N)`、
+   不许改 worker 数写法。并发/内存已由脚本内部管好(内存预算调度)。
+3. **报错就停 + 贴完整 traceback,等我修。** 不许"绕过"、不许猜着改。
+   (前科:你把内存安全的 s4 改回 Pool(16) 又炸内存;这种事不许再发生。)
+4. **调内存/速度只准用环境变量**(下面每条命令给了),【不许】改源码里的常量。
+5. **一步一停:** `git pull` → 跑一条 → 贴硬判据数字 → 等我确认 → 下一条。不跳步、不并行开多阶段。
 
-需要更快/更省内存,用脚本【自带的 `--workers`/`--limit`】,不要动源码。
+> 你不改代码,就不会再有内存回退、不会和规划端冲突、不会返工。有任何"我觉得应该改"的念头 → 先贴给我,我来改。
 
 ---
 
@@ -31,9 +33,12 @@ python scripts/s5_parallel.py               # 判据:processed ~几万;合并阶
 
 # 第4步 PDMX 直排音频(S4)
 python scripts/s4_parallel.py               # worker 数按内存自动定;跳过已渲;--workers N 可手动封顶
-# 第5步 PDMX 表现性音频 + TAST(S5,VN 模型只加载一次)
-python scripts/s5_vn_render.py --vn-checkpoint <你的 checkpoint_best.pt 路径> --limit 20
-python scripts/s5_vn_render.py --vn-checkpoint <同上>   # 判据:vn_ok>0、TAST>0;先 --limit 20 验证再全量
+# 第5步 PDMX 表现性音频 + TAST(S5,VN 模型只加载一次,权重自动定位,【内存预算调度不 OOM】)
+python scripts/s5_vn_render.py --limit 20    # 先 20 曲:判据 vn_ok>0、TAST>0;看打印的"渲染内存预算"行
+python scripts/s5_vn_render.py               # 全量;.done 标记的曲自动跳过(可续跑)
+# 【不用传 --vn-checkpoint】——脚本按 GUIDE §1 自动定位 virtuoso 标准权重。
+# 还炸内存?只调环境变量,别改代码:  set S5_RESERVE_GB=8   或   set S5_RENDER_OVERHEAD_GB=1.5
+# 内存预算已把"音源大小 + 每渲染音频缓冲"都算进准入,同时运行的内存和 ≤ 预算,不该再炸;若还炸,贴打印的预算行给我。
 
 # 第6步 nASAP(必须带输出参数,否则不落 labels)
 python scripts/s7_full_nasap.py --out-labels work/nasap_labels.jsonl --out-corpus work/a2s_corpus.txt

@@ -34,13 +34,14 @@ python scripts/s4_parallel.py                          # 全量。自动:读每�
 ```
 python scripts/s5_vn_render.py --limit 20              # 先 20 曲,确认 vn_ok>0 / TAST>0
 python scripts/s5_vn_render.py                         # 全量;.done 标记的曲自动跳过(可续跑)
-python scripts/s5_vn_render.py --workers 8             # 手动定 CPU 渲染并发(内存吃紧就调小)
-python scripts/s5_vn_render.py --vn-checkpoint 你的/checkpoint_best.pt   # VN 模型只加载一次
-# VN:默认用 InferenceModel【只加载一次】(GUIDE §5),每曲只前向,不再每曲重载 172MB(R-S5.1)。
-#     --vn-checkpoint 路径不对会打印提示并退回 CLI(每曲重载,慢);传 --vn-checkpoint "" 强制 CLI。
-# 机制:主进程顺序跑 VN 推理(GPU,~0.5s),非阻塞把渲染(~5s)交给 CPU worker 池 →
-#       CPU 渲染第 N 曲时 GPU 已在推理 N+1...,GPU 不再干等 CPU(旧版顺序跑 GPU 空转 ~90%)。
-# 中间产物 perf.mid/whole.opus 每曲用完即删(不撑磁盘);--workers 默认按内存自动定。
+# VN 权重【自动定位】(GUIDE §1),不用传 --vn-checkpoint;InferenceModel 只加载一次,每曲只前向。
+# 【内存预算调度,不 OOM】:准入权重 = 音源目录大小 + 每渲染音频缓冲开销,同时运行的内存和 ≤ 预算。
+#   大音源(ExperienceNY 6.5GB)自动少并发、小音源多并发。GPU 推理与 CPU 渲染重叠。
+# 还炸内存?只调环境变量(别改代码):
+set S5_RESERVE_GB=8            # 多留给系统
+set S5_RENDER_OVERHEAD_GB=1.5 # 每渲染音频缓冲估得更足(更保守、更不炸)
+set S5_MEM_FACTOR=0.5         # 想更快:承认 sfizz 流式、音源权重打折、多并发
+python scripts/s5_vn_render.py
 ```
 
 ## S5 文本标签(PDMX A2S,内存安全、可续跑)
