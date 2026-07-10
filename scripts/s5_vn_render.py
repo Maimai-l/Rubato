@@ -127,12 +127,14 @@ def _slice_audio(whole_path: str, t0: float, t1: float, out_path: str) -> str | 
 
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
         allow_humanize_fallback=False, seed=20260706, limit=None, offset=0):
-    import partitura
-    pieces = list(read_jsonl(manifest))
+    import partitura, itertools
+    # 切片在迭代时做,避免大 manifest 多次拷贝撑爆内存
+    all_pieces = read_jsonl(manifest)   # generator
     if offset:
-        pieces = pieces[offset:]
+        all_pieces = itertools.islice(all_pieces, offset, None)
     if limit:
-        pieces = pieces[:limit]
+        all_pieces = itertools.islice(all_pieces, limit)
+    pieces = list(all_pieces)
     out_audio_dir = Path(out_audio_dir); out_audio_dir.mkdir(parents=True, exist_ok=True)
     label_fh = open(out_labels, "a", encoding="utf-8") if out_labels else None
     corpus_fh = open(out_corpus, "a", encoding="utf-8") if out_corpus else None
