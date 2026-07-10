@@ -37,13 +37,17 @@ python scripts/s4_parallel.py               # worker 数按内存自动定;跳�
 python scripts/s5_vn_render.py --limit 20    # 先 20 曲:判据 vn_ok>0、TAST>0;看打印的"渲染内存预算"行
 python scripts/s5_vn_render.py               # 全量;.done 标记的曲自动跳过(可续跑)
 # 【不用传 --vn-checkpoint】——脚本按 GUIDE §1 自动定位 virtuoso 标准权重。
-# 【本次 pull 的真正止血点】worker 每 16 曲自动回收重开(清 RSS 棘轮:长命 worker 的堆水位
-#   只涨不还给 OS,越跑越高最后炸——这才是你重启 5 次的根因)。Windows 默认已开,你什么都不用做。
+# 【VN 泄漏的真正止血点】VN 模型现在跑在【可回收子进程】里:memtrace 实测 VN 模型驻主进程会以
+#   ~1GB/5s 泄漏主机内存(RTX50/WDDM 驱动侧,Python 收不回),放子进程里、RSS 超 4GB 就 kill 重开,
+#   OS 全额回收,主进程恒平。Windows 默认已开,你什么都不用做。看打印的"子进程模式"行 + 每 25 曲的
+#   [mem] 主进程 RSS(应【平】,不再爬)。
 # 还炸内存?只调环境变量,别改代码:
+#   set S5_VN_RSS_CAP_GB=3         # VN 子进程超 3GB 就回收(默认4;越小越稳、重载略勤)
 #   set S5_RESERVE_GB=8            # 多留系统内存
-#   set S5_RENDER_OVERHEAD_GB=1.5  # 每曲音频缓冲估大一点、更少并发
-#   set S5_TASKS_PER_CHILD=8       # 回收更勤(默认16;越小峰值越低、略慢)
-# 内存预算已把"音源大小 + worker 常驻 + 每渲染音频缓冲"都算进准入,再叠加定期回收清棘轮,不该再炸;若还炸,贴打印的预算行给我。
+#   set S5_TASKS_PER_CHILD=8       # 渲染 worker 回收更勤(默认16)
+#   set S5_VN_INFER_TIMEOUT=300    # 单曲 VN 卡死超时(秒),超时杀重开、该曲续跑重试
+# 两层都封了:VN 主进程(子进程回收)+ 渲染 worker(预算准入 + max_tasks_per_child)。若还炸,把
+#   memtrace 表(python scripts/memtrace.py)贴回来。
 
 # 第6步 nASAP(必须带输出参数,否则不落 labels)
 python scripts/s7_full_nasap.py --out-labels work/nasap_labels.jsonl --out-corpus work/a2s_corpus.txt
