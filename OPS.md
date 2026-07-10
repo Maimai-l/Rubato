@@ -32,6 +32,9 @@ python scripts/s4_parallel.py --per-worker-gb 2.0      # 音源更大就调高�
 python scripts/s5_vn_render.py --limit 20              # 先 20 曲,确认 vn_ok>0 / TAST>0
 python scripts/s5_vn_render.py                         # 全量;.done 标记的曲自动跳过(可续跑)
 python scripts/s5_vn_render.py --workers 8             # 手动定 CPU 渲染并发(内存吃紧就调小)
+python scripts/s5_vn_render.py --vn-checkpoint 你的/checkpoint_best.pt   # VN 模型只加载一次
+# VN:默认用 InferenceModel【只加载一次】(GUIDE §5),每曲只前向,不再每曲重载 172MB(R-S5.1)。
+#     --vn-checkpoint 路径不对会打印提示并退回 CLI(每曲重载,慢);传 --vn-checkpoint "" 强制 CLI。
 # 机制:主进程顺序跑 VN 推理(GPU,~0.5s),非阻塞把渲染(~5s)交给 CPU worker 池 →
 #       CPU 渲染第 N 曲时 GPU 已在推理 N+1...,GPU 不再干等 CPU(旧版顺序跑 GPU 空转 ~90%)。
 # 中间产物 perf.mid/whole.opus 每曲用完即删(不撑磁盘);--workers 默认按内存自动定。

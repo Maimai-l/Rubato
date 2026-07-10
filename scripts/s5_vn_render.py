@@ -59,6 +59,41 @@ def vn_infer(xml_path: str, composer: str, out_mid: str, timeout_s: float = 300.
     return csv_path if Path(csv_path).exists() and Path(out_mid).exists() else None
 
 
+class VNEngine:
+    """
+    按 GUIDE §5 Python API【只加载一次】172MB 模型,循环 infer_xml —— 不再每曲重载(R-S5.1)。
+    构造一次(主进程),之后每曲只做前向。midi_decode_options 冻结 save_csv/bool_pedal/no_plot(R-S5.2)。
+    """
+    def __init__(self, checkpoint: str, out_dir: str, device: str | None = None):
+        import torch
+        from virtuoso.inference import InferenceModel
+        self.out_dir = Path(out_dir); self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.model = InferenceModel(
+            checkpoint_path=checkpoint,
+            device=device or ("cuda" if torch.cuda.is_available() else "cpu"),
+            output_path=str(self.out_dir),
+            midi_decode_options={"save_csv": True, "bool_pedal": True, "no_plot": True},
+        )
+
+    def infer(self, xml_path: str, composer: str):
+        """一曲前向(复用已载模型)。返回 (mid_path, csv_path) 或 (None, None)。"""
+        before = set(self.out_dir.glob("*.mid"))
+        self.model.infer_xml(xml_path=xml_path, composer_name=composer, qpm_primo=None)
+        # 定位本曲产物:优先 GUIDE §2.3 命名,兜底取本次新增的 .mid(不受命名版本差异影响)
+        stem, parent = Path(xml_path).stem, Path(xml_path).parent.name
+        mid = self.out_dir / f"{parent}_{stem}_by_isgn_{composer}.mid"
+        if not mid.exists():
+            new = sorted(set(self.out_dir.glob("*.mid")) - before, key=lambda p: p.stat().st_mtime)
+            mid = new[-1] if new else None
+        if not mid or not mid.exists():
+            return None, None
+        for cand in (Path(str(mid) + "_midi_notes.csv"),                 # 执行端 CLI 实测的后缀
+                     mid.parent / f"{mid.stem}_midi_notes.csv"):          # GUIDE §2.4 的另一种写法
+            if cand.exists():
+                return str(mid), str(cand)
+        return str(mid), None
+
+
 def csv_to_tmap(csv_path: str, part):
     """
     VN 的 CSV(xml_idx,start,end,pitch,velocity)→ 演奏 tmap(R-S5.6 主路径)。
@@ -219,10 +254,12 @@ def cpu_stage(mid: dict) -> dict:
 
 
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
-        allow_humanize_fallback=False, seed=20260706, limit=None, offset=0, n_cpu=0):
+        allow_humanize_fallback=False, seed=20260706, limit=None, offset=0, n_cpu=0,
+        vn_checkpoint=None):
     """
     GPU/CPU 流水线:主进程顺序跑 VN 推理(GPU,~0.5s),非阻塞把渲染交给 CPU worker 池(~5s),
     GPU 不再干等 CPU —— CPU 渲染第 N 曲时,GPU 已在推理 N+1...(见 rubato.ops.pipeline_map)。
+    VN 用 InferenceModel【只加载一次】(GUIDE §5),每曲只前向;vn_checkpoint=None 时退回 CLI(每曲重载,慢)。
     """
     import itertools
     from rubato.ops import pick_workers, pipeline_map
@@ -239,12 +276,24 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0, "humanized": 0,
            "utts": 0, "tast": 0, "failures": []}
 
+    # VN 引擎:优先 InferenceModel【只加载一次】(GUIDE §5,不每曲重载 172MB)。构造失败→退回 CLI。
+    engine = None
+    if vn_checkpoint:
+        try:
+            engine = VNEngine(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"))
+            print(f"VN: InferenceModel 已加载一次(复用),ckpt={vn_checkpoint}")
+        except Exception as e:
+            print(f"VN: 无法构造 InferenceModel({type(e).__name__}: {str(e)[:80]}),退回 CLI 每曲重载")
+            engine = None
+
     def gpu_stage(piece):
-        # 主进程:只做 VN 推理(GPU,快)。要复用 172MB 模型实例(R-S5.1)可在此持有 InferenceModel。
-        i = piece.get("_i", 0)
-        pid, xml_path, composer = _piece_meta(piece, i)
+        # 主进程:只做 VN 推理(GPU,快)。engine 复用已载模型;无 engine 才用 CLI(每曲重载)。
+        pid, xml_path, composer = _piece_meta(piece, piece.get("_i", 0))
         if not xml_path:
             return None
+        if engine is not None:
+            mid, csv_path = engine.infer(xml_path, composer)
+            return {"pid": pid, "xml_path": xml_path, "perf_mid": mid, "csv_path": csv_path}
         perf_mid = str(out_audio_dir / f"{pid}_perf.mid")
         csv_path = vn_infer(xml_path, composer, perf_mid)
         return {"pid": pid, "xml_path": xml_path, "perf_mid": perf_mid, "csv_path": csv_path}
@@ -302,13 +351,18 @@ def main():
     ap.add_argument("--allow-humanize-fallback", action="store_true",
                     help="仅在 VN 失败/超时的曲上兜底(SPEC R-S5.9);默认关,VN 失败即计入 failures")
     ap.add_argument("--workers", type=int, default=0, help="CPU 渲染并发;0=按内存自动定")
+    ap.add_argument("--vn-checkpoint",
+                    default="pretrained_weights/han_measnote_gru/checkpoint_best.pt",
+                    help="VN 权重 .pt(GUIDE §1 路径);给了就用 InferenceModel 只加载一次(§5)。"
+                         "路径不对会自动退回 CLI 并打印提示;传空串强制用 CLI")
     args = ap.parse_args()
     sources_cfg = yaml.safe_load(open(args.sources, encoding="utf-8"))
     presets_cfg = yaml.safe_load(open(args.presets, encoding="utf-8"))
     run(args.manifest, sources_cfg, presets_cfg, args.out_labels, args.out_corpus,
         args.out_audio_dir, offset=args.offset,
         allow_humanize_fallback=args.allow_humanize_fallback,
-        limit=args.limit or None, n_cpu=args.workers)
+        limit=args.limit or None, n_cpu=args.workers,
+        vn_checkpoint=(args.vn_checkpoint or None))
 
 
 if __name__ == "__main__":

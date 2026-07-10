@@ -69,4 +69,23 @@ rep2 = s5.run(manifest, {"sources":{},"render":{}}, {"presets":{}}, out_labels, 
 check("resume_no_new_utts", rep2["utts"] == 0, rep2)
 check("labels_not_duplicated", len(open(out_labels).readlines()) == n_before)
 
+print("[3] InferenceModel 只加载一次:引擎构造一次,每曲只前向(不重载)")
+loads = {"n": 0}; infers = {"n": 0}
+class FakeVNEngine:
+    def __init__(self, ckpt, out_dir, device=None):
+        loads["n"] += 1                                   # 构造(载模型)只应发生一次
+    def infer(self, xml, composer):
+        infers["n"] += 1
+        mid = os.path.join(out_audio, "e.mid"); open(mid, "w").close()
+        csv = mid + "_midi_notes.csv"; open(csv, "w").close()
+        return mid, csv
+s5.VNEngine = FakeVNEngine
+out2 = os.path.join(tmp, "audio2")
+rep3 = s5.run(manifest, {"sources":{},"render":{}}, {"presets":{}},
+              os.path.join(tmp,"l3.jsonl"), os.path.join(tmp,"c3.txt"),
+              out2, n_cpu=2, vn_checkpoint="fake.pt")
+check("engine_loaded_once", loads["n"] == 1, loads)          # 关键:模型只加载 1 次
+check("inferred_per_piece", infers["n"] == 2, infers)        # 2 曲各前向 1 次(复用模型)
+check("engine_vn_ok", rep3["vn_ok"] == 2, rep3)
+
 print(f"\n全部通过: {PASS} 项")
