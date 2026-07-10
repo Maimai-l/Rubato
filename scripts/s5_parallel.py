@@ -23,9 +23,12 @@ write_jsonl = _s5.write_jsonl
 write_text = _s5.write_text
 read_text = _s5.read_text
 
+from rubato.ops import pick_workers, concat_files
+
 ROOT = Path(r"D:\vscode_projects\ee_download")
 MANIFEST = ROOT / "work" / "manifest_pieces.jsonl"
-N_WORKERS = 24
+# 不再写死 24:s5 是纯文本(partitura 解析),每 worker ~0.6GB;按内存/CPU 自动定,再封顶 16。
+N_WORKERS = pick_workers(per_worker_gb=0.6, hard_cap=16)
 
 
 def split_manifest(pieces: list, n: int) -> list[list]:
@@ -62,49 +65,33 @@ def worker(chunk: list, work_dir: Path, worker_id: int) -> dict:
 
 
 def merge_outputs(work_dir: Path, n: int):
-    """Merge chunk outputs into final files."""
-    all_labels = []
-    corpus_lines = []
-    total_processed = 0
-    total_segments = 0
-    total_labels = 0
-    total_chars = 0
-    total_skipped = 0
-
+    """把分块产物【流式】合并到最终文件——逐块追加,不把全部标签/语料读进内存(旧实现会 OOM)。"""
+    total_processed = total_segments = total_labels = total_chars = total_skipped = 0
     for i in range(n):
-        chunk_labels = work_dir / f"pdmx_a2s_labels_{i}.jsonl"
-        chunk_corpus = work_dir / f"a2s_corpus_{i}.txt"
         chunk_report = ROOT / "reports" / f"s5_pdmx_a2s_{i}.json"
-
-        if chunk_labels.exists():
-            all_labels.extend(read_jsonl(str(chunk_labels)))
-        if chunk_corpus.exists():
-            corpus_lines.append(read_text(str(chunk_corpus)))
-
         if chunk_report.exists():
             with open(chunk_report, 'r') as f:
                 r = json.load(f)
-                total_processed += r.get("processed", 0)
-                total_segments += r.get("total_segments", 0)
-                total_labels += r.get("total_labels", 0)
-                total_chars += r.get("total_a2s_chars", 0)
-                total_skipped += r.get("skipped", 0)
+            total_processed += r.get("processed", 0)
+            total_segments += r.get("total_segments", 0)
+            total_labels += r.get("total_labels", 0)
+            total_chars += r.get("total_a2s_chars", 0)
+            total_skipped += r.get("skipped", 0)
 
-    # Write merged outputs
-    write_jsonl(str(work_dir / "pdmx_a2s_labels.jsonl"), all_labels)
-    write_text(str(work_dir / "a2s_corpus.txt"), "".join(corpus_lines))
+    # 流式合并(concat_files 一次只驻留一块的缓冲)
+    label_entries = concat_files(
+        [str(work_dir / f"pdmx_a2s_labels_{i}.jsonl") for i in range(n)],
+        str(work_dir / "pdmx_a2s_labels.jsonl"))
+    corpus_lines = concat_files(
+        [str(work_dir / f"a2s_corpus_{i}.txt") for i in range(n)],
+        str(work_dir / "a2s_corpus.txt"))
 
-    # Write merged report
     merged = {
-        "stage": "S5-parallel",
-        "workers": n,
-        "processed": total_processed,
-        "skipped": total_skipped,
-        "total_segments": total_segments,
-        "total_labels": total_labels,
+        "stage": "S5-parallel", "workers": n,
+        "processed": total_processed, "skipped": total_skipped,
+        "total_segments": total_segments, "total_labels": total_labels,
         "total_a2s_chars": total_chars,
-        "corpus_lines": sum(c.count("\n") for c in corpus_lines),
-        "label_entries": len(all_labels),
+        "corpus_lines": corpus_lines, "label_entries": label_entries,
     }
     report_path = ROOT / "reports" / "s5_pdmx_a2s.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)

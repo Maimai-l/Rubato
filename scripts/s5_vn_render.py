@@ -139,13 +139,12 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0, "humanized": 0,
            "utts": 0, "tast": 0, "failures": []}
     t0 = time.time()
-    skipped = 0
+    rep["skipped_done"] = 0
     for i, piece in enumerate(pieces):
         pid = piece.get("piece_id", f"p{i}")
-        # 断点续跑:已渲染过则跳过
-        whole_opus = str(out_audio_dir / f"{pid}_whole.opus")
-        if Path(whole_opus).exists() and Path(whole_opus).stat().st_size > 0:
-            skipped += 1
+        # 断点续跑:该曲 .done 标记存在 → 跳过(VN 是最贵的一步,不重跑;标记极小,整曲中间产物随后即删)
+        if (out_audio_dir / f"{pid}.done").exists():
+            rep["skipped_done"] += 1
             continue
         composer = piece.get("vn", {}).get("composer_used") or piece.get("composer") or "Beethoven"
         xml_rel = piece.get("xml_norm") or piece.get("xml_raw")
@@ -212,17 +211,25 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
                 for d in ("A2S", "A2S_lite"):
                     if row.get(d):
                         corpus_fh.write(row[d].strip() + "\n")
+        # 清理整曲中间产物(perf.mid + whole.opus)+ 写 .done 断点标记(段级音频已单独落盘)
+        for tmpf in (perf_mid, whole_audio):
+            if tmpf and Path(tmpf).exists() and (tmpf.endswith("_perf.mid") or tmpf.endswith("_whole.opus")):
+                try:
+                    Path(tmpf).unlink()
+                except OSError:
+                    pass
+        (out_audio_dir / f"{pid}.done").touch()
         if (i + 1) % 50 == 0:
             print(f"  [{i+1}/{len(pieces)}] vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} "
-                  f"utts={rep['utts']} tast={rep['tast']} ({(i+1)/(time.time()-t0):.2f} pc/s)")
+                  f"utts={rep['utts']} tast={rep['tast']} skip={rep['skipped_done']} "
+                  f"({(i+1)/(time.time()-t0):.2f} pc/s)")
     if label_fh:
         label_fh.close()
     if corpus_fh:
         corpus_fh.close()
     rep["elapsed_s"] = round(time.time() - t0, 1)
-    rep["skipped"] = skipped
-    print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} humanized={rep['humanized']} skipped={skipped} "
-          f"utts={rep['utts']} TAST={rep['tast']}")
+    print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} humanized={rep['humanized']} "
+          f"skipped={rep['skipped_done']} utts={rep['utts']} TAST={rep['tast']}")
     return rep
 
 
