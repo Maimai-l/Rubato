@@ -6,14 +6,14 @@
 sources:
   S1_salamander:
     engine: sfizz
-    ratio: 0.35
+    ratio: 0.40
     license: CC-BY-3.0
     path: assets/soundfonts/SalamanderGrandPiano/Salamander Grand Piano V3.sfz
     note: 主力音源,力度层完整,pp-ff 动态 28.7 dB,sfizz 零报错
     url: https://github.com/sfzinstruments/SalamanderGrandPiano
   S2_splendid:
     engine: sfizz
-    ratio: 0.20
+    ratio: 0.25
     license: Public Domain
     path: assets/soundfonts/SplendidGrandPiano/Splendid Grand Piano.sfz
     note: 146 MB 轻量,Grotrian 音色明亮,与 Salamander 互补
@@ -49,10 +49,10 @@ sources:
     note: stretch-tuned / untuned 双变体,音色现代,与 Salamander 互补
   S6_softify:
     engine: sfizz
-    ratio: 0.15
+    ratio: 0.10
     license: free
     path: assets/soundfonts/SoftifyPiano/SFZ/Softify Piano Vol 1 V1.1.sfz
-    note: 1.8 GB 高品质钢琴, SE8 ORTF 话筒位, sfz 第 627 行有格式小错但 sfizz 容错正常渲染
+    note: 1.8 GB 高品质钢琴, SE8 ORTF 话筒位
     url: https://www.softifymusic.com/
 render:
   sr_render: 44100
