@@ -18,14 +18,17 @@ python scripts/procmon.py kill --pattern sfizz --yes   # 杀掉所有 sfizz 渲�
 python scripts/s4_parallel.py --workers 6              # 用更小的并发重开(已渲的自动跳过)
 ```
 
-## S4 直排渲染(全量、内存安全、可续跑)
+## S4 直排渲染(内存预算调度,【自动不 OOM】、可续跑)
 ```
-python scripts/s4_parallel.py --limit 500              # 先 500 试吞吐 + 看内存
-python scripts/s4_parallel.py                          # 全量,worker 数按内存自动定
-python scripts/s4_parallel.py --workers 6              # 内存吃紧就手动封顶
-python scripts/s4_parallel.py --per-worker-gb 2.0      # 音源更大就调高单 worker 估算(worker 数会自动降)
-# 逐条状态: reports/s4_render.jsonl   断了直接重跑上面任一条,跳过已完成
+python scripts/s4_parallel.py                          # 全量。自动:读每个音源目录大小 + 可用内存,
+                                                       # 大音源少并发/小音源多并发,同时运行的音源和 ≤ 预算。
+# 不用再猜 worker 数。断了直接重跑,跳过已完成。逐条状态 reports/s4_render.jsonl
+# 还是紧(留更多给系统):   set S4_RESERVE_GB=8
+# 想更快(承认 sfizz 流式、少留内存):  set S4_MEM_FACTOR=0.5
+# 硬封顶进程数(可选):     set S4_WORKERS=8
 ```
+> 原理:权重 = 音源目录总大小(sfizz 常驻内存的安全上限)。ExperienceNY(6.5GB)自动只跑 1-3 个并发,
+> Splendid(146MB)可跑很多个 —— 内存占用之和永远 ≤ 预算,**不会再 OOM**。
 
 ## S5 表现性渲染(VN)—— GPU/CPU 流水线,不再干等
 ```

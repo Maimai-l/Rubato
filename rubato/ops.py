@@ -111,6 +111,64 @@ def stream_map(tasks, fn, *, max_workers: int, key_fn=None, done_fn=None,
     return stats
 
 
+# ---------------------------------------------------------------- 内存预算调度(永不 OOM)
+
+def mem_budget_map(tasks, fn, weight_fn, *, budget_gb: float, max_workers: int | None = None,
+                   on_result=None, done_fn=None, key_fn=None, initializer=None, initargs=(),
+                   log=print, log_every: int = 50):
+    """
+    并发跑 fn(task),硬保证【同时运行的 task 权重之和 ≤ budget_gb】—— 按内存准入,永不超预算。
+    weight_fn(task) -> gb:该 task 的内存占用(如它要加载的音源大小)。异构音源(146MB~6.5GB)
+    正是靠这个:大音源少并发、小音源多并发,自动填满预算但不爆。
+    单个 task 权重 > budget 时仍会【单独】跑(否则永远进不来),但同时只此一个。
+    done_fn(task)=True 的跳过(可续跑)。返回 {total, done_skipped, ok, failed, peak_gb_est}。
+    """
+    from concurrent.futures import ProcessPoolExecutor, FIRST_COMPLETED, wait
+    tasks = [t for t in tasks if not (done_fn and done_fn(t))]
+    max_workers = max_workers or (os.cpu_count() or 4)
+    stats = {"total": len(tasks), "done_skipped": 0, "ok": 0, "failed": 0, "peak_gb_est": 0.0}
+    used = 0.0
+    running = {}                     # future -> (task, weight)
+    it = iter(tasks)
+    pending = next(it, None)
+    done = 0
+    with ProcessPoolExecutor(max_workers=max_workers, initializer=initializer,
+                             initargs=initargs) as ex:
+        while pending is not None or running:
+            # 尽量准入:空闲时允许单个超预算,否则要求 used+w ≤ budget 且未满 worker
+            while pending is not None:
+                w = max(0.01, float(weight_fn(pending)))
+                fits = (used + w <= budget_gb) or (not running)
+                if fits and len(running) < max_workers:
+                    fut = ex.submit(fn, pending)
+                    running[fut] = (pending, w)
+                    used += w
+                    stats["peak_gb_est"] = max(stats["peak_gb_est"], used)
+                    pending = next(it, None)
+                else:
+                    break
+            if not running:
+                break
+            for fut in wait(list(running), return_when=FIRST_COMPLETED)[0]:
+                task, w = running.pop(fut)
+                used -= w
+                try:
+                    res = fut.result()
+                    if on_result is not None:
+                        on_result(task, res)
+                    stats["ok"] += 1
+                except Exception as e:
+                    stats["failed"] += 1
+                    log(f"[mem_budget] 失败 {key_fn(task) if key_fn else task}: "
+                        f"{type(e).__name__}: {str(e)[:100]}")
+                done += 1
+                if done % log_every == 0:
+                    log(f"[mem_budget] {done}/{len(tasks)} 运行中={len(running)} "
+                        f"占用≈{used:.1f}/{budget_gb:.1f}GB 峰值≈{stats['peak_gb_est']:.1f}GB "
+                        f"可用={available_gb():.1f}GB")
+    return stats
+
+
 # ---------------------------------------------------------------- GPU/CPU 流水线(重叠两阶段)
 
 def pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu: int, on_result=None,

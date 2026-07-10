@@ -19,6 +19,22 @@ def _cpu_stage(mid):
     import os
     return (mid, os.getpid())
 
+# mem_budget 用:共享计数追踪"同时运行的权重和",验证永不超预算。
+_SHARED = {}
+def _mb_init(cur, peak, lock):
+    _SHARED["cur"] = cur; _SHARED["peak"] = peak; _SHARED["lock"] = lock
+def _mb_task(item):
+    import time
+    idx, w = item
+    with _SHARED["lock"]:
+        _SHARED["cur"].value += w
+        if _SHARED["cur"].value > _SHARED["peak"].value:
+            _SHARED["peak"].value = _SHARED["cur"].value
+    time.sleep(0.03)                       # 让并发真实发生
+    with _SHARED["lock"]:
+        _SHARED["cur"].value -= w
+    return idx * 10
+
 
 print("[1] pick_workers:按内存/CPU 定并发,不写死")
 # 32GB 可用、每 worker 1.5GB、留 4GB → (32-4)/1.5≈18,但 CPU=8 封顶 → 8
@@ -90,5 +106,29 @@ print("[7] pipeline_map 可续跑(done_fn 跳过)")
 st2 = pipeline_map(range(30), gpu, _cpu_stage, n_cpu=4, on_result=lambda i,r: None,
                    done_fn=lambda x: True, log=lambda *a: None)
 check("pipeline_resume_skips_all", st2["done_skipped"] == 30 and st2["ok"] == 0, st2)
+
+print("[8] mem_budget_map:同时运行的权重和【永不超预算】(异构大/小音源混排)")
+from rubato.ops import mem_budget_map
+import multiprocessing as _mp
+mgr = _mp.Manager()
+cur = mgr.Value("d", 0.0); peak = mgr.Value("d", 0.0); lock = mgr.Lock()
+# 混排:6.5(大)/1.5/0.15(小)音源;预算 8GB。任何时刻和 ≤8。
+weights = ([6.5]*4 + [1.5]*10 + [0.15]*20)
+tasks = list(enumerate(weights))
+BUDGET = 8.0
+res = []
+st = mem_budget_map(tasks, _mb_task, weight_fn=lambda t: t[1], budget_gb=BUDGET,
+                    max_workers=16, on_result=lambda t, r: res.append(r),
+                    initializer=_mb_init, initargs=(cur, peak, lock), log=lambda *a: None)
+check("all_ran", st["ok"] == len(tasks), st)
+check("peak_within_budget", peak.value <= BUDGET + 1e-6, f"peak={peak.value} budget={BUDGET}")
+check("results_correct", sorted(res) == sorted(i*10 for i,_ in tasks), res[:5])
+
+print("[9] mem_budget_map:单个超预算 task 仍单独跑(不卡死)")
+peak.value = 0.0; cur.value = 0.0
+st2 = mem_budget_map([(0, 20.0), (1, 1.0)], _mb_task, weight_fn=lambda t: t[1],
+                     budget_gb=8.0, max_workers=4, on_result=lambda t,r: None,
+                     initializer=_mb_init, initargs=(cur, peak, lock), log=lambda *a: None)
+check("oversize_still_runs", st2["ok"] == 2, st2)         # 20GB 的也跑完了(单独)
 
 print(f"\n全部通过: {PASS} 项")

@@ -9,21 +9,41 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from rubato.render.core import render_midi_to_wav44, finalize, assign_source_and_preset
-from rubato.ops import pick_workers
+from rubato.ops import mem_budget_map, available_gb
 import yaml
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 MANIFEST = ROOT / "work" / "manifest_pieces.jsonl"
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
 OUT_DIR = ROOT / "work" / "pdmx_audio"
-# 内存感知定 worker 数。单个 sfizz 渲染的常驻内存【随音源差异很大】:
-# Splendid 146MB ~ Softify 1.8GB / ExperienceNY 6.5GB(多话筒),且慢渲会把内存按住到 timeout_s=600s。
-# 默认按 2.5GB/worker 保守估;真实值【必须实测】——先跑一条(见 N_PIECES 小值或先 --limit 思路),
-# 用 `python scripts/procmon.py watch --pattern sfizz` 看单个 sfizz 的 RSS,再:
-#   Windows:  set S4_WORKERS=6   或  set S4_PER_WORKER_GB=3.0   覆盖,不用改代码。
-_PER_WORKER_GB = float(os.environ.get("S4_PER_WORKER_GB", "2.5"))
-N_WORKERS = int(os.environ.get("S4_WORKERS", "0") or 0) or pick_workers(per_worker_gb=_PER_WORKER_GB, hard_cap=16)
+# 【内存预算调度,自动不 OOM】不再按固定 worker 数,而是按【每个音源的实际大小】准入:
+#   大音源(ExperienceNY 6.5GB)少并发、小音源(Splendid 146MB)多并发,
+#   同时运行的音源大小之和 ≤ 预算(可用内存 − 保留),硬保证不超内存(见 rubato.ops.mem_budget_map)。
+# 权重 = 音源目录总大小(sfizz 常驻内存的安全上限;流式加载实际更少)。想更激进用 S4_MEM_FACTOR<1。
+RESERVE_GB   = float(os.environ.get("S4_RESERVE_GB", "4"))     # 留给系统/主进程
+MEM_FACTOR   = float(os.environ.get("S4_MEM_FACTOR", "1.0"))   # <1 = 承认 sfizz 流式、少留内存、更多并发
+MAX_WORKERS  = int(os.environ.get("S4_WORKERS", "0") or 0) or min(os.cpu_count() or 4, 16)
 N_PIECES = 999999  # render all pieces
+
+
+def _source_weights(sources_cfg) -> dict:
+    """每个音源的常驻内存权重(GB)= 其 .sfz 所在目录的样本总大小(安全上限)。缺失→保守 2.0。"""
+    repo = CONFIG_DIR.parent
+    out = {}
+    for sid, s in sources_cfg["sources"].items():
+        d = (repo / s["path"]).parent
+        gb = 2.0
+        if d.exists():
+            total = 0
+            for f in d.rglob("*"):
+                try:
+                    if f.is_file():
+                        total += f.stat().st_size
+                except OSError:
+                    pass
+            gb = total / 1e9
+        out[sid] = max(0.1, gb * MEM_FACTOR)
+    return out
 
 _CFG = None
 
@@ -69,8 +89,15 @@ def render_one(args: tuple) -> dict:
             os.unlink(wav_path)
 
 
+def _done(task) -> bool:
+    op = Path(task[2]) / f"{task[1]}.opus"
+    return op.exists() and op.stat().st_size > 0     # 已渲染 → 跳过(可续跑,不重复)
+
+
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    sources_cfg, presets_cfg = load_configs()
+    src_gb = _source_weights(sources_cfg)
 
     pieces = []
     with open(MANIFEST, 'r', encoding='utf-8') as f:
@@ -78,31 +105,38 @@ def main():
             p = json.loads(line.strip())
             if p.get("split") == "train" and p.get("midi_path"):
                 pieces.append(p)
-
-    print(f"S4 Parallel Render: {len(pieces)} train pieces, {N_WORKERS} workers, first {N_PIECES}")
     tasks = [(p["midi_path"], f"pdmx_{p['piece_id']}", str(OUT_DIR)) for p in pieces[:N_PIECES]]
 
+    def weight_fn(task):
+        sid, _ = assign_source_and_preset(task[1], sources_cfg, presets_cfg)
+        return src_gb.get(sid, 2.0)                  # 该曲要加载的音源大小(GB)
+
+    budget = max(2.0, available_gb() - RESERVE_GB)
+    print(f"S4 render: {len(tasks)} 曲 | 内存预算 {budget:.1f}GB(可用 {available_gb():.1f} − 留 {RESERVE_GB}) "
+          f"| max_workers={MAX_WORKERS} | MEM_FACTOR={MEM_FACTOR}")
+    print("  音源权重(GB): " + ", ".join(f"{k}={v:.1f}" for k, v in sorted(src_gb.items())))
+    print("  → 大音源少并发、小音源多并发,同时运行的音源和 ≤ 预算,【硬保证不 OOM】。")
+
+    report_path = ROOT / "reports" / "s4_render.jsonl"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    rf = open(report_path, "a", encoding="utf-8")
+    counts = {"ok": 0, "fail": 0}
+
+    def on_result(task, res):
+        rf.write(json.dumps(res, ensure_ascii=False) + "\n")
+        counts["ok" if res.get("ok") else "fail"] += 1
+
     t0 = time.time()
-    with multiprocessing.Pool(N_WORKERS) as pool:
-        results = pool.map(render_one, tasks)
-    elapsed = time.time() - t0
-
-    ok = [r for r in results if r.get("ok")]
-    fail = [r for r in results if not r.get("ok")]
-    total_render = sum(r["elapsed_s"] for r in results)
-
+    stats = mem_budget_map(tasks, render_one, weight_fn=weight_fn, budget_gb=budget,
+                           max_workers=MAX_WORKERS, done_fn=_done, on_result=on_result,
+                           key_fn=lambda t: t[1], log_every=100)
+    rf.close()
+    dt = time.time() - t0
     print(f"\n{'='*50}")
-    print(f"Done: {len(ok)} ok, {len(fail)} fail in {elapsed/60:.1f}m")
-    print(f"Wall clock: {elapsed/60:.1f}m for {N_PIECES} pieces")
-    print(f"Throughput: {N_PIECES/(elapsed/3600):.0f} pieces/hour ({N_WORKERS} workers)")
-    if ok:
-        print(f"Avg single-piece render: {total_render/len(ok):.1f}s")
-    if fail:
-        print(f"Failures ({len(fail)}):")
-        for f in fail[:5]:
-            print(f"  {f['utt_id']}: {f.get('error')}")
-    total_opus = sum(os.path.getsize(str(OUT_DIR / f)) for f in os.listdir(str(OUT_DIR)) if f.endswith(".opus"))
-    print(f"Total Opus: {total_opus/1024/1024:.1f} MB")
+    print(f"DONE: ok={counts['ok']} fail={counts['fail']} skipped(已存在)={stats['done_skipped']} "
+          f"in {dt/60:.1f}m | 峰值内存占用≈{stats['peak_gb_est']:.1f}/{budget:.1f}GB")
+    print(f"  逐条状态: {report_path}")
+    print("  内存仍紧?set S4_RESERVE_GB=8 多留;想更快?set S4_MEM_FACTOR=0.5(承认 sfizz 流式)。")
 
 
 if __name__ == "__main__":
