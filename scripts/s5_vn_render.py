@@ -19,9 +19,12 @@ from __future__ import annotations
 import argparse
 import csv as _csv
 import json
+import multiprocessing as _mp
 import os
+import queue as _queue
 import subprocess
 import sys
+import threading as _threading
 import time
 from fractions import Fraction
 from pathlib import Path
@@ -165,6 +168,131 @@ class VNEngine:
             if cand.exists():
                 return str(mid), str(cand)
         return str(mid), None
+
+
+# ---------------------------------------------------------------- VN 子进程(把泄漏关进可回收进程)
+
+def _vn_child_main(req_q, resp_q, checkpoint, out_dir):
+    """VN 子进程主循环:构造 InferenceModel【一次】,循环收 (xml,composer) → infer → 回 (status,mid,csv)。
+    为什么在子进程:torch 模型常驻会随时间棘轮式泄漏主机 RSS(~1GB/5s,GPU 显存却是静态的 —— 是
+    CUDA 驱动/WDDM 在 RTX50 上占的主机内存,Python 侧 empty_cache/gc/重建对象都收不回)。放子进程里,
+    一 kill,OS 全额回收;主进程只发路径收路径,始终平坦(执行端 CLI 模式已实测主进程平)。"""
+    try:
+        from rubato.platform import quiet_wandb, harden_stdout
+        quiet_wandb(); harden_stdout()
+    except Exception:
+        pass
+    try:
+        eng = VNEngine(checkpoint, out_dir=out_dir)
+        resp_q.put(("ready", None, None))
+    except Exception as e:
+        resp_q.put(("init_fail", f"{type(e).__name__}: {str(e)[:150]}", None))
+        return
+    while True:
+        try:
+            item = req_q.get()
+        except (EOFError, OSError):
+            return
+        if item is None:                 # 收到停止信号
+            return
+        xml, composer = item
+        try:
+            mid, csv = eng.infer(xml, composer)
+            resp_q.put(("ok", mid, csv))
+        except Exception as e:
+            resp_q.put(("infer_fail", f"{type(e).__name__}: {str(e)[:150]}", None))
+
+
+class VNSubprocess:
+    """把 VN 推理关进【可回收的子进程】,按 RSS 水位 kill+重开,封死 torch 模型的时间型泄漏。
+    - 模型在子进程里【只加载一次】、跨曲复用(比 CLI 每曲重载快);子进程 RSS 越过 cap 才回收(重载~2s)。
+    - 监控线程在【渲染长等待期间】也盯 RSS(泄漏与推理无关、空闲也涨),越界即回收,主进程不 OOM。
+    - 推理卡死(未在 timeout 内返回)→ 杀掉重开,本曲判失败(续跑按标签重试)。
+    ctx/child_target/rss_fn 可注入,便于在无 GPU 沙盒里测回收机制。"""
+    def __init__(self, checkpoint, out_dir, rss_cap_gb=4.0, infer_timeout=180.0,
+                 monitor_sec=3.0, load_timeout=600.0, ctx=None, child_target=None, rss_fn=None):
+        self.checkpoint = checkpoint; self.out_dir = str(out_dir)
+        self.rss_cap_gb = rss_cap_gb; self.infer_timeout = infer_timeout
+        self.load_timeout = load_timeout
+        self.ctx = ctx or _mp.get_context("spawn")     # Windows 天然 spawn;CUDA 必须 spawn(不能 fork)
+        self._child = child_target or _vn_child_main
+        self._rss_override = rss_fn
+        self._lock = _threading.RLock()
+        self.proc = None; self.req_q = None; self.resp_q = None
+        self.recycles = 0; self.n_infer = 0
+        self._start()
+        self._stop = _threading.Event()
+        self._mon = _threading.Thread(target=self._monitor, args=(monitor_sec,), daemon=True)
+        self._mon.start()
+
+    def _start(self):
+        self.req_q = self.ctx.Queue(); self.resp_q = self.ctx.Queue()
+        self.proc = self.ctx.Process(target=self._child,
+                                     args=(self.req_q, self.resp_q, self.checkpoint, self.out_dir),
+                                     daemon=True)
+        self.proc.start()
+        status, msg, _ = self.resp_q.get(timeout=self.load_timeout)
+        if status != "ready":
+            raise RuntimeError(f"VN 子进程加载失败: {msg}")
+
+    def _rss_gb(self):
+        if self._rss_override is not None:
+            return self._rss_override(self.proc)
+        try:
+            import psutil
+            if self.proc and self.proc.pid:
+                return psutil.Process(self.proc.pid).memory_info().rss / 1e9
+        except Exception:
+            pass
+        return 0.0
+
+    def _kill(self):
+        p = self.proc; self.proc = None
+        for q in (self.req_q, self.resp_q):
+            try: q.close()
+            except Exception: pass
+        try:
+            if p is not None and p.is_alive():
+                p.terminate(); p.join(10)
+                if p.is_alive():
+                    p.kill(); p.join(5)
+        except Exception:
+            pass
+
+    def _recycle(self):
+        self._kill(); self._start(); self.recycles += 1
+
+    def _monitor(self, sec):
+        while not self._stop.wait(sec):
+            with self._lock:
+                if self.proc is not None and self._rss_gb() >= self.rss_cap_gb:
+                    self._recycle()
+
+    def infer(self, xml, composer):
+        with self._lock:
+            if self.proc is None or not self.proc.is_alive():
+                self._start()
+            try:
+                self.req_q.put((xml, composer))
+                status, mid, csv = self.resp_q.get(timeout=self.infer_timeout)
+            except (_queue.Empty, EOFError, OSError):
+                self._recycle()          # 卡死/管道坏 → 杀掉重开,本曲失败(续跑重试)
+                return None, None
+            self.n_infer += 1
+            if self._rss_gb() >= self.rss_cap_gb:    # 推理后也查一次,及时回收
+                self._recycle()
+            return (mid, csv) if status == "ok" else (None, None)
+
+    def close(self):
+        try: self._stop.set()
+        except Exception: pass
+        with self._lock:
+            try:
+                if self.proc is not None and self.proc.is_alive():
+                    self.req_q.put(None); self.proc.join(5)
+            except Exception:
+                pass
+            self._kill()
 
 
 def csv_to_tmap(csv_path: str, part):
@@ -368,31 +496,40 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0, "humanized": 0,
            "utts": 0, "tast": 0, "failures": []}
 
-    # VN 引擎:InferenceModel【只加载一次】(GUIDE §5)。ckpt 不传就【自动定位】virtuoso 标准权重
-    # (你不用传 --vn-checkpoint);找不到才退回 CLI(CLI 本就自动查权重,只是每曲重载)。
+    # VN 推理:默认放【可回收子进程】(VNSubprocess)—— 执行端实测证明 torch 模型常驻【主进程】会以
+    # ~1GB/5s 泄漏主机 RSS(RTX50/WDDM 驱动侧,Python 收不回),而 CLI(子进程)模式主进程恒平。
+    # 子进程按 RSS 水位 kill+重开:主进程始终平坦、模型跨曲复用(比 CLI 每曲重载快)。
+    # ckpt 不传就【自动定位】;S5_VN_INPROCESS=1 强制退回旧的主进程内联(仅调试/沙盒);都没有才退 CLI。
     if not vn_checkpoint:
         vn_checkpoint = _find_vn_checkpoint()
-    engine = None
-    if vn_checkpoint:
+    in_process = os.environ.get("S5_VN_INPROCESS", "0") == "1"
+    rss_cap = float(os.environ.get("S5_VN_RSS_CAP_GB", "4.0"))     # 子进程 RSS 超此值即回收(重载~2s)
+    infer_to = float(os.environ.get("S5_VN_INFER_TIMEOUT", "180"))  # 单曲推理超时→杀重开,本曲续跑重试
+    mon_sec = float(os.environ.get("S5_VN_MONITOR_SEC", "3"))       # 监控线程盯 RSS 的间隔
+    gc_every = int(os.environ.get("S5_GC_EVERY", "20"))
+    vn_recycle_n = int(os.environ.get("S5_VN_RECYCLE", "100"))
+    vn = None                         # VNSubprocess(默认)
+    eng = {"m": None, "seen": 0}      # 主进程内联 VNEngine(S5_VN_INPROCESS=1 / 测试用)
+    if vn_checkpoint and not in_process:
         try:
-            engine = VNEngine(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"))
-            harden_stdout()   # virtuoso import 带出的 wandb 会重包 stdout,构造后再硬化一次
-            print(f"VN: InferenceModel 已加载一次(复用),ckpt={vn_checkpoint}")
+            vn = VNSubprocess(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"),
+                              rss_cap_gb=rss_cap, infer_timeout=infer_to, monitor_sec=mon_sec)
+            harden_stdout()
+            print(f"VN: 子进程模式(模型驻子进程,RSS>{rss_cap}GB 自动回收→主进程恒平不 OOM),ckpt={vn_checkpoint}")
         except Exception as e:
-            print(f"VN: InferenceModel 构造失败({type(e).__name__}: {str(e)[:80]}),退回 CLI(自动查权重,每曲重载)")
-            engine = None
+            print(f"VN: 子进程构造失败({type(e).__name__}: {str(e)[:80]}),退回 CLI(每曲重载)")
+            vn = None
+    elif vn_checkpoint and in_process:
+        try:
+            eng["m"] = VNEngine(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"))
+            harden_stdout()
+            print(f"VN: 主进程内联(S5_VN_INPROCESS=1;注意会泄漏),ckpt={vn_checkpoint}")
+        except Exception as e:
+            print(f"VN: InferenceModel 构造失败({type(e).__name__}: {str(e)[:80]}),退回 CLI")
     else:
-        print("VN: 未定位到标准权重,用 CLI(自动查权重,每曲重载)。若知道 .pt 路径可传 --vn-checkpoint 换成只加载一次。")
+        print("VN: 未定位到标准权重,用 CLI(自动查权重,每曲重载)。")
 
-    # 【内存·主进程】VN 常驻主进程,pipeline_map 的 worker 回收【管不到主进程】。若 virtuoso 内部
-    #   每曲累积(缓存图/结果缓冲/CUDA 缓存),主进程 RSS 会随曲数一路涨到 OOM —— 这正是"从 60% 一路
-    #   爬到 99%、不停就得重启"的形态。两道止血:①每 GC_EVERY 曲 empty_cache+gc;②每 VN_RECYCLE 曲
-    #   把引擎整个重建(彻底清任何 Python 侧累积)。engine 放进可变盒子,gpu_stage 里替换。
-    gc_every = int(os.environ.get("S5_GC_EVERY", "20"))       # 每 N 曲 empty_cache + gc(便宜,常开)
-    vn_recycle = int(os.environ.get("S5_VN_RECYCLE", "100"))  # 每 N 曲重建 VN 引擎(清主进程累积;0=关)
-    eng = {"m": engine, "seen": 0}
-
-    def _rebuild_vn():
+    def _rebuild_vn():   # 仅内联模式的主进程累积兜底(子进程模式不用)
         import gc
         old = eng["m"]; eng["m"] = None
         try:
@@ -405,22 +542,25 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         if vn_checkpoint:
             try:
                 eng["m"] = VNEngine(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"))
-            except Exception as ex:   # 重建失败不致命:退回 CLI 直到下次重建点
+            except Exception as ex:
                 print(f"  [mem] VN 引擎重建失败({type(ex).__name__}: {str(ex)[:60]}),暂退 CLI", flush=True)
 
     def gpu_stage(piece):
-        # 主进程:只做 VN 推理(GPU,快)。engine 复用已载模型;无 engine 才用 CLI(每曲重载)。
+        # 主进程:只做 VN 推理(GPU,快)。子进程模式发路径给子进程;内联模式复用已载模型;都无则 CLI。
         pid, xml_path, composer = _piece_meta(piece, piece.get("_i", 0))
         if not xml_path:
             return None
+        if vn is not None:
+            mid, csv_path = vn.infer(xml_path, composer)     # 子进程推理,主进程恒平;超 cap 自动回收
+            return {"pid": pid, "xml_path": xml_path, "perf_mid": mid, "csv_path": csv_path}
         e = eng["m"]
         if e is not None:
             mid, csv_path = e.infer(xml_path, composer)
             eng["seen"] += 1; n = eng["seen"]
             if gc_every and n % gc_every == 0:
-                _free_gpu_and_gc(full=True)          # 便宜的定期清理(CUDA 缓存 + 循环引用)
-            if vn_recycle and n % vn_recycle == 0:
-                _rebuild_vn()                         # 主进程累积的兜底:整体重建 VN 引擎清水位
+                _free_gpu_and_gc(full=True)
+            if vn_recycle_n and n % vn_recycle_n == 0:
+                _rebuild_vn()
             return {"pid": pid, "xml_path": xml_path, "perf_mid": mid, "csv_path": csv_path}
         perf_mid = str(out_audio_dir / f"{pid}_perf.mid")
         csv_path = vn_infer(xml_path, composer, perf_mid)
@@ -492,13 +632,17 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
                          initializer=_cpu_init, max_tasks_per_child=recycle or None,
                          initargs=(sources_cfg, presets_cfg, str(out_audio_dir),
                                    allow_humanize_fallback, seed))
+    if vn is not None:
+        rep["vn_recycles"] = vn.recycles         # 子进程被回收几次(RSS 超 cap 的次数)
+        vn.close()
     if label_fh:
         label_fh.close()
     if corpus_fh:
         corpus_fh.close()
     print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} humanized={rep['humanized']} "
           f"skipped={stats['done_skipped']} dropped={stats['dropped']} "
-          f"utts={rep['utts']} TAST={rep['tast']} cpu_fail={stats['failed']}")
+          f"utts={rep['utts']} TAST={rep['tast']} cpu_fail={stats['failed']}"
+          + (f" vn_子进程回收={rep['vn_recycles']}次" if vn is not None else ""))
     return rep
 
 

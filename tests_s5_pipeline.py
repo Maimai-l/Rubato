@@ -81,6 +81,7 @@ class FakeVNEngine:
         csv = mid + "_midi_notes.csv"; open(csv, "w").close()
         return mid, csv
 s5.VNEngine = FakeVNEngine
+os.environ["S5_VN_INPROCESS"] = "1"     # 走主进程内联(mock 的 VNEngine);子进程模式 spawn 收不到 monkeypatch
 out2 = os.path.join(tmp, "audio2")
 rep3 = s5.run(manifest, {"sources":{},"render":{}}, {"presets":{}},
               os.path.join(tmp,"l3.jsonl"), os.path.join(tmp,"c3.txt"),
