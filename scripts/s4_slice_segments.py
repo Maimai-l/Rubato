@@ -101,7 +101,7 @@ def main(argv=None):
     ap.add_argument("--manifest", default=str(ROOT / "work" / "manifest_pieces.jsonl"))
     ap.add_argument("--audio-dir", default=str(ROOT / "work" / "pdmx_audio"))
     ap.add_argument("--out-dir", default="", help="段音频输出目录;默认与 --audio-dir 相同")
-    ap.add_argument("--min-sec", type=float, default=1.0)
+    ap.add_argument("--min-sec", type=float, default=2.0, help="用户定:<2s 即退化样本")
     ap.add_argument("--max-sec", type=float, default=40.0)
     ap.add_argument("--slack", type=float, default=1.0)
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 曲(冒烟)")

@@ -227,9 +227,9 @@ R-S5.5 力度增广【新增,来自你的封装能力】:`velocity_multiplier` �
 R-S5.6 TAST 时间戳来源(依 U9 结果二选一):
 - 主路径:save_csv 每行↔乐谱音符且含演奏 onset → 直接构成 time_map 喂 `score_to_intermo(part, time_map)`,VN 产物全 dialect 可用。
 - 降级路径:CSV 不含映射 → VN 产物仅供 A2S/A2S_lite;TAST 时间戳由 humanize 路线(时间自生成,天然有真值)与 nASAP 承担。**主线不因此受损**。
-R-S5.7 humanize 兜底【推断,冻结参数】:对 straight MIDI 施加 ①逐拍速度因子 OU 过程 φ_{k+1}=φ_k+0.2(1−φ_k)Δt+0.05√Δt·ε,截断 [0.90,1.10];②onset 抖动 N(0,12ms) 截 ±35ms,off 同步平移保时值;③力度 +U[−10,10] 截 [20,120];④踏板照谱。覆盖对象:VN failed/timeout 的曲 + 按预算未进 VN 队列的曲。
+R-S5.7 【已废除,2026-07-11 用户拍板:只要 VirtuosoNet,不要恒速假演奏。humanize 模块已删除;VN 失败=该曲失败,按标签续跑重试。原文留档:】humanize 兜底【推断,冻结参数】:对 straight MIDI 施加 ①逐拍速度因子 OU 过程 φ_{k+1}=φ_k+0.2(1−φ_k)Δt+0.05√Δt·ε,截断 [0.90,1.10];②onset 抖动 N(0,12ms) 截 ±35ms,off 同步平移保时值;③力度 +U[−10,10] 截 [20,120];④踏板照谱。覆盖对象:VN failed/timeout 的曲 + 按预算未进 VN 队列的曲。
 R-S5.8 资源约束【不变量】:VN 批量与 S11 训练不得同时占 GPU。依 U8 环境实测单曲耗时(你的指南:5070Ti ≈3–5s/曲)确定 VN 队列曲数上限 = 训练开始前可完成的量;溢出部分自动划给 humanize。队列进度记 ledger(jsonl),中断可续。
-R-S5.9 VN 失败判据:进程非零退出 / 超时 timeout=300s / 输出 .mid 缺失或 0 音符。失败入 failures 并转 humanize,**不重试超过 1 次**。
+R-S5.9 VN 失败判据:进程非零退出 / 超时 timeout=300s / 输出 .mid 缺失或 0 音符。失败入 failures,【2026-07-11 起不转 humanize(已废除)】,由按标签续跑机制重试。
 
 ### 验收
 A-S5.1 首批 20 曲:输出 .mid 音符数 ∈ [0.8, 1.2]×谱面音符数(展开后);抽 3 曲人耳对比 flat 版,可闻 rubato。

@@ -100,7 +100,7 @@ def process_piece(piece: dict, xml_root: Path,
         try:
             # flat→A2S/A2S_lite。此路【故意不产 TAST】:TAST 时间戳必须与音频同一 tmap,
             # 本脚本不渲染音频(恒速估算与真实音频不匹配)。PDMX 的表现性音频+匹配 TAST
-            # 由 scripts/s5_vn_render.py 产(humanize/VN)。本脚本只供 tokenizer 语料 + A2S 训练标签。
+            # 由 scripts/s5_vn_render.py 产(仅 VirtuosoNet)。本脚本只供 tokenizer 语料 + A2S 训练标签。
             labels, fails = make_labels(sub_ir, "flat")
             a2s = labels.get("A2S")
             if a2s:

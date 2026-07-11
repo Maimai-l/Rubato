@@ -6,14 +6,14 @@ S5 表现性渲染驱动 —— 调【你本地的 VirtuosoNet】(不是重写�
 CSV 的 (xml_idx,start,end,pitch,velocity) 给出音符↔演奏秒(GUIDE §2.4,即 SPEC R-S5.6 主路径),
 据此建 tmap;VN 的演奏 MIDI 直接渲成音频。音频与 TAST 同一 tmap ⇒ 天然对齐。
 
-VN 主路径(默认)。humanize 只是 SPEC R-S5.9 的失败兜底(VN 超时/非零退出/无 CSV 时才用),
-不是与 VN 并列的选项 —— 你有 VN,VN 就是管线。
+VN 是【唯一】路径(用户拍板,humanize 兜底已删除):VN 超时/非零退出/无 CSV = 该曲失败,
+计入 failures,按标签续跑机制重试;绝不用假的恒速"人性化"顶替真演奏。
 
 用法(执行端,py312 环境已装 virtuoso):
   python scripts/s5_vn_render.py \
     --out-labels work/pdmx_perf_labels.jsonl --out-corpus work/a2s_corpus.txt \
     --out-audio-dir work/pdmx_audio
-  # 想只在 VN 挂掉时兜底、或先干验:见 --allow-humanize-fallback / --limit。
+  # 先干验:--limit 20。
 """
 from __future__ import annotations
 import argparse
@@ -390,13 +390,14 @@ def _read_audio(path: str):
         return None, None
 
 
-def _slice_audio(audio, sr: int, t0: float, t1: float, out_path: str) -> str | None:
+def _slice_audio(audio, sr: int, t0: float, t1: float, out_path: str,
+                 min_sec: float = 2.0) -> str | None:
     """从【已载入】的整曲音频切 [t0,t1] 秒(段级 utt)。返回路径或 None。
     【内存修复】旧版每段各自 sf.read 整曲 —— 一首 30 段的曲把整曲反复读 30 次,worker 峰值分配
     被顶高且 heap 不还 OS(棘轮)。现在 cpu_stage 读一次、把数组传进来。"""
     import soundfile as sf     # 拆函数时 import 曾漏在 _read_audio 里 → NameError(执行端实测),必须在此
     a, b = max(0, int(t0 * sr)), min(len(audio), int(t1 * sr))
-    if b - a < int(0.2 * sr):
+    if b - a < int(min_sec * sr):      # 【实际长度】保底与守卫同标准(旧版 0.2s 是漏洞:截断残段能溜过)
         return None
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     # soundfile 不支持 .opus 写;统一用 .wav 落盘(后续 build_dataset 的 resolve_audio 会搜 .wav)
@@ -428,22 +429,20 @@ def _piece_meta(piece, i):
 _W: dict = {}
 
 
-def _cpu_init(sources_cfg, presets_cfg, out_audio_dir, allow_hum, seed):
-    _W.update(sources=sources_cfg, presets=presets_cfg,
-              out=Path(out_audio_dir), allow_hum=allow_hum, seed=seed)
+def _cpu_init(sources_cfg, presets_cfg, out_audio_dir):
+    _W.update(sources=sources_cfg, presets=presets_cfg, out=Path(out_audio_dir))
 
 
 def cpu_stage(mid: dict) -> dict:
     """
-    CPU 阶段(worker 进程,~5s):载谱 → tmap(VN CSV / humanize)→ 渲染整曲 → 按段切 + 打标签。
+    CPU 阶段(worker 进程,~5s):载谱 → tmap(仅 VN CSV)→ 渲染整曲 → 按段切 + 打标签。
     段级音频落盘;返回 rows 给主进程统一写标签/语料(单写者,免并发写冲突)。
     """
     import partitura
-    from rubato.render.humanize import humanize_timemap
     pid = mid["pid"]; xml_path = mid["xml_path"]
     perf_mid = mid["perf_mid"]; csv_path = mid["csv_path"]
     out = _W["out"]
-    res = {"pid": pid, "vn_ok": 0, "vn_fail": 0, "humanized": 0, "rows": [], "fail": None}
+    res = {"pid": pid, "vn_ok": 0, "vn_fail": 0, "rows": [], "fail": None}
     whole_audio = str(out / f"{pid}_whole.opus")
     try:   # 【清理】finally 兜底删所有中间产物 —— 旧版异常路径会把 _perf.mid/_whole.opus/csv 留在盘上
         try:
@@ -459,18 +458,14 @@ def cpu_stage(mid: dict) -> dict:
             tmap, _ = csv_to_tmap(csv_path, part)
             _safe_unlink(csv_path)     # 【清理】CSV 用完即删 —— 旧版从不删,_vn/ 随曲数无限堆积
             csv_path = None
-        if tmap is None:
+        if tmap is None:               # VN 是唯一路径:无 tmap = 该曲失败,续跑重试,不造假演奏
             res["vn_fail"] = 1
-            _safe_unlink(perf_mid)     # 【清理】兜底路径也删 VN 的 mid(旧版置 None 后文件漏在盘上)
-            perf_mid = None
-            if not _W["allow_hum"]:
-                res["fail"] = "vn_no_tmap"
-                return res
-            tmap = humanize_timemap(ir, seed=_W["seed"], piece_id=pid)   # R-S5.9 兜底
-            res["humanized"] = 1
-        else:
-            res["vn_ok"] = 1
+            res["fail"] = "vn_no_tmap"
+            return res
+        res["vn_ok"] = 1
 
+        bounds = [m.start for m in ir.measures] + [ir.score_end]
+        bounds_end = bounds[-1] if bounds else None
         audio = None; sr = 0
         if perf_mid:
             try:
@@ -482,15 +477,22 @@ def cpu_stage(mid: dict) -> dict:
             if audio is None:
                 res["fail"] = "read_audio"
                 return res
+            # 【截断校验】渲染被超时杀/中途失败 → 音频比 tmap 预期短,后段会被夹成残段
+            # (守卫只查"计划时长",管不住实际音频不够长)。差超容差 → 整曲判失败重跑,不出残段。
+            expected_end = float(tmap(bounds_end)) if bounds_end is not None else 0.0
+            if expected_end - (len(audio) / max(sr, 1)) > 2.0:
+                res["fail"] = f"render_truncated:{len(audio)/max(sr,1):.0f}s<{expected_end:.0f}s"
+                return res
 
-        bounds = [m.start for m in ir.measures] + [ir.score_end]
         # 【分段必须用真 tmap】(执行端听音频抓出的 bug):旧版传 sec_per_whole=2.0(恒速 120bpm 假设)
         # 决定"切哪几小节",而音频切片用真 tmap —— 两个时间源打架:快曲被切成 0.2s 碎片、慢曲切出
         # 93s 超长段(max_sec=40 形同虚设)。segment_score 本就支持 tmap(nASAP 同款),传入即按
-        # 【真实演奏秒】约束段长;VN/humanize 两条路到这里都有 tmap。
-        min_sec = float(os.environ.get("S5_SEG_MIN_SEC", "1.0"))
+        # 【真实演奏秒】约束段长;到这里必有 VN 的真 tmap(没有就已判失败返回)。
+        min_sec = float(os.environ.get("S5_SEG_MIN_SEC", "2.0"))   # 用户定:<2s 即退化样本
+        # 段参数 = 论文/SPEC R-S8.1 规格:4≤小节数≤32 且 ≤40s(与文本标签、nASAP 同一规格)。
+        # 旧值 2/16 是编写时偏离规格的私设(无依据、未报告);min=2 在快曲上正是 <2s 碎片的来源之一。
         for si, (sub_ir, (a, b)) in enumerate(
-                segment_score(ir, min_measures=2, max_measures=16, max_sec=40.0, tmap=tmap)):
+                segment_score(ir, min_measures=4, max_measures=32, max_sec=40.0, tmap=tmap)):
             utt_id = f"pdmxperf_{pid}_{si:03d}"
             score_off = bounds[a] if a < len(bounds) else bounds[-1]
             t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))
@@ -502,7 +504,8 @@ def cpu_stage(mid: dict) -> dict:
                 continue
             seg_audio = None
             if audio is not None:
-                seg_audio = _slice_audio(audio, sr, t_lo, t_hi, str(out / f"{utt_id}.opus"))
+                seg_audio = _slice_audio(audio, sr, t_lo, t_hi, str(out / f"{utt_id}.opus"),
+                                         min_sec=min_sec)
                 if seg_audio is None:      # 应有音频却切不出 → 不产出残行(human 段无音频没意义)
                     res["seg_no_audio"] = res.get("seg_no_audio", 0) + 1
                     continue
@@ -517,8 +520,7 @@ def cpu_stage(mid: dict) -> dict:
 
 
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
-        allow_humanize_fallback=False, seed=20260706, limit=None, offset=0, n_cpu=0,
-        vn_checkpoint=None):
+        limit=None, offset=0, n_cpu=0, vn_checkpoint=None):
     """
     GPU/CPU 流水线:主进程顺序跑 VN 推理(GPU,~0.5s),非阻塞把渲染交给 CPU worker 池(~5s),
     GPU 不再干等 CPU —— CPU 渲染第 N 曲时,GPU 已在推理 N+1...(见 rubato.ops.pipeline_map)。
@@ -542,7 +544,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         print(f"续跑:{len(labeled)} 曲已有标签(跳过);{stale} 个 .done 无对应标签(旧 CLI 遗留,将重跑补回)")
     label_fh = open(out_labels, "a", encoding="utf-8") if out_labels else None
     corpus_fh = open(out_corpus, "a", encoding="utf-8") if out_corpus else None
-    rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0, "humanized": 0,
+    rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0,
            "utts": 0, "tast": 0, "failures": []}
 
     # VN 推理:默认放【可回收子进程】(VNSubprocess)—— 执行端实测证明 torch 模型常驻【主进程】会以
@@ -621,7 +623,6 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 
     def on_result(piece, res):
         rep["vn_ok"] += res["vn_ok"]; rep["vn_fail"] += res["vn_fail"]
-        rep["humanized"] += res["humanized"]
         rep["seg_too_short"] = rep.get("seg_too_short", 0) + res.get("seg_too_short", 0)
         rep["seg_no_audio"] = rep.get("seg_no_audio", 0) + res.get("seg_no_audio", 0)
         if res.get("fail"):
@@ -691,8 +692,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
                          done_fn=done_fn, key_fn=lambda p: p.get("piece_id"),
                          weight_fn=weight_fn, budget_gb=budget,
                          initializer=_cpu_init, max_tasks_per_child=recycle or None,
-                         initargs=(sources_cfg, presets_cfg, str(out_audio_dir),
-                                   allow_humanize_fallback, seed))
+                         initargs=(sources_cfg, presets_cfg, str(out_audio_dir)))
     if vn is not None:
         rep["vn_recycles"] = vn.recycles         # 子进程被回收几次(RSS 超 cap 的次数)
         vn.close()
@@ -700,7 +700,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         label_fh.close()
     if corpus_fh:
         corpus_fh.close()
-    print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} humanized={rep['humanized']} "
+    print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} "
           f"skipped={stats['done_skipped']} dropped={stats['dropped']} "
           f"utts={rep['utts']} TAST={rep['tast']} cpu_fail={stats['failed']} "
           f"过短段弃={rep.get('seg_too_short', 0)} 无音频段弃={rep.get('seg_no_audio', 0)}"
@@ -718,8 +718,6 @@ def main():
     ap.add_argument("--out-labels", default=str(ROOT / "work" / "pdmx_perf_labels.jsonl"))
     ap.add_argument("--out-corpus", default=str(ROOT / "work" / "a2s_corpus.txt"))
     ap.add_argument("--out-audio-dir", default=str(ROOT / "work" / "pdmx_audio"))
-    ap.add_argument("--allow-humanize-fallback", action="store_true",
-                    help="仅在 VN 失败/超时的曲上兜底(SPEC R-S5.9);默认关,VN 失败即计入 failures")
     ap.add_argument("--workers", type=int, default=0, help="CPU 渲染并发;0=按内存自动定")
     ap.add_argument("--vn-checkpoint", default="",
                     help="通常【不用传】——脚本自动定位 virtuoso 标准权重(GUIDE §1)。"
@@ -729,7 +727,6 @@ def main():
     presets_cfg = yaml.safe_load(open(args.presets, encoding="utf-8"))
     run(args.manifest, sources_cfg, presets_cfg, args.out_labels, args.out_corpus,
         args.out_audio_dir, offset=args.offset,
-        allow_humanize_fallback=args.allow_humanize_fallback,
         limit=args.limit or None, n_cpu=args.workers,
         vn_checkpoint=(args.vn_checkpoint or None))
 

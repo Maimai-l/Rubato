@@ -33,8 +33,8 @@ def _pick(weights: dict, u: float):
 def events_to_midi(events: list[dict], pedal: list, out_path: str,
                     tempo_bpm: float = 120.0, ppq: int = 480) -> str:
     """
-    演奏事件(秒)→ MIDI 文件。S5(VN/humanize)把演奏事件渲成音频前的一步:
-    humanize_events / VN 产出 [{pitch,on,off,vel}] + pedal[(sec,down)] → .mid,
+    演奏事件(秒)→ MIDI 文件。演奏事件渲成音频前的一步:
+    调用方产出 [{pitch,on,off,vel}] + pedal[(sec,down)] → .mid,
     再交给 render_midi_to_wav44。用固定 tempo 把秒换算成 tick(秒本身已含表现性时序,
     tempo 只是 tick 标度,不改听感)。踏板写 CC64。
     """

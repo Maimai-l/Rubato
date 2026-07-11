@@ -61,7 +61,7 @@ def scan(labels_path: Path, min_sec: float, max_sec: float):
             stats["pieces"].add(pid)
             ap = row.get("audio_path")
             if not ap:
-                stats["no_audio_field"] += 1      # humanize 无音频行:不据此判坏
+                stats["no_audio_field"] += 1      # 无音频字段的行:不据此判坏
                 continue
             dur = _duration_s(ap)
             if dur is None:
@@ -124,7 +124,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="按真实音频时长找出坏分段的曲,清掉待重渲(默认干跑)")
     ap.add_argument("--labels", default=str(ROOT / "work" / "pdmx_perf_labels.jsonl"))
     ap.add_argument("--audio-dir", default=str(ROOT / "work" / "pdmx_audio"))
-    ap.add_argument("--min-sec", type=float, default=1.0)
+    ap.add_argument("--min-sec", type=float, default=2.0, help="用户定:<2s 即退化样本")
     ap.add_argument("--max-sec", type=float, default=40.0, help="与 segment_score 的 max_sec 一致")
     ap.add_argument("--slack", type=float, default=1.0,
                     help="max-sec 容差(秒):切片按小节界取整会略超 max_sec,不算坏")
@@ -145,7 +145,7 @@ def main(argv=None):
     print(f"  行数 {st['rows']}(VN 行 {st['vn_rows']},涉及 {n_pieces} 曲)")
     print(f"  段时长范围 [{st['min_seen']:.1f}s, {st['max_seen']:.1f}s] | "
           f"过短(<{args.min_sec}s): {st['too_short']} | 过长(>{args.max_sec}+{args.slack}s): {st['too_long']} | "
-          f"音频缺失: {st['missing_audio']} | 无音频字段(humanize): {st['no_audio_field']}")
+          f"音频缺失: {st['missing_audio']} | 无音频字段: {st['no_audio_field']}")
     print(f"  → 含越界段需重做的曲: {len(bad)} / {n_pieces}"
           f"({0 if not n_pieces else round(100 * len(bad) / n_pieces, 1)}%)")
     if not args.apply:
