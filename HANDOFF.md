@@ -49,15 +49,26 @@ git pull
 # — S5 VN 全量重跑(分段算法级修复,用户已拍板)—
 python scripts/s5_repair_segments.py --all --apply   # 清全部 VN 行/段音频/.done(labels 留 .bak)
 python scripts/s5_vn_render.py                       # 全量重渲(真 tmap 分段);另终端 memtrace 照旧
-# — S4 速度钳制 + 段切割 —
+# — S4 速度钳制 + 文本标签重生成 + 段切割 —
 python scripts/s4_fix_tempo.py                       # 干跑:看多少曲离谱速度(先贴报告)
 python scripts/s4_fix_tempo.py --apply               # 钳到 80bpm + 删这些曲的整曲音频
 python scripts/s4_parallel.py                        # 只重渲被删的曲(续跑机制)
+python scripts/s5_parallel.py                        # 文本标签重生成(分段已改真 tmap,CPU-only)
 python scripts/s4_slice_segments.py --limit 20       # 冒烟:看 sliced/skip 计数
 python scripts/s4_slice_segments.py                  # 全量切段 → pdmx_audio/<utt_id>.flac
+# — MAESTRO AMT 切窗(审计新发现:整曲 AMT 配不成训练对,占混比 0.30)—
+python scripts/s6_amt_windows.py --limit 5           # 冒烟:看 windows/labels 计数
+python scripts/s6_amt_windows.py                     # 全量 → work/maestro_amt_windows.jsonl
 ```
-判据:S5 DONE 行 `过短段弃/无音频段弃` 小、不 OOM;S4 切割报告里 structure_mismatch 占比贴回来
-(高 = MIDI 展开了反复,需另处理);抽听几段确认速度/边界自然。
+判据:S5 DONE 行 `过短段弃/无音频段弃` 小、不 OOM;S4 切割报告 structure_mismatch 占比贴回来
+(高 = MIDI 展开了反复,需另处理);文本标签重生成日志里 `tempo_fallback` 占比贴回来;
+s6_amt_windows 的 windows/win_fail 计数贴回来;抽听几段确认速度/边界自然。
+
+### 全管线时间源审计(2026-07-11,见 reports/pipeline_time_audit.md)
+120bpm 同类问题清查:共 6 处(A 文本标签恒速分段、B 三个无预算陈旧渲染脚本已截断为守卫、
+C MAESTRO AMT 切窗缺失、D overlap 分段 max_sec 静默失效、E/F 两处休眠地雷加铁律注释),全部处理;
+MAESTRO tick→秒、s7 真 tmap、s6 命名、events_to_midi 等 6 处查过干净、留档。
+【别再跑】s4_retry.py / s4_batch_render.py / s4_retry_worker.py —— 已截断为硬退出守卫。
 
 ## 全绿基线
 所有 `tests_*.py` 通过(`tests_ops` 23、`tests_s5_pipeline` 12、`tests_ops_recycle` 6 等)。

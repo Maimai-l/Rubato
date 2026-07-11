@@ -45,6 +45,11 @@ def humanize_timemap(ir: ScoreIR, base_sec_per_whole: float = 2.0,
     直排乐谱 + OU 速度 → 演奏 TimeMap(乐谱位置 Fraction → 演奏秒)。
     拍点网格用 _derive_beats;每拍的名义时长 = (1/den)*base_sec_per_whole,乘 OU 因子 φ_k
     得实际时长,累加成演奏时刻。锚点覆盖每个拍点(含各小节下拍),TAST 投影用它加时间戳。
+
+    ⚠ base_sec_per_whole=2.0 是【基准恒速 120bpm】:标签与音频由同一 tmap 产出、自洽不错位
+    (与 120bpm 事故不同类),但音乐上所有曲都在 ~120bpm 附近,忽略谱面速度记号。
+    此路仅是 VN 失败的兜底(默认关);若要启用,调用方应从该曲渲染 MIDI 的
+    rubato.data.midi_time 取真实平均速度换算 base_sec_per_whole,别用默认 2.0。
     """
     beats = _derive_beats(ir)                       # [(score_pos, is_downbeat)] 升序
     positions = [p for p, _ in beats]

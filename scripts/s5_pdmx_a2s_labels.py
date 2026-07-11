@@ -63,14 +63,33 @@ def process_piece(piece: dict, xml_root: Path,
         stats["skipped"] = f"part_to_ir_failed:{type(e).__name__}:{str(e)[:80]}"
         return [], stats
 
+    # 【分段用真实速度图,不再恒速 120bpm】(与 S5 VN 同一类 bug 的 S4 侧修复):
+    # 该曲的渲染 MIDI 自带 set_tempo 真速度 → midi_time 提取 tmap;max_sec=40 约束按真实秒生效,
+    # 快曲不再被切碎、慢曲不再超训练窗。结构守卫:MIDI 小节网格须与 IR 对齐(展开反复等结构
+    # 不一致 → 回退恒速并计数,此时该曲的段在 s4_slice_segments 处也会被 structure_mismatch 跳过)。
+    tmap = None
+    midi_path = piece.get("midi_path")
+    if midi_path and Path(midi_path).exists():
+        try:
+            from rubato.data.midi_time import midi_time
+            mtmap, mmeasures, mtotal = midi_time(midi_path)
+            if (len(mmeasures) == len(ir.measures)
+                    and abs(float(mtotal - ir.score_end)) <= 1.0 / 16):
+                tmap = mtmap
+            else:
+                stats["tempo_fallback"] = "structure_mismatch"
+        except Exception as e:
+            stats["tempo_fallback"] = f"midi_fail:{type(e).__name__}"
+    else:
+        stats["tempo_fallback"] = "no_midi"
     try:
         if overlap:
-            segs = segment_score_overlap(ir, min_measures=min_measures,
+            segs = segment_score_overlap(ir, tmap, min_measures=min_measures,
                                          max_measures=max_measures, max_sec=max_sec)
         else:
             segs = segment_score(ir, min_measures=min_measures,
                                  max_measures=max_measures, max_sec=max_sec,
-                                 sec_per_whole=2.0)   # 恒速估算切段时长(无 tmap)
+                                 tmap=tmap, sec_per_whole=None if tmap else 2.0)
         stats["segments"] = len(segs)
     except Exception as e:
         stats["skipped"] = f"segment_failed:{type(e).__name__}:{str(e)[:80]}"

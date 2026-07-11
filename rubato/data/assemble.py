@@ -88,9 +88,17 @@ def assemble(sources: list[dict], audio_resolver, default_split: str = "train") 
                 st["no_audio"] += 1
                 continue
             audio_path, dur_s = res
-            utts.append({"utt_id": uid, "kind": kind, "audio_path": audio_path,
-                         "dur_s": float(dur_s), "dialects": dialects,
-                         "split": split or default_split, "domain": domain})
+            u = {"utt_id": uid, "kind": kind, "audio_path": audio_path,
+                 "dur_s": float(dur_s), "dialects": dialects,
+                 "split": split or default_split, "domain": domain}
+            # 【窗内 utt】行带 win=[t0,t1](秒,整曲坐标)= 该 utt 只用整曲音频的一个窗
+            # (MAESTRO AMT 切窗:整曲 FLAC 不切文件,加载时按窗读)。dur_s 必须按窗长,
+            # 否则 bucketing/tiling 拿整曲时长会全错。
+            win = row.get("win")
+            if isinstance(win, (list, tuple)) and len(win) == 2:
+                u["win"] = [float(win[0]), float(win[1])]
+                u["dur_s"] = float(win[1]) - float(win[0])
+            utts.append(u)
             labels[uid] = lab
             st["kept"] += 1
 

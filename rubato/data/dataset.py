@@ -142,16 +142,25 @@ def online_room_augment(audio, utt_id: str, epoch: int, presets_cfg: dict,
                         preset_id=chosen, irs_dir=irs_dir)
 
 
-def load_audio(path: str, sr_target: int = 16000, tile_pad_s: float = 0.0):
+def load_audio(path: str, sr_target: int = 16000, tile_pad_s: float = 0.0,
+               win: list | tuple | None = None):
     """
     FLAC/Opus → 16k mono float32 numpy。tile_pad_s>0 时前导补零(R-S11.3 tiling)。
+    win=[t0,t1](秒,整曲坐标):窗内 utt(MAESTRO AMT 切窗)只读整曲的该窗 ——
+    用 soundfile 的 start/stop 帧级读取,不把几分钟的整曲载进内存、不切文件占双倍磁盘。
     LOCAL:需 soundfile(+soxr 重采样),沙盒不跑真实音频。
     R-S4.5【不变量】:预设链在线增强时须"先 tile-pad、后预设链",使噪底覆盖补零区;
     此处只补零,预设链若在线做需在补零【之后】作用(dataloader 装配处保证次序)。
     """
     import numpy as np
     import soundfile as sf
-    audio, sr = sf.read(path, dtype="float32")
+    if win is not None and len(win) == 2:
+        info = sf.info(path)
+        a = max(0, int(float(win[0]) * info.samplerate))
+        b = min(info.frames, int(float(win[1]) * info.samplerate))
+        audio, sr = sf.read(path, dtype="float32", start=a, stop=b)
+    else:
+        audio, sr = sf.read(path, dtype="float32")
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
     if sr != sr_target:
@@ -275,7 +284,8 @@ class RubatoDataset:
 
         enc = encode_target(self.tok, dialect, text,
                             sample=self.train, alpha=self.alpha, domain=u.get("domain"))
-        enc["audio"] = load_audio(u["audio_path"], self.sr, tile_pad_s=t0_s)  # LOCAL
+        enc["audio"] = load_audio(u["audio_path"], self.sr, tile_pad_s=t0_s,
+                                  win=u.get("win"))  # LOCAL;win=窗内 utt 只读整曲的 [t0,t1]
         enc["utt_id"] = uid
         enc["dialect"] = dialect
         return enc

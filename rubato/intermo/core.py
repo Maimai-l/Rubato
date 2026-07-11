@@ -553,7 +553,12 @@ def score_ir_to_events(ir: ScoreIR, sec_per_whole: float = 2.0,
     这是 PDMX(纯乐谱、无真实演奏)进入 AMT/AMT_lite 通路的桥:非表现性(恒定 tempo)
     渲染下,AMT 目标 = 乐谱音符按 sec_per_whole 定时。表现性渲染(VirtuosoNet)则改用
     其产出的演奏 MIDI 直接喂 perf_to_amt。default_vel:乐谱无力度时的缺省(论文合成用)。
-    渲染音频必须用【同一】sec_per_whole/力度,才与此目标对齐。
+
+    ⚠【时间源一致性铁律 —— 120bpm 事故同类地雷,接线前必读】
+    此函数产出的时间戳是【恒速假设】。它只有在"音频也由这些事件经 events_to_midi 渲出"时
+    才与音频对齐。S4 现行整曲音频由 MuseScore 导出 MIDI(谱面真实 set_tempo)渲染 ——
+    给 S4 音频配 AMT 标签【禁止】用本函数,必须用 rubato.data.maestro.midi_to_events
+    解析【渲染所用的那个 MIDI】(时间源同源,天然对齐)。当前无调用方;新增调用先过此检查。
     """
     ir = ir.normalized()
     out = []
