@@ -145,4 +145,13 @@ check("time_split_count", len(segs9b) == 3, len(segs9b))   # 120s/40s = 恰 3 �
 check("segments_maximal", all((b - a) == 20 for _, (a, b) in segs9b),
       [s[1] for s in segs9b])                          # 每段装满 40s=20 小节,绝不提前切
 
+print("[10] 单小节超窗:segment_score 下限是 1 小节,单小节 >max_sec 也会产出(消费方必须自设守卫)")
+ir10 = make_ir(3)                                      # 3 小节,每小节 1 全音符
+tm_huge = TimeMap([(F(0), 0.0), (F(1), 60.0), (F(3), 70.0)])   # 第 1 小节 60s(华彩式)
+segs10 = segment_score(ir10, min_measures=1, max_measures=None, max_sec=40.0, tmap=tm_huge)
+check("oversize_single_measure_emitted",
+      any(float(tm_huge(ir10.measures[b].start if b < 3 else ir10.score_end)
+                - tm_huge(ir10.measures[a].start)) > 40.0 for _, (a, b) in segs10),
+      [s[1] for s in segs10])                          # 机制:首候选超时仍产出 → S5/S4 消费方各有丢弃守卫
+
 print(f"\n全部通过: {PASS} 项")

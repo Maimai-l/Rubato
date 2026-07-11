@@ -489,6 +489,10 @@ def cpu_stage(mid: dict) -> dict:
         # 93s 超长段(max_sec=40 形同虚设)。segment_score 本就支持 tmap(nASAP 同款),传入即按
         # 【真实演奏秒】约束段长;到这里必有 VN 的真 tmap(没有就已判失败返回)。
         min_sec = float(os.environ.get("S5_SEG_MIN_SEC", "2.0"))   # 用户定:<2s 即退化样本
+        # 【超窗守卫】segment_score 的下限是"1 个小节",不能切小节内部 —— 华彩(一个"小节"记几十拍)、
+        # 长延音、VN 弹得极慢的段落,单小节就能 >40s,贪心循环首候选超时也照样产出(best_b 先初始化)。
+        # 这类段(实测 ~0.12%)超出训练窗,产出即废 → 与 S4 切割器同标准丢弃并计数。
+        max_sec = float(os.environ.get("S5_SEG_MAX_SEC", "40.0")) + 1.0   # +1s 容差同 S4 slack
         # 段参数【用户决定 2026-07-11,覆盖 SPEC R-S8.1 的 4–32】:小节数不设限,时间是唯一上限 ——
         # 段尽量长,≤40s 内装下尽可能多的完整小节;质量下限由 ≥2s 时长守卫把守(不是小节数)。
         # (nASAP 仍按论文明确的 4–32 重叠窗,不受此决定影响。)
@@ -499,6 +503,9 @@ def cpu_stage(mid: dict) -> dict:
             t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))
             if t_hi - t_lo < min_sec:      # 真实时长过短的段(极快小曲)是退化样本,直接不产出
                 res["seg_too_short"] = res.get("seg_too_short", 0) + 1
+                continue
+            if t_hi - t_lo > max_sec:      # 单小节超窗(华彩/延音/极慢演绎):超训练窗,不产出
+                res["seg_too_long"] = res.get("seg_too_long", 0) + 1
                 continue
             labels, _ = make_labels(sub_ir, "human", tmap=tmap, score_offset=score_off)
             if not labels.get("A2S"):
@@ -625,6 +632,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     def on_result(piece, res):
         rep["vn_ok"] += res["vn_ok"]; rep["vn_fail"] += res["vn_fail"]
         rep["seg_too_short"] = rep.get("seg_too_short", 0) + res.get("seg_too_short", 0)
+        rep["seg_too_long"] = rep.get("seg_too_long", 0) + res.get("seg_too_long", 0)
         rep["seg_no_audio"] = rep.get("seg_no_audio", 0) + res.get("seg_no_audio", 0)
         if res.get("fail"):
             rep["failures"].append({"piece_id": res["pid"], "reason": res["fail"]})
@@ -704,7 +712,8 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} "
           f"skipped={stats['done_skipped']} dropped={stats['dropped']} "
           f"utts={rep['utts']} TAST={rep['tast']} cpu_fail={stats['failed']} "
-          f"过短段弃={rep.get('seg_too_short', 0)} 无音频段弃={rep.get('seg_no_audio', 0)}"
+          f"过短段弃={rep.get('seg_too_short', 0)} 超长段弃={rep.get('seg_too_long', 0)} "
+          f"无音频段弃={rep.get('seg_no_audio', 0)}"
           + (f" vn_子进程回收={rep['vn_recycles']}次" if vn is not None else ""))
     return rep
 
