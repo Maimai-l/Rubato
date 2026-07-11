@@ -74,6 +74,15 @@ C MAESTRO AMT 切窗缺失、D overlap 分段 max_sec 静默失效、E/F 两处�
 MAESTRO tick→秒、s7 真 tmap、s6 命名、events_to_midi 等 6 处查过干净、留档。
 【别再跑】s4_retry.py / s4_batch_render.py / s4_retry_worker.py —— 已截断为硬退出守卫。
 
+## 弱起(anacrusis)静默错位 bug 的重跑判定(2026-07-11,commit 9c7ec93 已修)
+影响面:只有 P6 的 S4 段切割(网格换算秒);S5 VN / S4 整曲渲染 / 文本内容 / MAESTRO 全不受影响。
+执行端二选一(判别:`findstr score_range work\pdmx_a2s_labels.jsonl` 有无输出):
+- 有 score_range(P4 用新代码跑的)→ 什么都不用做,P6 自动走弱起免疫路径。
+- 无 score_range(P4/P6 用旧代码跑过)→ reset P4/P6a/P6b + 删旧段 flac 后 --go:
+  `sop_next --reset-step P4`(同理 P6a/P6b)→ `del work\pdmx_audio\pdmx_*_???.flac` → `--go`。
+  删旧段不能省:续跑会跳过已存在文件,错位旧段会残留。
+不涉及任何 GPU 重渲;最坏情况 = 两个 CPU 步骤,几小时。
+
 ## 全绿基线
 所有 `tests_*.py` 通过(`tests_ops` 23、`tests_s5_pipeline` 12、`tests_ops_recycle` 6 等)。
 改任何东西后先跑对应 test 再 push。
