@@ -66,6 +66,10 @@ def _steps():
         dict(id="P1b", title="S4 速度钳制·实施(钳 80bpm + 删旧整曲音频)",
              cmds=[S("scripts/s4_fix_tempo.py", "--apply")],
              parse={"clamped": r"改写 set_tempo (\d+)", "audio_deleted": r"删整曲音频 (\d+)"}),
+        dict(id="P1c", title="乐器审计:剔除非钢琴曲(鼓/吉他/人声…)+ 彻底清产物 + 验证表",
+             cmds=[S("scripts/s3_instrument_audit.py", "--apply")],
+             parse={"nonpiano": r"非钢琴 (\d+) 曲"},
+             require=lambda n: None),   # 审计脚本清不干净会自己 exit 1(验证表非全 0)
         dict(id="P2a", title="S5 全量清场(repair --all --apply,labels 留 .bak)",
              cmds=[S("scripts/s5_repair_segments.py", "--all", "--apply")],
              parse={"rows_dropped": r"剔除 (\d+) 行", "audio_deleted": r"删段音频 (\d+)"}),
@@ -101,10 +105,15 @@ def _steps():
              parse={"sliced": r"sliced = (\d+)", "structure_mismatch": r"structure_mismatch = (\d+)",
                     "seg_too_long": r"seg_too_long = (\d+)"},
              require=lambda n: None if int(n.get("sliced", 0)) > 0 else "sliced=0,配对全失败,停"),
-        dict(id="P7", title="tokenizer 重训(两份语料)+ 字形覆盖检查",
+        dict(id="P6c", title="语料重建(从标签文件确定性重建,不再依赖追加顺序)",
+             cmds=[S("scripts/rebuild_corpus.py")],
+             parse={"corpus_lines": r"corpus_lines=(\d+)"},
+             require=lambda n: None if int(n.get("corpus_lines", 0)) > 100000
+                     else f"corpus_lines={n.get('corpus_lines')} 过少,标签文件有问题,停"),
+        dict(id="P7", title="tokenizer 重训(重建后语料)+ 字形覆盖检查",
              cmds=[[PY, "-c",
                     "from rubato.data.tokenizer import train_unigram; "
-                    f"print(train_unigram([r'{WORK / 'a2s_corpus.txt'}', r'{WORK / 'a2s_corpus_vn.txt'}'],"
+                    f"print(train_unigram([r'{WORK / 'a2s_corpus.txt'}'],"
                     f"r'{WORK / 'rubato_spm'}',vocab_size=8000,spec_path='configs/vocab_spec.json'))"],
                    [PY, "-c",
                     "from rubato.data.tokenizer import check_glyph_coverage as c; "

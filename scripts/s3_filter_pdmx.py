@@ -229,6 +229,19 @@ def main():
     rows = load_pdmx_csv(PDMX_CSV)
     print(f"  After pre-filters: {len(rows)} candidates")
 
+    # 1b. 非钢琴黑名单(乐器审计 s3_instrument_audit 的产物)。
+    # 【洞的由来】本过滤器唯一的"钢琴"代理是 n_tracks∈{1,2} —— 独奏鼓/吉他/人声照样穿过
+    # (执行端实听抓到鼓谱)。内容级判定(unpitched/打击谱号/TAB/10通道/GM音色)由审计脚本做,
+    # 这里消费其名单,保证重建 manifest 时不再放进来。
+    _np = ROOT / "reports" / "nonpiano_ids.txt"
+    if _np.exists():
+        bad_ids = {l.split("\t")[0] for l in _np.read_text(encoding="utf-8").splitlines() if l.strip()}
+        before = len(rows)
+        rows = [r for r in rows if r["piece_id"] not in bad_ids]
+        print(f"  [1b] 非钢琴黑名单剔除 {before - len(rows)} 曲(名单 {_np})")
+    else:
+        print("  [1b] 未找到非钢琴黑名单(先跑 scripts/s3_instrument_audit.py 生成)")
+
     # 2. conservative_split: group by work_key, keep ALL arrangements
     #    (not collapse to one per work_key — that loses data for tokenizer corpus)
     print("\n[2/4] Assigning splits via conservative_split (all pieces kept)...")

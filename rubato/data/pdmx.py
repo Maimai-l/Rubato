@@ -272,3 +272,72 @@ def metadata_filter(meta: dict) -> tuple[bool, str]:
     if not license_ok(meta.get("license", "")):
         return False, "license_not_whitelisted"
     return True, "ok"
+
+
+# ---------------------------------------------------------------- 乐器判定(补 S3 过滤器的洞)
+# 背景:s3_filter 唯一的"钢琴"代理是 n_tracks∈{1,2} —— 独奏鼓/吉他/人声全是 1-2 轨,照样穿过
+# (执行端实听抓到鼓谱)。判定必须看【内容】:谱面的无音高音符/打击乐谱号/TAB、MIDI 的 10 通道
+# 与 GM 音色号。任一强信号命中 = 非钢琴。名字词表只是辅助(用户乱填名不可靠)。
+
+_NONPIANO_NAME = re.compile(
+    r"drum|percus|guitar|violin|viola|cello|double bass|bass guitar|electric bass|"
+    r"flute|piccolo|clarinet|oboe|bassoon|sax|trumpet|trombone|tuba|french horn|"
+    r"voice|vocal|choir|chorus|soprano|tenor\b|ukulele|banjo|mandolin|harp(?!sichord)|"
+    r"marimba|xylophone|vibraphone|glockenspiel|organ|accordion|harmonica|recorder|"
+    r"ocarina|erhu|pipa|guzheng|dizi|koto|shakuhachi|steel pan|synth", re.IGNORECASE)
+
+
+def classify_musicxml_text(xml_text: str) -> tuple[bool, str]:
+    """MusicXML 文本 → (是钢琴, 理由)。强信号优先,全部内容级。"""
+    if "<unpitched" in xml_text:
+        return False, "percussion_unpitched"          # 鼓谱的确定性特征:无音高音符
+    if re.search(r"<sign>\s*percussion\s*</sign>", xml_text, re.I):
+        return False, "percussion_clef"
+    if re.search(r"<sign>\s*TAB\s*</sign>", xml_text, re.I):
+        return False, "tab_clef"                      # 吉他/贝斯 TAB
+    if re.search(r"<midi-channel>\s*10\s*</midi-channel>", xml_text):
+        return False, "midi_channel_10"               # GM 打击乐通道
+    progs = [int(m) for m in re.findall(r"<midi-program>\s*(\d+)\s*</midi-program>", xml_text)]
+    bad = [p for p in progs if not (1 <= p <= 8)]     # GM 1-8 = 钢琴/键盘类;其余一律非钢琴
+    if bad:
+        return False, f"midi_program_{bad[0]}"
+    names = re.findall(r"<(?:part-name|instrument-name)[^>]*>([^<]{0,80})<", xml_text)
+    for nm in names:
+        if _NONPIANO_NAME.search(nm):
+            return False, f"name:{nm.strip()[:30]}"
+    return True, "ok"
+
+
+def classify_score_file(path) -> tuple[bool, str]:
+    """.mxl(zip)/.musicxml/.xml → (是钢琴, 理由)。读不了 → (False, read_fail:...) 宁可错杀交人工。"""
+    import zipfile
+    from pathlib import Path as _P
+    p = _P(path)
+    try:
+        if p.suffix.lower() == ".mxl":
+            with zipfile.ZipFile(p) as z:
+                names = [n for n in z.namelist()
+                         if n.lower().endswith((".xml", ".musicxml")) and not n.startswith("META-INF")]
+                if not names:
+                    return False, "read_fail:empty_mxl"
+                text = z.read(names[0]).decode("utf-8", errors="replace")
+        else:
+            text = p.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return False, f"read_fail:{type(e).__name__}"
+    return classify_musicxml_text(text)
+
+
+def classify_midi_file(path) -> tuple[bool, str]:
+    """MIDI → (是钢琴, 理由):10 通道音符=打击乐;program change 超出 GM 0-7=非钢琴;无 program=放行。"""
+    import mido
+    try:
+        mid = mido.MidiFile(str(path))
+    except Exception as e:
+        return False, f"read_fail:{type(e).__name__}"
+    for msg in mido.merge_tracks(mid.tracks):
+        if msg.type in ("note_on", "note_off") and getattr(msg, "channel", 0) == 9:
+            return False, "midi_channel_10"
+        if msg.type == "program_change" and not (0 <= msg.program <= 7):
+            return False, f"midi_program_{msg.program + 1}"
+    return True, "ok"

@@ -18,11 +18,13 @@
 |------|------|--------------------|
 | P0 准备 | ☐ | commit=____ |
 | P1 S4 速度钳制 | ☐ | outlier_pieces=____ clamped=____ |
+| P1c 乐器审计(剔非钢琴) | ☐ | nonpiano=____ 验证表全0=____ |
 | P2 S5 VN 全量重渲 | ☐ | vn_ok=____ utts=____ TAST=____ 回收=____次 |
 | P3 S4 补渲 | ☐ | ok=____ fail=____ |
 | P4 文本标签重生成 | ☐ | processed=____ labels=____ tempo_fallback=____ |
 | P5 MAESTRO AMT 切窗 | ☐ | windows=____ labels=____ win_fail=____ |
 | P6 S4 段切割 | ☐ | sliced=____ structure_mismatch=____ |
+| P6c 语料重建(从标签) | ☐ | corpus_lines=____ |
 | P7 tokenizer 重训 | ☐ | vocab=____ split_rate=____ |
 
 依赖关系:P1→P3→P4→P6 严格串行;P2 独立(P1 后即可开);P5 独立随时;P7 要等 P2+P4 都完。
@@ -115,6 +117,18 @@ python -c "from rubato.data.tokenizer import check_glyph_coverage as c; print(c(
 判据:vocab_size=8000、fell_back=False;split_rate<0.30。**贴回**:两条输出原文。
 
 ---
+
+## 清理章程(违者 = 上次"清了 done 和音频但 csv 全漏"重演)
+
+1. **任何"清掉某些曲"的操作,只准走两个入口**:`scripts/s3_instrument_audit.py --apply`
+   (乐器审计连带清理)或 `scripts/cleanup_pieces.py --ids-file <名单> --apply`(通用)。
+   **禁止手删文件**——手删必漏(一首曲的产物有 8 类:整曲音频、S4 段、VN 段、_perf.mid/_whole.opus
+   中间件、.done、_vn/ 里的演奏 MIDI+CSV、两份标签文件里的行)。
+2. **清完必须贴验证表**:两个入口清完都会自动打印"每类残留计数"表,【全 0 才算清干净】。
+   把表贴回给用户;没有表 = 没清。
+3. **随时可复核**:`python scripts/cleanup_pieces.py --ids-file <名单> --verify-only`
+   重新输出验证表——用户想确认"到底清没清",让执行端跑这条,看数字。
+4. 语料不手改:标签清完后跑 `scripts/rebuild_corpus.py`(P6c)从标签整体重建,污染行自然消失。
 
 ## 明确不做的事
 - 不重渲 S4 速度正常的 ~48k 整曲(本来就按真速度渲的)。
