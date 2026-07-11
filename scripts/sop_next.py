@@ -31,6 +31,8 @@ WORK = ROOT / "work"
 STATE = Path(os.environ.get("SOP_STATE", str(WORK / "sop_state.json")))
 LOGD = Path(os.environ.get("SOP_LOGS", str(ROOT / "reports")))
 PY = sys.executable
+PY_VN = r"D:\ProgramData\envs\py312\python.exe"     # VN/VirtuosoNet 必须 py312(与 NeMo 环境隔离)
+PY_NEMO = r"D:\ProgramData\envs\nemo_test\python.exe"  # 其余脚本用 NeMo 环境
 
 
 # ---------------------------------------------------------------- P0 的本地动作(改名留档)
@@ -56,7 +58,8 @@ def _p0_action(log):
 # ---------------------------------------------------------------- 步骤表(照 SOP_RERUN.md)
 
 def _steps():
-    S = lambda *a: [PY, *a]
+    S = lambda *a, py=PY: [py, *a]
+    SV = lambda *a: [PY_VN, *a]   # VN/VirtuosoNet 用 py312
     return [
         dict(id="P0", title="准备:旧语料/旧文本标签改名留档 + 记录 commit",
              action=_p0_action),
@@ -71,16 +74,16 @@ def _steps():
              parse={"nonpiano": r"非钢琴 (\d+) 曲"},
              require=lambda n: None),   # 审计脚本清不干净会自己 exit 1(验证表非全 0)
         dict(id="P2a", title="S5 全量清场(repair --all --apply,labels 留 .bak)",
-             cmds=[S("scripts/s5_repair_segments.py", "--all", "--apply")],
+             cmds=[SV("scripts/s5_repair_segments.py", "--all", "--apply")],
              parse={"rows_dropped": r"剔除 (\d+) 行", "audio_deleted": r"删段音频 (\d+)"}),
         dict(id="P2b", title="S5 VN 冒烟(20 曲,判据 vn_ok≥15)",
-             cmds=[S("scripts/s5_vn_render.py", "--limit", "20",
+             cmds=[SV("scripts/s5_vn_render.py", "--limit", "20",
                      "--out-corpus", str(WORK / "a2s_corpus_vn.txt"))],
              parse={"vn_ok": r"vn_ok=(\d+)", "utts": r"utts=(\d+)", "tast": r"TAST=(\d+)"},
              require=lambda n: None if int(n.get("vn_ok", 0)) >= 15
                      else f"vn_ok={n.get('vn_ok')} < 15,冒烟不过,停"),
         dict(id="P2c", title="S5 VN 全量重渲(天级,可中断后重跑 --go 续)",
-             cmds=[S("scripts/s5_vn_render.py",
+             cmds=[SV("scripts/s5_vn_render.py",
                      "--out-corpus", str(WORK / "a2s_corpus_vn.txt"))],
              parse={"vn_ok": r"vn_ok=(\d+)", "utts": r"utts=(\d+)", "tast": r"TAST=(\d+)",
                     "vn_recycles": r"vn_子进程回收=(\d+)"}),
