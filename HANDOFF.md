@@ -43,7 +43,11 @@
 - 离谱速度:`scripts/s4_fix_tempo.py` 把 <20 或 >300bpm 的 set_tempo 钳到 80bpm(原 MIDI 备份
   *.tempo_orig.mid)+ 删旧整曲音频待重渲。【铁律】钳制必须走"改 MIDI→重渲",不能只改切割图。
 
-### 执行顺序(依次跑,每步结果贴回)
+### 执行顺序 → 已升级为 **SOP_RERUN.md**(P0–P7,带进度表/判据/GATE,执行端只看那份)
+下面的清单保留作背景;与 SOP 不一致时【以 SOP 为准】(SOP 修掉了语料互写的坑:VN 语料独立成
+a2s_corpus_vn.txt,tokenizer 收两个文件)。
+
+### 执行顺序(背景参考)
 ```
 git pull
 # — S5 VN 全量重跑(分段算法级修复,用户已拍板)—
