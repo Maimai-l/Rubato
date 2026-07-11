@@ -30,22 +30,34 @@
   另:S4/S5 任务按音源亲和排序(同音源连续渲,页缓存热、并发同质)。
 - `e61bc4f` VNSubprocess(VN 驻可回收子进程);`8590ebc` GBK 止血;`e7d074b` 续跑按真标签;`0a650e6` worker 回收。
 
-## 分段 bug(执行端听音频抓出)与外科修复 —— 当前最优先
-旧版 cpu_stage 调 segment_score 没传 tmap(用 120bpm 假速定段界),快曲切 0.2s 碎片、慢曲切 93s
-超长段;音频/TAST 本身是同一真 tmap 产的、内部自洽 → 【长度正常的段是合法数据】。已修
-(`segment_score(..., tmap=tmap)` + 最短段守卫 + 补 `measure_range`)。**不必全量重跑**:
+## 120bpm 假设的全部清算(用户拍板:S5 全量重跑)—— 当前最优先
+旧版三处沿用"恒速 2s/全音符(120bpm)"假设,后果:①段长失控(快曲 0.2s 碎片/慢曲 93s 超窗);
+②段长与真实速度负相关的分布偏置;③【S4 段音频配对根本没实现,且按假速换算切整曲音频必然错位】
+(整曲音频是 MuseScore 真速度)。另:部分 MXL 有编辑错误(如"四分音符=1"),渲出荒谬速度。
 
+已修(全部有测试):
+- S5 VN:`segment_score(..., tmap=真tmap)` + 最短段守卫 + 行补 `measure_range`。
+- S4:新 `rubato/data/midi_time.py` 从渲染所用 MIDI 提取【真实 set_tempo 速度图 + 拍号小节网格】;
+  新 `scripts/s4_slice_segments.py` 据此把整曲音频切成与文本标签 measure_range 精确对齐的段 flac
+  (结构不一致/越界段跳过并计数,不静默)。
+- 离谱速度:`scripts/s4_fix_tempo.py` 把 <20 或 >300bpm 的 set_tempo 钳到 80bpm(原 MIDI 备份
+  *.tempo_orig.mid)+ 删旧整曲音频待重渲。【铁律】钳制必须走"改 MIDI→重渲",不能只改切割图。
+
+### 执行顺序(依次跑,每步结果贴回)
 ```
 git pull
-python scripts/s5_repair_segments.py            # ① 干跑:看多少曲含越界段(只报告)
-python scripts/s5_repair_segments.py --apply    # ② 实施:清坏曲的行/音频/.done(labels 留 .bak)
-python scripts/s5_vn_render.py                  # ③ 续跑只重渲被清的曲(新分段按真 tmap)
-python scripts/memtrace.py --interval 5         #    (另开终端照旧盯内存)
+# — S5 VN 全量重跑(分段算法级修复,用户已拍板)—
+python scripts/s5_repair_segments.py --all --apply   # 清全部 VN 行/段音频/.done(labels 留 .bak)
+python scripts/s5_vn_render.py                       # 全量重渲(真 tmap 分段);另终端 memtrace 照旧
+# — S4 速度钳制 + 段切割 —
+python scripts/s4_fix_tempo.py                       # 干跑:看多少曲离谱速度(先贴报告)
+python scripts/s4_fix_tempo.py --apply               # 钳到 80bpm + 删这些曲的整曲音频
+python scripts/s4_parallel.py                        # 只重渲被删的曲(续跑机制)
+python scripts/s4_slice_segments.py --limit 20       # 冒烟:看 sliced/skip 计数
+python scripts/s4_slice_segments.py                  # 全量切段 → pdmx_audio/<utt_id>.flac
 ```
-判据:①的报告贴回来(重做比例);③跑完 DONE 行的 `过短段弃/无音频段弃` 计数、不 OOM;
-memtrace 里任何单进程不无界爬(VN 子进程 ≤cap 锯齿)。
-- sfizz 实际 RSS 比权重大 → `set SF_DECODE_FACTOR=2.5` 再试并贴数。
-- VN 子进程越 cap 不回落 → 贴 [mem] 行(尤其 psutil 警告在不在)。
+判据:S5 DONE 行 `过短段弃/无音频段弃` 小、不 OOM;S4 切割报告里 structure_mismatch 占比贴回来
+(高 = MIDI 展开了反复,需另处理);抽听几段确认速度/边界自然。
 
 ## 全绿基线
 所有 `tests_*.py` 通过(`tests_ops` 23、`tests_s5_pipeline` 12、`tests_ops_recycle` 6 等)。

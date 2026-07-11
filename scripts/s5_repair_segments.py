@@ -128,6 +128,8 @@ def main(argv=None):
     ap.add_argument("--max-sec", type=float, default=40.0, help="与 segment_score 的 max_sec 一致")
     ap.add_argument("--slack", type=float, default=1.0,
                     help="max-sec 容差(秒):切片按小节界取整会略超 max_sec,不算坏")
+    ap.add_argument("--all", action="store_true",
+                    help="全量重跑模式:所有 VN 曲都标记重做(不看时长)。用于分段算法级修复后的整体重渲")
     ap.add_argument("--apply", action="store_true", help="实施修复(默认只报告)")
     args = ap.parse_args(argv)
 
@@ -135,6 +137,9 @@ def main(argv=None):
     if not labels_path.exists():
         print(f"labels 不存在: {labels_path}"); return 2
     bad, st = scan(labels_path, args.min_sec, args.max_sec + args.slack)
+    if args.all:
+        bad = set(st["pieces"])          # 全部 VN 曲重做(标签行/段音频/.done 全清,labels 留 .bak)
+        print("【--all 全量重跑模式】不按时长筛,所有 VN 曲的行/音频/.done 都将清除待重渲。")
     n_pieces = len(st["pieces"])
     print(f"扫描 {labels_path}")
     print(f"  行数 {st['rows']}(VN 行 {st['vn_rows']},涉及 {n_pieces} 曲)")

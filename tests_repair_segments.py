@@ -90,4 +90,14 @@ with open(labels, "a", encoding="utf-8") as f:
 bad2, _ = rep.scan(labels, 1.0, 41.0)
 check("slack_tolerates", "E" not in bad2, bad2)
 
+print("[5] --all 全量重跑:所有 VN 曲(含好曲 A/E)都清,非 VN 行仍保留")
+rc = rep.main(["--labels", str(labels), "--audio-dir", str(audio), "--all", "--apply"])
+check("all_rc0", rc == 0)
+kept = [json.loads(l) for l in open(labels) if l.strip()]
+check("all_only_nonvn_left", {r["utt_id"] for r in kept} == {"pdmx_T_000"},
+      [r["utt_id"] for r in kept])
+check("all_audio_gone", not (audio / "pdmxperf_A_000.wav").exists()
+      and not (audio / "pdmxperf_E_000.wav").exists())
+check("all_done_gone", not (audio / "A.done").exists())
+
 print(f"\n全部通过: {PASS} 项")
