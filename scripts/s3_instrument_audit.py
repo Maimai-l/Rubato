@@ -13,6 +13,7 @@
 from __future__ import annotations
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -59,15 +60,23 @@ def main(argv=None):
         pieces = pieces[:args.limit]
     bad: dict[str, str] = {}
     reasons: dict[str, int] = {}
-    for p in pieces:
-        pid = p.get("piece_id")
-        if not pid:
-            continue
-        ok, why = classify_piece(p, Path(args.xml_root))
-        if not ok:
-            bad[pid] = why
-            key = why.split(":")[0]
-            reasons[key] = reasons.get(key, 0) + 1
+
+    # 并行分类:每首曲加载 XML/MIDI,IO 密集
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from rubato.ops import pick_workers
+    nw = pick_workers(per_worker_gb=0.3, hard_cap=min(os.cpu_count() or 4, 16))
+    xml_root = Path(args.xml_root)
+    with ProcessPoolExecutor(max_workers=nw) as ex:
+        futs = {ex.submit(classify_piece, p, xml_root): p for p in pieces if p.get("piece_id")}
+        for i, f in enumerate(as_completed(futs)):
+            pid = futs[f].get("piece_id")
+            ok, why = f.result()
+            if not ok:
+                bad[pid] = why
+                key = why.split(":")[0]
+                reasons[key] = reasons.get(key, 0) + 1
+            if (i + 1) % 2000 == 0:
+                print(f"  [{i+1}/{len(futs)}] 已审计,非钢琴={len(bad)}", flush=True)
 
     print(f"乐器审计: {len(pieces)} 曲中发现非钢琴 {len(bad)} 曲"
           f"({0 if not pieces else round(100 * len(bad) / len(pieces), 1)}%)")
