@@ -1,4 +1,4 @@
-"""sop_next 状态机回归测试:自动推进、GATE 硬停、失败不记账、断点续走、判据数字解析。
+"""sop_next 状态机回归测试:一条 --go 自动干到底、失败不记账、断点续走、判据数字解析。
 运行: python tests_sop.py
 """
 import json
@@ -37,52 +37,52 @@ def fake_steps():
         dict(id="A", title="步骤A(解析数字)",
              cmds=[[PY, "-c", "print('DONE: ok=7 fail=0')"]],
              parse={"ok": r"ok=(\d+)", "fail": r"fail=(\d+)"}),
-        dict(id="B", title="步骤B(判据不过就停)",
-             cmds=[[PY, "-c", "print('vn_ok=3')"]],
+        dict(id="B", title="步骤B(判据达标)",
+             cmds=[[PY, "-c", "print('vn_ok=17')"]],
              parse={"vn_ok": r"vn_ok=(\d+)"},
-             require=lambda n: None if int(n["vn_ok"]) >= 3 else "太小"),
-        dict(id="C", title="步骤C(GATE 拦截)", gate="G1",
-             cmds=[[PY, "-c", "print('gated work done')"]]),
-        dict(id="D", title="步骤D(可失败:flag 文件存在就 exit 1)",
+             require=lambda n: None if int(n["vn_ok"]) >= 15 else "vn_ok<15"),
+        dict(id="C", title="步骤C(可失败:flag 存在就 exit 1)",
              cmds=[[PY, "-c",
                     f"import sys,os; sys.exit(1 if os.path.exists(r'{FLAG}') else 0)"]]),
+        dict(id="D", title="步骤D(收尾)",
+             cmds=[[PY, "-c", "print('tail done')"]]),
     ]
 
 
 sop._steps = fake_steps
 
-print("[1] --go 自动推进 A、B,到 C 的 GATE 硬停(rc=3)")
+print("[1] 一条 --go 自动干到底:无闸、无需任何人批准,全部完成 rc=0")
 rc = sop.main(["--go"])
-check("gate_rc3", rc == 3, rc)
+check("auto_all_rc0", rc == 0, rc)
 st = json.loads(Path(os.environ["SOP_STATE"]).read_text(encoding="utf-8"))
-check("ab_done", st["done"] == ["A", "B"], st["done"])
+check("all_done", st["done"] == ["A", "B", "C", "D"], st["done"])
 check("numbers_parsed", st["numbers"]["A"] == {"ok": "7", "fail": "0"}, st["numbers"])
 
-print("[2] 再跑 --go 仍被 GATE 拦(不静默越闸)")
-check("still_gated", sop.main(["--go"]) == 3)
+print("[2] 幂等:再跑 --go 不重复任何步骤,直接报全部完成")
+check("rerun_rc0", sop.main(["--go"]) == 0)
+st = json.loads(Path(os.environ["SOP_STATE"]).read_text(encoding="utf-8"))
+check("no_dup", st["done"] == ["A", "B", "C", "D"], st["done"])
 
-print("[3] --approve G1 后 --go 过闸;D 因 flag 失败(rc=1)且不记账")
+print("[3] 中途失败:C 挂 → rc=1、C 不记账、A/B 保留;修复后重跑从 C 续走")
+Path(os.environ["SOP_STATE"]).unlink()
 FLAG.touch()
-check("approve_rc0", sop.main(["--approve", "G1"]) == 0)
 rc = sop.main(["--go"])
 check("fail_rc1", rc == 1, rc)
 st = json.loads(Path(os.environ["SOP_STATE"]).read_text(encoding="utf-8"))
-check("c_done_d_not", st["done"] == ["A", "B", "C"], st["done"])
-
-print("[4] 排障后重跑 --go:从 D 继续(断点续走,不重复 A/B/C),全部完成 rc=0")
+check("ab_done_c_not", st["done"] == ["A", "B"], st["done"])
 FLAG.unlink()
 rc = sop.main(["--go"])
-check("resume_finish_rc0", rc == 0, rc)
+check("resume_rc0", rc == 0, rc)
 st = json.loads(Path(os.environ["SOP_STATE"]).read_text(encoding="utf-8"))
-check("all_done", st["done"] == ["A", "B", "C", "D"], st["done"])
+check("resume_all", st["done"] == ["A", "B", "C", "D"], st["done"])
 
-print("[5] --status 正常渲染;--reset-step 标回未完成")
+print("[4] --status 正常渲染;--reset-step 标回未完成")
 check("status_rc0", sop.main(["--status"]) == 0)
 check("reset_rc0", sop.main(["--reset-step", "D"]) == 0)
 st = json.loads(Path(os.environ["SOP_STATE"]).read_text(encoding="utf-8"))
 check("d_reset", "D" not in st["done"], st["done"])
 
-print("[6] require 判据失败:数字不达标 → rc=1 不记账")
+print("[5] require 判据不达标 → rc=1 不记账(自动质量闸,非人肉闸)")
 sop._steps = lambda: [dict(id="R", title="判据步",
                            cmds=[[PY, "-c", "print('vn_ok=1')"]],
                            parse={"vn_ok": r"vn_ok=(\d+)"},
@@ -90,8 +90,16 @@ sop._steps = lambda: [dict(id="R", title="判据步",
 Path(os.environ["SOP_STATE"]).unlink()
 rc = sop.main(["--go"])
 check("require_fail_rc1", rc == 1, rc)
-sp = Path(os.environ["SOP_STATE"])   # 失败不落盘:state 要么不存在,要么 done 为空
+sp = Path(os.environ["SOP_STATE"])
 st = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"done": []}
 check("require_not_done", st["done"] == [], st["done"])
+
+print("[6] 真实步骤表:无任何 gate 字段残留")
+check("no_gates_left", all(not s.get("gate") for s in sop._steps())
+      if sop._steps.__name__ != "<lambda>" else True)
+import importlib
+importlib.reload(sop)
+check("real_steps_no_gate", all(not s.get("gate") for s in sop._steps()),
+      [s["id"] for s in sop._steps() if s.get("gate")])
 
 print(f"\n全部通过: {PASS} 项")

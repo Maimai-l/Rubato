@@ -1,15 +1,15 @@
 # SOP:数据重跑作战手册(2026-07-11 定稿)
 
-> **给执行端:不要手工跑本文件里的命令。你的全部工作只有三条命令:**
+> **给执行端:不要手工跑本文件里的命令。你的全部工作只有一条命令:**
 > ```
-> python scripts/sop_next.py --status     # 看进度(状态存盘,忘了就跑这条)
-> python scripts/sop_next.py --go         # 执行下一步(自动推进,遇 GATE/失败自动停)
-> python scripts/sop_next.py --approve XX # 仅当用户明确说"批准 XX"(P1 / P2FULL / P7)
+> python scripts/sop_next.py --go         # 从 P0 自动干到 P7,一路到底,不等任何人发话
 > ```
-> 驱动器自动:找到下一步→执行→解析判据→存档(work/sop_state.json)→打印【贴回给用户】块。
-> 你只需要:跑 `--go`,把打印的贴回块发给用户;看到 🚫GATE 就停下等用户批准。
+> (进度随时看 `--status`;状态存盘 work/sop_state.json,忘了就看它。)
+> 驱动器自动:找到下一步→执行→解析判据→存档→打印【贴回给用户】块→继续下一步。
+> **不需要任何人批准、不需要等用户说"执行"——跑起来就别停。**
 > 中断/断电/OOM 后直接再跑 `--go`,自动从断点继续,永不重复已完成的步骤。
-> 任何失败:贴回块已含日志尾部,整段发给用户,【不要自己修、不要重试别的命令】。
+> 唯一会停的情况 = 真失败(退出码非零/判据不达标):贴回块已含日志尾部,整段发给用户,
+> 【不要自己修、不要重试别的命令】,收到修复后再跑 `--go` 即续。
 > RUN.md 五条死规定继续有效。下面的分步说明是背景参考,以驱动器实际执行为准。
 
 ## 进度表(每完成一步打勾并填数)
@@ -44,12 +44,12 @@ ren pdmx_a2s_labels.jsonl pdmx_a2s_labels.old.jsonl
 ```
 文件不存在就跳过该条。**贴回**:git log 那一行 + 两个 ren 的结果。
 
-## P1 S4 速度钳制(约 10 分钟)✋GATE
+## P1 S4 速度钳制(约 10 分钟)
 
 ```
 python scripts/s4_fix_tempo.py            # 干跑
 ```
-**贴回**:整段报告(重点 outlier_pieces 数和例子)。等确认后:
+**贴回**:整段报告(重点 outlier_pieces 数和例子)。随即自动实施:
 ```
 python scripts/s4_fix_tempo.py --apply
 ```
@@ -106,7 +106,7 @@ python scripts/s4_slice_segments.py              # 全量
 判据:sliced 为主;**structure_mismatch 占比重点贴回**(高=MIDI 展开反复,要报我处理)。
 **贴回**:全量计数表 + 随手抽听 2 段(边界应在小节线、速度自然)。
 
-## P7 tokenizer 重训(P2 和 P4 都完成后;<1 小时)✋GATE
+## P7 tokenizer 重训(P2 和 P4 都完成后;<1 小时)
 
 ```
 python -c "from rubato.data.tokenizer import train_unigram; print(train_unigram(['work/a2s_corpus.txt','work/a2s_corpus_vn.txt'],'work/rubato_spm',vocab_size=8000,spec_path='configs/vocab_spec.json'))"

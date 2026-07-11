@@ -1,15 +1,14 @@
 """
-SOP 状态机驱动器 —— 执行端【只需要反复跑一条命令】,流程自动推进,不依赖任何人的记忆。
+SOP 状态机驱动器 —— 一条命令从 P0 自动干到 P7,【不需要任何人催、任何人批】。
 
-为什么存在:长流程会忘、"说要做 X"然后不动。本脚本把 SOP_RERUN.md 变成状态机:
-进度存 work/sop_state.json(磁盘,不靠上下文记忆);每次 --go 找到下一步、直接执行、
-解析判据数字、存档、打印【贴回给用户】块;GATE 步骤硬停,必须用户明确批准后
-用 --approve 才能过 —— "要不要做"永远是用户说了算,"做"就是跑 --go。
+为什么存在:长流程会忘、"说要做 X"然后不动、等人说"执行"才执行 —— 全部病根一次拔掉。
+进度存 work/sop_state.json(磁盘,不靠记忆);--go 自动连续推进:找下一步→执行→解析判据
+数字→存档→打印【贴回给用户】块→继续下一步,直到 P7 全部完成。中途【只有真失败】才停
+(判据不达标/退出码非零),失败块自带日志尾部,贴回后修复,再跑 --go 从断点继续。
 
-执行端用法(全部三条,没有别的):
+执行端用法(两条,没有别的;启动后不要等任何人发话):
+  python scripts/sop_next.py --go              # 一路干到底;失败才停;中断后重跑即续
   python scripts/sop_next.py --status          # 看进度表(随时)
-  python scripts/sop_next.py --go              # 执行下一步(连续推进,遇 GATE/失败/长任务边界停)
-  python scripts/sop_next.py --approve P1      # 仅当用户明确说"批准 P1"时运行
 
 底层脚本全部可续跑/幂等:任何一步中断后重跑 --go 会安全继续,不重复已完成的工作。
 """
@@ -64,7 +63,7 @@ def _steps():
         dict(id="P1a", title="S4 速度钳制·干跑(报告离谱速度曲数)",
              cmds=[S("scripts/s4_fix_tempo.py")],
              parse={"outlier_pieces": r"的曲 = (\d+)"}),
-        dict(id="P1b", title="S4 速度钳制·实施(钳 80bpm + 删旧整曲音频)", gate="P1",
+        dict(id="P1b", title="S4 速度钳制·实施(钳 80bpm + 删旧整曲音频)",
              cmds=[S("scripts/s4_fix_tempo.py", "--apply")],
              parse={"clamped": r"改写 set_tempo (\d+)", "audio_deleted": r"删整曲音频 (\d+)"}),
         dict(id="P2a", title="S5 全量清场(repair --all --apply,labels 留 .bak)",
@@ -76,7 +75,7 @@ def _steps():
              parse={"vn_ok": r"vn_ok=(\d+)", "utts": r"utts=(\d+)", "tast": r"TAST=(\d+)"},
              require=lambda n: None if int(n.get("vn_ok", 0)) >= 15
                      else f"vn_ok={n.get('vn_ok')} < 15,冒烟不过,停"),
-        dict(id="P2c", title="S5 VN 全量重渲(天级,可中断后重跑 --go 续)", gate="P2FULL",
+        dict(id="P2c", title="S5 VN 全量重渲(天级,可中断后重跑 --go 续)",
              cmds=[S("scripts/s5_vn_render.py",
                      "--out-corpus", str(WORK / "a2s_corpus_vn.txt"))],
              parse={"vn_ok": r"vn_ok=(\d+)", "utts": r"utts=(\d+)", "tast": r"TAST=(\d+)",
@@ -102,7 +101,7 @@ def _steps():
              parse={"sliced": r"sliced = (\d+)", "structure_mismatch": r"structure_mismatch = (\d+)",
                     "seg_too_long": r"seg_too_long = (\d+)"},
              require=lambda n: None if int(n.get("sliced", 0)) > 0 else "sliced=0,配对全失败,停"),
-        dict(id="P7", title="tokenizer 重训(两份语料)+ 字形覆盖检查", gate="P7",
+        dict(id="P7", title="tokenizer 重训(两份语料)+ 字形覆盖检查",
              cmds=[[PY, "-c",
                     "from rubato.data.tokenizer import train_unigram; "
                     f"print(train_unigram([r'{WORK / 'a2s_corpus.txt'}', r'{WORK / 'a2s_corpus_vn.txt'}'],"
@@ -202,19 +201,15 @@ def _run_step(step, st) -> bool:
 def cmd_status(steps, st):
     print("SOP 进度(状态存盘 work/sop_state.json,不怕忘):")
     for s in steps:
-        mark = "✅" if s["id"] in st["done"] else \
-               ("🚫GATE未批" if s.get("gate") and not st["approvals"].get(s["gate"]) else "⬜")
+        mark = "✅" if s["id"] in st["done"] else "⬜"
         nums = st["numbers"].get(s["id"], {})
         extra = ("  " + " ".join(f"{k}={v}" for k, v in nums.items())) if nums else ""
         print(f"  {mark} [{s['id']}] {s['title']}{extra}")
     nxt = next((s for s in steps if s["id"] not in st["done"]), None)
     if nxt is None:
         print("\n全部完成。把 --status 输出整个贴给用户。")
-    elif nxt.get("gate") and not st["approvals"].get(nxt["gate"]):
-        print(f"\n下一步 [{nxt['id']}] 是 GATE({nxt['gate']}):把当前进度贴给用户,"
-              f"等用户明确批准后运行: python scripts/sop_next.py --approve {nxt['gate']}")
     else:
-        print(f"\n下一步: [{nxt['id']}] —— 运行 python scripts/sop_next.py --go")
+        print(f"\n下一步: [{nxt['id']}] —— 运行 python scripts/sop_next.py --go(会自动一路干到底)")
 
 
 def cmd_go(steps, st):
@@ -224,12 +219,6 @@ def cmd_go(steps, st):
         if nxt is None:
             print("\n全部完成 ✅。运行 --status 并把进度表贴给用户。")
             return 0
-        if nxt.get("gate") and not st["approvals"].get(nxt["gate"]):
-            print(f"\n🚫 GATE [{nxt['gate']}] 拦在 [{nxt['id']}] {nxt['title']} 之前。")
-            print("   把上面的贴回块/进度发给用户;【只有用户明确说批准】才运行:")
-            print(f"   python scripts/sop_next.py --approve {nxt['gate']}")
-            print("   然后再 --go。在那之前不要做任何别的事。")
-            return 3
         if not _run_step(nxt, st):
             return 1
         ran += 1
@@ -237,20 +226,13 @@ def cmd_go(steps, st):
 
 def main(argv=None):
     harden_stdout()
-    ap = argparse.ArgumentParser(description="SOP 状态机:--go 执行下一步;--status 看进度;--approve 过闸")
+    ap = argparse.ArgumentParser(description="SOP 状态机:--go 自动干到底(失败才停);--status 看进度")
     ap.add_argument("--go", action="store_true")
     ap.add_argument("--status", action="store_true")
-    ap.add_argument("--approve", default="", metavar="GATE",
-                    help="仅当用户明确批准(如 P1/P2FULL/P7)")
     ap.add_argument("--reset-step", default="", help="把某步标回未完成(仅用户指示时用)")
     args = ap.parse_args(argv)
     steps = _steps()
     st = _load()
-    if args.approve:
-        st["approvals"][args.approve] = True
-        _save(st)
-        print(f"GATE {args.approve} 已记录为【用户已批准】。现在运行 --go 继续。")
-        return 0
     if args.reset_step:
         st["done"] = [d for d in st["done"] if d != args.reset_step]
         _save(st)
