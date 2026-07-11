@@ -30,16 +30,22 @@
   另:S4/S5 任务按音源亲和排序(同音源连续渲,页缓存热、并发同质)。
 - `e61bc4f` VNSubprocess(VN 驻可回收子进程);`8590ebc` GBK 止血;`e7d074b` 续跑按真标签;`0a650e6` worker 回收。
 
-## 下一步(真机复验)
+## 分段 bug(执行端听音频抓出)与外科修复 —— 当前最优先
+旧版 cpu_stage 调 segment_score 没传 tmap(用 120bpm 假速定段界),快曲切 0.2s 碎片、慢曲切 93s
+超长段;音频/TAST 本身是同一真 tmap 产的、内部自洽 → 【长度正常的段是合法数据】。已修
+(`segment_score(..., tmap=tmap)` + 最短段守卫 + 补 `measure_range`)。**不必全量重跑**:
+
 ```
 git pull
-python scripts/s5_vn_render.py --limit 400          # 终端1
-python scripts/memtrace.py --interval 5             # 终端2
+python scripts/s5_repair_segments.py            # ① 干跑:看多少曲含越界段(只报告)
+python scripts/s5_repair_segments.py --apply    # ② 实施:清坏曲的行/音频/.done(labels 留 .bak)
+python scripts/s5_vn_render.py                  # ③ 续跑只重渲被清的曲(新分段按真 tmap)
+python scripts/memtrace.py --interval 5         #    (另开终端照旧盯内存)
 ```
-判据:`vn_ok>0`、`TAST>0`、跑完不 OOM;memtrace 里【任何单进程】都不该无界爬
-(VN 子进程应呈 ≤cap 的锯齿;sfizz_GB 出现时 ≈ 解码后音源大小、受准入约束)。
-- VN 子进程仍越 cap 长时间不回落 → 贴 memtrace + 终端里 [mem] 行(尤其"psutil 警告"有没有出现)。
-- sfizz 实际 RSS 比权重还大 → `set SF_DECODE_FACTOR=2.5` 再试并贴数。
+判据:①的报告贴回来(重做比例);③跑完 DONE 行的 `过短段弃/无音频段弃` 计数、不 OOM;
+memtrace 里任何单进程不无界爬(VN 子进程 ≤cap 锯齿)。
+- sfizz 实际 RSS 比权重大 → `set SF_DECODE_FACTOR=2.5` 再试并贴数。
+- VN 子进程越 cap 不回落 → 贴 [mem] 行(尤其 psutil 警告在不在)。
 
 ## 全绿基线
 所有 `tests_*.py` 通过(`tests_ops` 23、`tests_s5_pipeline` 12、`tests_ops_recycle` 6 等)。
