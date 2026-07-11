@@ -37,7 +37,7 @@ def load_musicxml_part(xml_path: str):
 
 
 def process_piece(piece: dict, xml_root: Path,
-                  min_measures: int, max_measures: int, max_sec: float,
+                  min_measures: int, max_measures: int | None, max_sec: float,
                   lenient: bool, overlap: bool = False) -> tuple[list[dict], dict]:
     """
     单曲:归一化 XML → IR → 小节对齐切段 → A2S/A2S_lite 标签。
@@ -122,7 +122,7 @@ def process_piece(piece: dict, xml_root: Path,
 
 def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
         out_report: str, blacklist: set | None = None,
-        min_measures: int = 4, max_measures: int = 32, max_sec: float = 40.0,
+        min_measures: int = 1, max_measures: int | None = None, max_sec: float = 40.0,
         lenient: bool = True, overlap: bool = False, limit: int | None = None) -> dict:
     """批量驱动。blacklist=work_key 集合(命中的曲整曲跳过,不产 train 标签)。"""
     blacklist = blacklist or set()
@@ -193,8 +193,9 @@ if __name__ == "__main__":
     ap.add_argument("--out-labels", type=str, default="")
     ap.add_argument("--out-corpus", type=str, default="")
     ap.add_argument("--out-report", type=str, default="")
-    ap.add_argument("--min-measures", type=int, default=2)
-    ap.add_argument("--max-measures", type=int, default=16)
+    ap.add_argument("--min-measures", type=int, default=1)
+    ap.add_argument("--max-measures", type=int, default=0,
+                    help="0=不设小节数上限(用户决定:时间 max-sec 是唯一上限,段尽量长)")
     ap.add_argument("--overlap", type=int, default=1)
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
@@ -210,5 +211,5 @@ if __name__ == "__main__":
 
     run(str(MANIFEST), str(XML_ROOT), str(OUT_LABELS), str(OUT_CORPUS),
         str(OUT_REPORT), blacklist=blacklist,
-        min_measures=args.min_measures, max_measures=args.max_measures,
+        min_measures=args.min_measures, max_measures=args.max_measures or None,
         overlap=bool(args.overlap), limit=args.limit if args.limit else None)

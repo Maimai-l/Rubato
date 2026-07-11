@@ -55,30 +55,33 @@ def _slice_ir(ir: ScoreIR, a: int, b: int) -> tuple[ScoreIR, Fraction]:
     return ScoreIR(notes, measures, hi - lo), lo
 
 
-def segment_score(ir: ScoreIR, min_measures: int = 4, max_measures: int = 32,
+def segment_score(ir: ScoreIR, min_measures: int = 4, max_measures: int | None = 32,
                   max_sec: float = 40.0, sec_per_whole: float | None = None,
                   tmap: TimeMap | None = None) -> list[tuple[ScoreIR, tuple[int, int]]]:
     """
     R-S8.1:小节对齐贪心聚合。返回 [(sub_ir, (a,b)), ...],a/b 为原始小节索引。
     约束:min_measures≤(b-a)≤max_measures 且段渲染时长≤max_sec;段起点在小节线。
     末不足 min_measures 的尾巴向前并入(仍≤max_measures 且≤max_sec)否则弃。
+    max_measures=None【用户决定 2026-07-11】:小节数不设上限,时间(max_sec)是唯一上限 ——
+    段尽量长,在 ≤max_sec 内装下尽可能多的完整小节(PDMX 训练数据用;nASAP 仍按论文 4–32 重叠窗)。
     """
     n = len(ir.measures)
+    mm = max_measures if max_measures else n        # None = 无小节数上限,只受 max_sec 约束
     segs = []
     a = 0
     while a < n:
         b = a + min_measures
         if b > n:                                   # 末尾不足 min:尝试并入上一段
-            if segs and (n - segs[-1][1][0]) <= max_measures:
+            if segs and (n - segs[-1][1][0]) <= mm:
                 pa, _ = segs[-1][1]
                 sub, off = _slice_ir(ir, pa, n)
                 if _seg_seconds(sub, off, tmap, sec_per_whole) <= max_sec:
                     segs[-1] = (sub, (pa, n))
                     break
             break                                   # 并不进去 → 丢弃尾巴
-        # 贪心向后扩,直到 max_measures 或超时或到末尾
+        # 贪心向后扩,直到超时或小节上限或到末尾 —— 段【尽量长】
         best_b = b
-        for bb in range(b, min(a + max_measures, n) + 1):
+        for bb in range(b, min(a + mm, n) + 1):
             sub, off = _slice_ir(ir, a, bb)
             if _seg_seconds(sub, off, tmap, sec_per_whole) <= max_sec:
                 best_b = bb

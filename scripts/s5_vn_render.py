@@ -489,10 +489,11 @@ def cpu_stage(mid: dict) -> dict:
         # 93s 超长段(max_sec=40 形同虚设)。segment_score 本就支持 tmap(nASAP 同款),传入即按
         # 【真实演奏秒】约束段长;到这里必有 VN 的真 tmap(没有就已判失败返回)。
         min_sec = float(os.environ.get("S5_SEG_MIN_SEC", "2.0"))   # 用户定:<2s 即退化样本
-        # 段参数 = 论文/SPEC R-S8.1 规格:4≤小节数≤32 且 ≤40s(与文本标签、nASAP 同一规格)。
-        # 旧值 2/16 是编写时偏离规格的私设(无依据、未报告);min=2 在快曲上正是 <2s 碎片的来源之一。
+        # 段参数【用户决定 2026-07-11,覆盖 SPEC R-S8.1 的 4–32】:小节数不设限,时间是唯一上限 ——
+        # 段尽量长,≤40s 内装下尽可能多的完整小节;质量下限由 ≥2s 时长守卫把守(不是小节数)。
+        # (nASAP 仍按论文明确的 4–32 重叠窗,不受此决定影响。)
         for si, (sub_ir, (a, b)) in enumerate(
-                segment_score(ir, min_measures=4, max_measures=32, max_sec=40.0, tmap=tmap)):
+                segment_score(ir, min_measures=1, max_measures=None, max_sec=40.0, tmap=tmap)):
             utt_id = f"pdmxperf_{pid}_{si:03d}"
             score_off = bounds[a] if a < len(bounds) else bounds[-1]
             t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))

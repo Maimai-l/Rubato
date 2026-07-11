@@ -279,7 +279,7 @@ A-S7.2 report:曲目数、段数、重叠系数、与 MAESTRO test 的录音交�
 **输入**:S4/S5/S6/S7 产物。**输出**:`manifest_utts.jsonl`、`labels.jsonl`、`$SHARDS/`(训练分片)。
 
 ### 需求
-R-S8.1 乐谱类切段【不变量】:小节对齐,贪心聚合连续小节,约束 4≤小节数≤32 且渲染时长 ≤40s;段起点必在小节线;piece 末不足 4 小节的尾巴向前并入(仍 ≤40s)否则弃。**禁止任意时间点切乐谱类样本**(会破坏 Dyck 与小节自包含)。
+R-S8.1 乐谱类切段【不变量;2026-07-11 用户修订:PDMX 训练数据小节数不设上下限,时间(≤40s)是唯一上限,段尽量长(min_measures=1, max_measures=None),质量下限由 ≥2s 时长守卫把守;nASAP 仍按 R-S7.3 论文明确的 4–32 重叠窗】原文:小节对齐,贪心聚合连续小节,约束 4≤小节数≤32 且渲染时长 ≤40s;段起点必在小节线;piece 末不足 4 小节的尾巴向前并入(仍 ≤40s)否则弃。**禁止任意时间点切乐谱类样本**(会破坏 Dyck 与小节自包含)。
 R-S8.2 每段渲染时长来源:flat/humanize 由生成的 MIDI 时间;vn 由输出 MIDI;时长与音频实测差 >1.5s 判废。
 R-S8.3 dialects 可用性规则:flat/humanize → {A2S, A2S_lite, TAST, (无 AMT:合成域不做 AMT【推断:力度/踏板系人造,监督价值低,省序列长度】)};vn → 依 R-S5.6;maestro → {AMT};nasap → {A2S, A2S_lite, TAST}。
 R-S8.4 标签文本生成:调 `project()`;每条样本每个可用 dialect 一份文本;任何 validate() 违规 = 该样本整条废弃入 failures。

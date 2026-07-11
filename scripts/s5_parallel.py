@@ -57,7 +57,7 @@ def worker(chunk: list, work_dir: Path, worker_id: int) -> dict:
         str(chunk_manifest), str(ROOT / "work" / "xml_norm"),
         str(chunk_labels), str(chunk_corpus), str(chunk_report),
         blacklist=set(),
-        min_measures=2, max_measures=16, overlap=True,
+        min_measures=1, max_measures=None, overlap=True,   # 用户决定:时间是唯一上限,段尽量长
     )
     report["worker_id"] = worker_id
     report["chunk_size"] = len(chunk)

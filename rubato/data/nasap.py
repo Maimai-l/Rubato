@@ -17,7 +17,7 @@ SEED = 20260706
 # ---------------------------------------------------------------- 重叠切窗(R-S7.3)
 
 def segment_score_overlap(ir, tmap: TimeMap | None = None,
-                          min_measures: int = 4, max_measures: int = 32,
+                          min_measures: int = 4, max_measures: int | None = 32,
                           max_sec: float = 40.0, sec_per_whole: float | None = None):
     """
     R-S7.3【论文明确 nASAP 用重叠窗】:小节对齐 4–32 小节 ≤40s,重叠步长=段长一半。

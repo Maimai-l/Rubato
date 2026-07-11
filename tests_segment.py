@@ -133,4 +133,16 @@ utts_bad = utts + [{"utt_id": "u4", "split": "test", "work_key": "chopin|op10",
 r = leakage_check(utts_bad)
 check("leakage_detected", not r["ok"] and "chopin|op10" in r["violations"]["work_key"], r)
 
+print("[9] max_measures=None:小节数不设限,时间是唯一上限(用户决定,段尽量长)")
+ir9 = make_ir(60)                                     # 60 小节,每小节 1 全音符
+tm_fast = TimeMap([(F(0), 0.0), (F(60), 30.0)])       # 全曲 30s:60 小节都装进一段 40s 窗
+segs9 = segment_score(ir9, min_measures=1, max_measures=None, max_sec=40.0, tmap=tm_fast)
+check("unbounded_one_seg", len(segs9) == 1 and segs9[0][1] == (0, 60),
+      [s[1] for s in segs9])                          # 旧上限 32 会硬拆;现在一段装满
+tm_slow = TimeMap([(F(0), 0.0), (F(60), 120.0)])      # 全曲 120s:时间上限起作用
+segs9b = segment_score(ir9, min_measures=1, max_measures=None, max_sec=40.0, tmap=tm_slow)
+check("time_split_count", len(segs9b) == 3, len(segs9b))   # 120s/40s = 恰 3 段
+check("segments_maximal", all((b - a) == 20 for _, (a, b) in segs9b),
+      [s[1] for s in segs9b])                          # 每段装满 40s=20 小节,绝不提前切
+
 print(f"\n全部通过: {PASS} 项")
