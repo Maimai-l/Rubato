@@ -119,4 +119,42 @@ check("fast_clamped", tempo_outliers(bad2) == [], tempo_outliers(bad2))
 check("stale_audio_deleted", not (audio_dir / "pdmx_B.flac").exists())
 check("normal_piece_untouched", tempo_outliers(m) == [] and (audio_dir / "pdmx_P_000.flac").exists())
 
+print("[6]【弱起免疫】anacrusis 曲:score_range 直达速度图,切割正确(网格路径会静默错位)")
+# 弱起 1 拍(0.25 全音符)+ 2 个整 4/4 小节,60bpm:IR 小节起点 [0, 0.25, 1.25],总长 2.25 全音符 = 9s。
+# 算术网格会给 [0,1,2](整小节假设)且 len/total 双守卫恰好都过 —— 这正是静默毒药;
+# score_range 携带 IR 真实位置,免疫此问题。
+mp6 = mido.MidiFile(ticks_per_beat=480)
+tr6 = mido.MidiTrack(); mp6.tracks.append(tr6)
+tr6.append(mido.MetaMessage("time_signature", numerator=4, denominator=4, time=0))
+tr6.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(60.0), time=0))
+tr6.append(mido.Message("note_on", note=60, velocity=64, time=0))
+tr6.append(mido.Message("note_off", note=60, velocity=0, time=4320))     # 2.25 全音符
+mp6.save(str(tmp / "pickup.mid"))
+sf.write(str(audio_dir / "pdmx_PU.flac"), np.zeros(9 * 8000, dtype="float32"), 8000)
+lb6 = tmp / "l6.jsonl"
+with open(lb6, "w", encoding="utf-8") as f:
+    f.write(json.dumps({"utt_id": "pdmx_PU_000", "piece_id": "PU", "measure_range": [1, 3],
+                        "score_range": [0.25, 2.25], "A2S": "x"}) + "\n")
+mani6 = tmp / "m6.jsonl"
+with open(mani6, "w", encoding="utf-8") as f:
+    f.write(json.dumps({"piece_id": "PU", "midi_path": str(tmp / "pickup.mid")}) + "\n")
+rc = slicer.main(["--labels", str(lb6), "--manifest", str(mani6),
+                  "--audio-dir", str(audio_dir), "--min-sec", "1.0",
+                  "--max-sec", "40.0", "--slack", "0"])
+check("pickup_rc0", rc == 0)
+d6 = sf.info(str(audio_dir / "pdmx_PU_000.flac")).duration
+check("pickup_slice_correct_8s", abs(d6 - 8.0) < 0.01, d6)   # 0.25→2.25 全音符 @60bpm = 1s..9s
+
+print("[7] 同 tick 重复 meta 事件去重(双轨 merge 后拍号/速度各带一份不再插重复小节)")
+mp7 = mido.MidiFile(ticks_per_beat=480)
+t1 = mido.MidiTrack(); t2 = mido.MidiTrack(); mp7.tracks += [t1, t2]
+for tr in (t1, t2):                                          # 两轨都带同样的 meta(常见导出)
+    tr.append(mido.MetaMessage("time_signature", numerator=4, denominator=4, time=0))
+    tr.append(mido.MetaMessage("set_tempo", tempo=500000, time=0))
+t1.append(mido.Message("note_on", note=60, velocity=64, time=0))
+t1.append(mido.Message("note_off", note=60, velocity=0, time=3840))      # 2 整小节
+mp7.save(str(tmp / "dup.mid"))
+_, meas7, tot7 = midi_time(tmp / "dup.mid")
+check("dup_meta_dedup", meas7 == [F(0), F(1)] and tot7 == F(2), (meas7, tot7))
+
 print(f"\n全部通过: {PASS} 项")

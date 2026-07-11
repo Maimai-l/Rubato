@@ -71,9 +71,15 @@ def slice_piece_task(task) -> dict:
     st["seg_resumed"] += len(rows) - len(todo)
     if not todo:
         return st
-    # 对齐校验:标签小节索引必须落在 MIDI 小节网格内(b 允许 == len,表示切到曲尾)
+    # 对齐校验:优先 score_range(IR 真实位置,弱起免疫);无此字段的旧行退回网格+索引。
     n = len(measures)
-    if any(r["measure_range"][1] > n or r["measure_range"][0] >= n for r in todo):
+    use_pos = all(r.get("score_range") for r in todo)
+    if use_pos:
+        tol = 1.0 / 16
+        if any(r["score_range"][1] > float(total) + tol for r in todo):
+            st["structure_mismatch"] += 1   # 标签位置超出 MIDI 时长(展开反复等)→ 整曲跳过
+            return st
+    elif any(r["measure_range"][1] > n or r["measure_range"][0] >= n for r in todo):
         st["structure_mismatch"] += 1       # MIDI 展开反复/结构不一致 → 整曲跳过,绝不切错位
         return st
     try:
@@ -82,9 +88,13 @@ def slice_piece_task(task) -> dict:
         st["audio_read_fail"] += 1
         return st
     for r in todo:
-        a, b = r["measure_range"]
-        t0 = float(tmap(measures[a]))
-        t1 = float(tmap(measures[b])) if b < n else float(tmap(total))
+        if use_pos:
+            p0, p1 = r["score_range"]
+            t0, t1 = float(tmap(p0)), float(tmap(p1))
+        else:
+            a, b = r["measure_range"]
+            t0 = float(tmap(measures[a]))
+            t1 = float(tmap(measures[b])) if b < n else float(tmap(total))
         dur = t1 - t0
         if dur < min_sec:
             st["seg_too_short"] += 1
@@ -146,7 +156,8 @@ def main(argv=None):
         if not midi_path:
             st["no_midi"] += 1
             continue
-        rows_min = [{"utt_id": r["utt_id"], "measure_range": r["measure_range"]} for r in rows]
+        rows_min = [{"utt_id": r["utt_id"], "measure_range": r["measure_range"],
+                     "score_range": r.get("score_range")} for r in rows]
         tasks.append((pid, rows_min, midi_path, str(audio_dir), str(out_dir),
                       args.min_sec, args.max_sec + args.slack))
 

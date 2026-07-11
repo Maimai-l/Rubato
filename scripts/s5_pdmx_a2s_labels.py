@@ -96,6 +96,7 @@ def process_piece(piece: dict, xml_root: Path,
         return [], stats
 
     rows = []
+    bounds = [m.start for m in ir.measures] + [ir.score_end]
     for si, (sub_ir, (a, b)) in enumerate(segs):
         try:
             # flat→A2S/A2S_lite。此路【故意不产 TAST】:TAST 时间戳必须与音频同一 tmap,
@@ -108,6 +109,9 @@ def process_piece(piece: dict, xml_root: Path,
                     "utt_id": f"pdmx_{pid}_{si:03d}",
                     "piece_id": pid,
                     "measure_range": [a, b],
+                    # 【弱起免疫】IR 的真实乐谱位置(全音符)。切割器直接拿位置过 MIDI 速度图,
+                    # 不再从拍号算术重建小节网格 —— 弱起小节会让重建网格整体错位且守卫恰好双过。
+                    "score_range": [float(bounds[a]), float(bounds[b])],
                     "A2S": a2s,
                     "A2S_lite": labels.get("A2S_lite"),
                     "TAST": None, "AMT": None,

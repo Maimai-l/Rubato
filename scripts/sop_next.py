@@ -87,6 +87,9 @@ def _steps():
                      "--out-corpus", str(WORK / "a2s_corpus_vn.txt"))],
              parse={"vn_ok": r"vn_ok=(\d+)", "utts": r"utts=(\d+)", "tast": r"TAST=(\d+)",
                     "vn_recycles": r"vn_子进程回收=(\d+)"}),
+        dict(id="P2d", title="VN 段抽听采样(5 段音频+标签 → 贴文件夹路径给用户听)",
+             cmds=[S("scripts/spot_check.py", "--labels", str(WORK / "pdmx_perf_labels.jsonl"),
+                     "--n", "5", "--tag", "vn")]),
         dict(id="P3", title="S4 补渲被删的离谱速度曲(其余自动跳过)",
              cmds=[S("scripts/s4_parallel.py")],
              parse={"ok": r"ok=(\d+)", "fail": r"fail=(\d+)"}),
@@ -108,6 +111,9 @@ def _steps():
              parse={"sliced": r"sliced = (\d+)", "structure_mismatch": r"structure_mismatch = (\d+)",
                     "seg_too_long": r"seg_too_long = (\d+)"},
              require=lambda n: None if int(n.get("sliced", 0)) > 0 else "sliced=0,配对全失败,停"),
+        dict(id="P6b2", title="S4 段抽听采样(5 段音频+标签 → 贴文件夹路径给用户听)",
+             cmds=[S("scripts/spot_check.py", "--labels", str(WORK / "pdmx_a2s_labels.jsonl"),
+                     "--n", "5", "--tag", "s4")]),
         dict(id="P6c", title="语料重建(从标签文件确定性重建,不再依赖追加顺序)",
              cmds=[S("scripts/rebuild_corpus.py")],
              parse={"corpus_lines": r"corpus_lines=(\d+)"},
@@ -125,6 +131,8 @@ def _steps():
              require=lambda n: None if n.get("vocab") == "8000"
                      and float(n.get("split_rate", 1)) < 0.30
                      else f"vocab={n.get('vocab')} split_rate={n.get('split_rate')} 未达标,停"),
+        dict(id="P8", title="装配终检:build_dataset --dry-run(每源 kept>0,no_audio 不占大头)",
+             cmds=[S("scripts/build_dataset.py", "--dry-run")]),
     ]
 
 

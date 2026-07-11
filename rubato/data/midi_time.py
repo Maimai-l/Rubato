@@ -49,6 +49,9 @@ def midi_time(midi_path: str | Path):
         last_tick = t                              # 纯 meta 文件兜底
     total_whole = last_tick * whole_per_tick
 
+    # 同 tick 重复事件去重(双轨 MIDI merge 后 meta 可能各带一份;重复会让网格插重复小节起点):
+    tempo_events = list({t: us for t, us in tempo_events}.items())
+    tsig_events = list({t: bar for t, bar in tsig_events}.items())
     # --- 速度图:分段线性锚点。无 set_tempo 时 MIDI 规范默认 500000(=120bpm)。
     if not tempo_events or tempo_events[0][0] > 0:
         tempo_events.insert(0, (0, 500000))

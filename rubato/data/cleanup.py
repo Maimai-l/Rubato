@@ -45,7 +45,9 @@ def piece_files(audio_dir: Path, pid: str) -> dict[str, list[Path]]:
         "intermediates": [audio_dir / f"{pid}_whole.opus", audio_dir / f"{pid}_perf.mid"],
         "done_marker":   [audio_dir / f"{pid}.done"],
         # 上次被漏掉的:VN 输出目录里这曲的演奏 MIDI 和 CSV(命名含 xml stem = pid)
-        "vn_mid_csv":    list(vn_dir.glob(f"*{pid}*")) if vn_dir.exists() else [],
+        # VN 命名 {parent}_{stem=pid}_by_isgn_{composer}.mid(+ _midi_notes.csv 同前缀):
+        # 用 "{pid}_by_" 边界匹配,不用裸子串(pid 互为子串时裸匹配会过删别曲的文件)
+        "vn_mid_csv":    list(vn_dir.glob(f"*{pid}_by_*")) if vn_dir.exists() else [],
     }
     return {k: [p for p in v if p.exists()] for k, v in cats.items()}
 

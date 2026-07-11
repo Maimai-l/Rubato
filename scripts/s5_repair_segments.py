@@ -101,8 +101,9 @@ def apply_repair(labels_path: Path, audio_dir: Path, bad: set) -> dict:
                 fo.write(s + "\n")
     bak = labels_path.with_suffix(".bak")
     if bak.exists():
-        bak.unlink()
-    labels_path.rename(bak)
+        labels_path.unlink()        # 已有首次备份:保留它(与 cleanup/audit 同策略),不覆盖
+    else:
+        labels_path.rename(bak)
     tmp.rename(labels_path)
     for pid in bad:
         for f in audio_dir.glob(f"{VN_PREFIX}{pid}_*"):     # 段音频(.wav/.opus)
