@@ -484,18 +484,30 @@ def cpu_stage(mid: dict) -> dict:
                 return res
 
         bounds = [m.start for m in ir.measures] + [ir.score_end]
+        # 【分段必须用真 tmap】(执行端听音频抓出的 bug):旧版传 sec_per_whole=2.0(恒速 120bpm 假设)
+        # 决定"切哪几小节",而音频切片用真 tmap —— 两个时间源打架:快曲被切成 0.2s 碎片、慢曲切出
+        # 93s 超长段(max_sec=40 形同虚设)。segment_score 本就支持 tmap(nASAP 同款),传入即按
+        # 【真实演奏秒】约束段长;VN/humanize 两条路到这里都有 tmap。
+        min_sec = float(os.environ.get("S5_SEG_MIN_SEC", "1.0"))
         for si, (sub_ir, (a, b)) in enumerate(
-                segment_score(ir, min_measures=2, max_measures=16, max_sec=40.0, sec_per_whole=2.0)):
+                segment_score(ir, min_measures=2, max_measures=16, max_sec=40.0, tmap=tmap)):
             utt_id = f"pdmxperf_{pid}_{si:03d}"
             score_off = bounds[a] if a < len(bounds) else bounds[-1]
+            t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))
+            if t_hi - t_lo < min_sec:      # 真实时长过短的段(极快小曲)是退化样本,直接不产出
+                res["seg_too_short"] = res.get("seg_too_short", 0) + 1
+                continue
             labels, _ = make_labels(sub_ir, "human", tmap=tmap, score_offset=score_off)
             if not labels.get("A2S"):
                 continue
             seg_audio = None
             if audio is not None:
-                t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))
                 seg_audio = _slice_audio(audio, sr, t_lo, t_hi, str(out / f"{utt_id}.opus"))
+                if seg_audio is None:      # 应有音频却切不出 → 不产出残行(human 段无音频没意义)
+                    res["seg_no_audio"] = res.get("seg_no_audio", 0) + 1
+                    continue
             res["rows"].append({"utt_id": utt_id, "piece_id": pid, "kind": "human",
+                                "measure_range": [a, b],                 # 与 S5 文本标签 schema 对齐
                                 "audio_path": seg_audio,
                                 **{k: labels.get(k) for k in ("A2S", "A2S_lite", "TAST")}, "AMT": None})
         (out / f"{pid}.done").touch()                       # 断点标记
@@ -610,6 +622,8 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     def on_result(piece, res):
         rep["vn_ok"] += res["vn_ok"]; rep["vn_fail"] += res["vn_fail"]
         rep["humanized"] += res["humanized"]
+        rep["seg_too_short"] = rep.get("seg_too_short", 0) + res.get("seg_too_short", 0)
+        rep["seg_no_audio"] = rep.get("seg_no_audio", 0) + res.get("seg_no_audio", 0)
         if res.get("fail"):
             rep["failures"].append({"piece_id": res["pid"], "reason": res["fail"]})
         for row in res["rows"]:
@@ -688,7 +702,8 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         corpus_fh.close()
     print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} humanized={rep['humanized']} "
           f"skipped={stats['done_skipped']} dropped={stats['dropped']} "
-          f"utts={rep['utts']} TAST={rep['tast']} cpu_fail={stats['failed']}"
+          f"utts={rep['utts']} TAST={rep['tast']} cpu_fail={stats['failed']} "
+          f"过短段弃={rep.get('seg_too_short', 0)} 无音频段弃={rep.get('seg_no_audio', 0)}"
           + (f" vn_子进程回收={rep['vn_recycles']}次" if vn is not None else ""))
     return rep
 
