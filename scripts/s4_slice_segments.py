@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import harden_stdout, read_jsonl
 from rubato.data.midi_time import midi_time
+from rubato.ops import auto_map
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 
@@ -48,32 +49,38 @@ def _find_whole(audio_dir: Path, pid: str):
     return None
 
 
-def slice_piece(pid: str, rows: list[dict], midi_path: str, audio_dir: Path, out_dir: Path,
-                min_sec: float, max_sec: float, st: dict):
+def slice_piece_task(task) -> dict:
+    """并行 worker(模块顶层):切一曲,返回【自己的】计数 dict,主进程合并。
+    每曲 = opus 解码 + midi 解析 + N 个 flac 编码,~1-3s 纯 CPU × 5 万曲 —— 必须并行。"""
+    pid, rows, midi_path, audio_dir, out_dir, min_sec, max_sec = task
+    audio_dir, out_dir = Path(audio_dir), Path(out_dir)
+    st = {"pieces_done": 0, "sliced": 0, "seg_resumed": 0, "seg_too_short": 0,
+          "seg_too_long": 0, "structure_mismatch": 0, "no_whole_audio": 0,
+          "midi_fail": 0, "audio_read_fail": 0}
     whole = _find_whole(audio_dir, pid)
     if whole is None:
         st["no_whole_audio"] += 1
-        return
+        return st
     try:
         tmap, measures, total = midi_time(midi_path)
     except Exception:
         st["midi_fail"] += 1
-        return
+        return st
     todo = [r for r in rows
             if not (out_dir / f"{r['utt_id']}.flac").exists()]     # 已切过的段跳过(续跑)
     st["seg_resumed"] += len(rows) - len(todo)
     if not todo:
-        return
+        return st
     # 对齐校验:标签小节索引必须落在 MIDI 小节网格内(b 允许 == len,表示切到曲尾)
     n = len(measures)
     if any(r["measure_range"][1] > n or r["measure_range"][0] >= n for r in todo):
         st["structure_mismatch"] += 1       # MIDI 展开反复/结构不一致 → 整曲跳过,绝不切错位
-        return
+        return st
     try:
         audio, sr = _read_audio(whole)      # 整曲只读一次
     except Exception:
         st["audio_read_fail"] += 1
-        return
+        return st
     for r in todo:
         a, b = r["measure_range"]
         t0 = float(tmap(measures[a]))
@@ -92,6 +99,7 @@ def slice_piece(pid: str, rows: list[dict], midi_path: str, audio_dir: Path, out
         _write_flac(out_dir / f"{r['utt_id']}.flac", audio[i0:i1], sr)
         st["sliced"] += 1
     st["pieces_done"] += 1
+    return st
 
 
 def main(argv=None):
@@ -105,6 +113,7 @@ def main(argv=None):
     ap.add_argument("--max-sec", type=float, default=40.0)
     ap.add_argument("--slack", type=float, default=1.0)
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 曲(冒烟)")
+    ap.add_argument("--workers", type=int, default=0, help="0=自动(核数,≤16)")
     args = ap.parse_args(argv)
 
     audio_dir = Path(args.audio_dir)
@@ -126,18 +135,26 @@ def main(argv=None):
                     and row.get("measure_range") and not row.get("audio_path"):
                 yield row
 
+    # 组任务:每曲一个 task;行只留 utt_id/measure_range(A2S 文本很大,不进任务队列)
+    tasks = []
     for pid, rows in groupby(_vn_text_rows(), key=lambda r: r.get("piece_id")):
         st["pieces"] += 1
         if args.limit and st["pieces"] > args.limit:
             st["pieces"] -= 1
             break
-        rows = list(rows)
         midi_path = midi_by_pid.get(pid)
         if not midi_path:
             st["no_midi"] += 1
             continue
-        slice_piece(pid, rows, midi_path, audio_dir, out_dir,
-                    args.min_sec, args.max_sec + args.slack, st)
+        rows_min = [{"utt_id": r["utt_id"], "measure_range": r["measure_range"]} for r in rows]
+        tasks.append((pid, rows_min, midi_path, str(audio_dir), str(out_dir),
+                      args.min_sec, args.max_sec + args.slack))
+
+    def _merge(_t, res):
+        for k, v in res.items():
+            st[k] = st.get(k, 0) + v
+
+    auto_map(tasks, slice_piece_task, workers=args.workers, on_result=_merge, log_every=500)
 
     print("S4 段切割(按 MIDI 真实速度图):")
     for k, v in st.items():

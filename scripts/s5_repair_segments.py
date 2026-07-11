@@ -136,10 +136,27 @@ def main(argv=None):
     labels_path, audio_dir = Path(args.labels), Path(args.audio_dir)
     if not labels_path.exists():
         print(f"labels 不存在: {labels_path}"); return 2
-    bad, st = scan(labels_path, args.min_sec, args.max_sec + args.slack)
     if args.all:
-        bad = set(st["pieces"])          # 全部 VN 曲重做(标签行/段音频/.done 全清,labels 留 .bak)
-        print("【--all 全量重跑模式】不按时长筛,所有 VN 曲的行/音频/.done 都将清除待重渲。")
+        # 【性能】--all 不需要时长:只收集 piece_id(纯文本一遍),跳过全量 sf.info 音频头扫描
+        bad = set()
+        n_rows = 0
+        with open(labels_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                n_rows += 1
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if str(row.get("utt_id", "")).startswith(VN_PREFIX) and row.get("piece_id"):
+                    bad.add(row["piece_id"])
+        st = {"rows": n_rows, "vn_rows": "-", "pieces": bad, "too_short": "-", "too_long": "-",
+              "missing_audio": "-", "no_audio_field": "-", "min_seen": 0.0, "max_seen": 0.0}
+        print("【--all 全量重跑模式】不按时长筛(跳过音频头扫描),所有 VN 曲的行/音频/.done 都将清除待重渲。")
+    else:
+        bad, st = scan(labels_path, args.min_sec, args.max_sec + args.slack)
     n_pieces = len(st["pieces"])
     print(f"扫描 {labels_path}")
     print(f"  行数 {st['rows']}(VN 行 {st['vn_rows']},涉及 {n_pieces} 曲)")

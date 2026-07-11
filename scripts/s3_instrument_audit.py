@@ -13,7 +13,6 @@
 from __future__ import annotations
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -21,25 +20,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import harden_stdout, read_jsonl
 from rubato.data.pdmx import classify_score_file, classify_midi_file
 from rubato.data.cleanup import purge_pieces, verify_pieces, format_verify
+from rubato.ops import auto_map
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 
 
-def classify_piece(piece: dict, xml_root: Path) -> tuple[bool, str]:
-    """谱面优先(记谱信号最全),MIDI 兜底;两个都查,任一非钢琴即非钢琴。"""
-    xml_rel = piece.get("xml_norm") or piece.get("xml_raw")
-    if xml_rel:
-        xp = Path(xml_rel) if Path(xml_rel).is_absolute() else xml_root / xml_rel
-        if xp.exists():
-            ok, why = classify_score_file(xp)
-            if not ok:
-                return False, why
-    mp = piece.get("midi_path")
-    if mp and Path(mp).exists():
-        ok, why = classify_midi_file(mp)
+def _classify_task(t):
+    """并行 worker(模块顶层,可 pickle):谱面优先、MIDI 兜底,任一非钢琴即非钢琴。
+    每曲几十毫秒的纯 CPU 活 × 5 万曲 —— 单线程数小时,进程池分钟级。"""
+    pid, xml_path, midi_path = t
+    if xml_path and Path(xml_path).exists():
+        ok, why = classify_score_file(xml_path)
         if not ok:
-            return False, why
-    return True, "ok"
+            return pid, False, why
+    if midi_path and Path(midi_path).exists():
+        ok, why = classify_midi_file(midi_path)
+        if not ok:
+            return pid, False, why
+    return pid, True, "ok"
 
 
 def main(argv=None):
@@ -52,31 +50,34 @@ def main(argv=None):
     ap.add_argument("--vn-labels", default=str(ROOT / "work" / "pdmx_perf_labels.jsonl"))
     ap.add_argument("--out-ids", default=str(ROOT / "reports" / "nonpiano_ids.txt"))
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--workers", type=int, default=0, help="0=自动(核数,≤16)")
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args(argv)
 
     pieces = list(read_jsonl(args.manifest))
     if args.limit:
         pieces = pieces[:args.limit]
+    xml_root = Path(args.xml_root)
+    tasks = []
+    for p in pieces:
+        pid = p.get("piece_id")
+        if not pid:
+            continue
+        xml_rel = p.get("xml_norm") or p.get("xml_raw")
+        xp = str(Path(xml_rel) if (xml_rel and Path(xml_rel).is_absolute())
+                 else (xml_root / xml_rel)) if xml_rel else ""
+        tasks.append((pid, xp, p.get("midi_path") or ""))
     bad: dict[str, str] = {}
     reasons: dict[str, int] = {}
 
-    # 并行分类:每首曲加载 XML/MIDI,IO 密集
-    from concurrent.futures import ProcessPoolExecutor, as_completed
-    from rubato.ops import pick_workers
-    nw = pick_workers(per_worker_gb=0.3, hard_cap=min(os.cpu_count() or 4, 16))
-    xml_root = Path(args.xml_root)
-    with ProcessPoolExecutor(max_workers=nw) as ex:
-        futs = {ex.submit(classify_piece, p, xml_root): p for p in pieces if p.get("piece_id")}
-        for i, f in enumerate(as_completed(futs)):
-            pid = futs[f].get("piece_id")
-            ok, why = f.result()
-            if not ok:
-                bad[pid] = why
-                key = why.split(":")[0]
-                reasons[key] = reasons.get(key, 0) + 1
-            if (i + 1) % 2000 == 0:
-                print(f"  [{i+1}/{len(futs)}] 已审计,非钢琴={len(bad)}", flush=True)
+    def _collect(_t, res):
+        pid, ok, why = res
+        if not ok:
+            bad[pid] = why
+            key = why.split(":")[0]
+            reasons[key] = reasons.get(key, 0) + 1
+
+    auto_map(tasks, _classify_task, workers=args.workers, on_result=_collect)
 
     print(f"乐器审计: {len(pieces)} 曲中发现非钢琴 {len(bad)} 曲"
           f"({0 if not pieces else round(100 * len(bad) / len(pieces), 1)}%)")

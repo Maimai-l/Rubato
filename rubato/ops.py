@@ -306,3 +306,32 @@ def concat_files(chunk_paths, out_path, *, skip_missing: bool = True) -> int:
                     if line.endswith("\n"):
                         n += 1
     return n
+
+
+# ---------------------------------------------------------------- 批量纯函数自动并行
+
+def auto_map(tasks, fn, *, workers: int = 0, on_result=None, seq_threshold: int = 8,
+             per_worker_gb: float = 0.3, log=print, log_every: int = 200):
+    """
+    CPU 纯函数批量跑,自动选执行方式:任务 ≤ seq_threshold 或 workers=1 → 顺序(冒烟/测试
+    零开销);否则进程池 stream_map。并发数默认【内存感知】:pick_workers(per_worker_gb) 与
+    min(核数,16) 取小(执行端 0e6e2ad 的思路,吸收为默认)。fn 必须模块顶层(可 pickle)。
+    为什么存在:扫 5 万曲的审计/钳速度/切段这类"每曲几十毫秒~几秒"的纯 CPU 活,单线程要跑
+    几小时纯属浪费 —— 并行是默认,顺序只是小任务的快路径。
+    """
+    tasks = list(tasks)
+    n_workers = workers or pick_workers(per_worker_gb, hard_cap=min(os.cpu_count() or 4, 16))
+    if n_workers <= 1 or len(tasks) <= seq_threshold:
+        stats = {"total": len(tasks), "done_skipped": 0, "ok": 0, "failed": 0}
+        for t in tasks:
+            try:
+                r = fn(t)
+                if on_result is not None:
+                    on_result(t, r)
+                stats["ok"] += 1
+            except Exception as e:
+                stats["failed"] += 1
+                log(f"[auto_map] 失败: {type(e).__name__}: {str(e)[:100]}")
+        return stats
+    return stream_map(tasks, fn, max_workers=n_workers, on_result=on_result,
+                      log=log, log_every=log_every)

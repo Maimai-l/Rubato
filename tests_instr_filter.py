@@ -141,4 +141,19 @@ check("rebuild_rc0", rc == 0, rc)
 lines = out_c.read_text(encoding="utf-8").splitlines()
 check("corpus_lines", lines == ["aaa", "bbb", "ccc"], lines)
 
+print("[8] 并行路径实测:12 曲 > seq_threshold → 真进程池跑审计(结果与顺序一致)")
+mani_p = tmp / "mani_p.jsonl"
+with open(mani_p, "w", encoding="utf-8") as f:
+    for i in range(11):
+        f.write(json.dumps({"piece_id": f"PP{i}", "xml_raw": str(xmlp),
+                            "midi_path": str(tmp / "pa.mid")}) + "\n")
+    f.write(json.dumps({"piece_id": "DRUM_P", "xml_raw": str(mxl),
+                        "midi_path": str(tmp / "dr.mid")}) + "\n")
+rc = audit.main(["--manifest", str(mani_p), "--xml-root", str(tmp), "--audio-dir", str(aud),
+                 "--text-labels", str(tmp / "no1.jsonl"), "--vn-labels", str(tmp / "no2.jsonl"),
+                 "--out-ids", str(tmp / "bad_p.txt"), "--workers", "2"])
+check("pool_audit_rc0", rc == 0, rc)
+ids_p = (tmp / "bad_p.txt").read_text(encoding="utf-8")
+check("pool_found_only_drum", ids_p.strip().startswith("DRUM_P") and "PP" not in ids_p, ids_p)
+
 print(f"\n全部通过: {PASS} 项")

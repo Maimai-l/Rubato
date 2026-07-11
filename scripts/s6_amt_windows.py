@@ -29,7 +29,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import harden_stdout
 from rubato.data.maestro import midi_to_events
 from rubato.data.segment import segment_amt, make_amt_label
+from rubato.ops import auto_map
 from scripts.gen_amt_labels import load_csv_rows, resolve_zip_member
+
+_ZF: dict = {}      # 每个 worker 进程各持一个 zip 句柄(懒开,进程生命周期内复用)
+
+
+def _win_task(t):
+    """并行 worker:一场演奏 → MIDI 解析 → 12–25s 切窗 → AMT 校验标签行列表。
+    每场 ~0.5-2s 纯 CPU × 1276 场 —— 并行后分钟级。返回 (rows, n_windows, n_fail) 。"""
+    zpath, member, midi_filename, split, lo, hi = t
+    import zipfile as _zip
+    zf = _ZF.get(zpath)
+    if zf is None:
+        zf = _ZF[zpath] = _zip.ZipFile(zpath)
+    notes, pedal = midi_to_events(zf.read(member))
+    base = _slug(midi_filename)
+    rows, n_win, n_fail = [], 0, 0
+    for wi, (win_notes, win_pedal, (w0, w1)) in enumerate(
+            segment_amt(notes, pedal, target_lo=lo, target_hi=hi)):
+        n_win += 1
+        labels, _fails = make_amt_label(win_notes, win_pedal)
+        if not labels.get("AMT"):
+            n_fail += 1
+            continue
+        rows.append({"utt_id": f"maestro_{base}_{wi:03d}", "midi_file": midi_filename,
+                     "win": [round(w0, 3), round(w1, 3)], "AMT": labels["AMT"],
+                     "split": split, "n_notes": len(win_notes)})
+    return rows, n_win, n_fail
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 
@@ -47,51 +74,41 @@ def main(argv=None):
     ap.add_argument("--target-lo", type=float, default=12.0)
     ap.add_argument("--target-hi", type=float, default=25.0)
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 场演奏(冒烟)")
+    ap.add_argument("--workers", type=int, default=0, help="0=自动(核数,≤16)")
     args = ap.parse_args(argv)
 
     rows = load_csv_rows(args.csv)
     if args.limit:
         rows = rows[:args.limit]
-    zf = zipfile.ZipFile(args.zip)
+    zf = zipfile.ZipFile(args.zip)       # 主进程只做 member 解析(namelist 查表,快)
     st = {"performances": 0, "windows": 0, "labels": 0, "win_fail": 0,
           "not_found": 0, "parse_fail": 0}
+    tasks = []
+    for row in rows:
+        member = resolve_zip_member(zf, row["midi_filename"])
+        if member is None:
+            st["not_found"] += 1
+            continue
+        tasks.append((args.zip, member, row["midi_filename"], row.get("split"),
+                      args.target_lo, args.target_hi))
+    zf.close()
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    with open(out_path, "w", encoding="utf-8") as fo:
-        for i, row in enumerate(rows):
-            member = resolve_zip_member(zf, row["midi_filename"])
-            if member is None:
-                st["not_found"] += 1
-                continue
-            try:
-                notes, pedal = midi_to_events(zf.read(member))
-            except Exception:
-                st["parse_fail"] += 1
-                continue
-            st["performances"] += 1
-            base = _slug(row["midi_filename"])
-            for wi, (win_notes, win_pedal, (w0, w1)) in enumerate(
-                    segment_amt(notes, pedal, target_lo=args.target_lo,
-                                target_hi=args.target_hi)):
-                st["windows"] += 1
-                labels, fails = make_amt_label(win_notes, win_pedal)
-                if not labels.get("AMT"):
-                    st["win_fail"] += 1          # 校验失败的窗:计数,不静默
-                    continue
-                fo.write(json.dumps({
-                    "utt_id": f"maestro_{base}_{wi:03d}",
-                    "midi_file": row["midi_filename"],
-                    "win": [round(w0, 3), round(w1, 3)],
-                    "AMT": labels["AMT"],
-                    "split": row.get("split"),
-                    "n_notes": len(win_notes),
-                }, ensure_ascii=False) + "\n")
-                st["labels"] += 1
-            if (i + 1) % 100 == 0:
-                print(f"  [{i + 1}/{len(rows)}] windows={st['windows']} labels={st['labels']}",
-                      flush=True)
-    zf.close()
+    fo = open(out_path, "w", encoding="utf-8")
+
+    def _write(_t, res):                 # 主进程单写者:并行结果即时落盘,不在内存累积
+        out_rows, n_win, n_fail = res
+        st["performances"] += 1
+        st["windows"] += n_win
+        st["win_fail"] += n_fail
+        for r in out_rows:
+            fo.write(json.dumps(r, ensure_ascii=False) + "\n")
+            st["labels"] += 1
+
+    stats = auto_map(tasks, _win_task, workers=args.workers, on_result=_write, log_every=100)
+    st["parse_fail"] += stats.get("failed", 0)
+    fo.close()
     print(f"\nDONE in {time.time() - t0:.0f}s: " + " ".join(f"{k}={v}" for k, v in st.items()))
     print(f"  → {out_path}(行带 win=[t0,t1],加载时按窗读整曲 FLAC,不切文件)")
     return 0

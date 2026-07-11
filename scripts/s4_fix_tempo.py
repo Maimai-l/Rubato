@@ -22,6 +22,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import harden_stdout, read_jsonl
 from rubato.data.midi_time import tempo_outliers, clamp_midi_tempo
+from rubato.ops import auto_map
+
+
+def _scan_task(t):
+    """并行 worker:一曲的 set_tempo 越界扫描(mido 解析 ~几十 ms × 5 万曲 → 必须并行)。"""
+    pid, midi_path, lo, hi = t
+    try:
+        return pid, tempo_outliers(midi_path, lo, hi), None
+    except Exception as e:
+        return pid, [], type(e).__name__
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 
@@ -35,6 +45,7 @@ def main(argv=None):
     ap.add_argument("--hi", type=float, default=300.0, help="高于此 bpm 视为编辑错误")
     ap.add_argument("--fallback", type=float, default=80.0, help="钳制目标 bpm")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--workers", type=int, default=0, help="0=自动(核数,≤16)")
     ap.add_argument("--apply", action="store_true", help="实施(默认只报告)")
     args = ap.parse_args(argv)
 
@@ -42,6 +53,8 @@ def main(argv=None):
     st = {"pieces": 0, "outlier_pieces": 0, "events_clamped": 0,
           "audio_deleted": 0, "midi_fail": 0}
     examples = []
+    tasks = []
+    midi_by_pid = {}
     for p in read_jsonl(args.manifest):
         pid, midi_path = p.get("piece_id"), p.get("midi_path")
         if not (pid and midi_path):
@@ -50,18 +63,23 @@ def main(argv=None):
         if args.limit and st["pieces"] > args.limit:
             st["pieces"] -= 1
             break
-        try:
-            bad = tempo_outliers(midi_path, args.lo, args.hi)
-        except Exception:
+        tasks.append((pid, midi_path, args.lo, args.hi))
+        midi_by_pid[pid] = midi_path
+    outliers = {}
+
+    def _collect(_t, res):
+        pid, bad, err = res
+        if err:
             st["midi_fail"] += 1
-            continue
-        if not bad:
-            continue
-        st["outlier_pieces"] += 1
-        if len(examples) < 10:
-            examples.append((pid, bad[:4]))
-        if args.apply:
-            st["events_clamped"] += clamp_midi_tempo(midi_path, args.lo, args.hi, args.fallback)
+        elif bad:
+            outliers[pid] = bad
+
+    auto_map(tasks, _scan_task, workers=args.workers, on_result=_collect)   # 扫描并行
+    st["outlier_pieces"] = len(outliers)
+    examples = [(pid, bad[:4]) for pid, bad in list(outliers.items())[:10]]
+    if args.apply:
+        for pid, bad in outliers.items():          # 实施只动越界的少数曲,顺序即可
+            st["events_clamped"] += clamp_midi_tempo(midi_by_pid[pid], args.lo, args.hi, args.fallback)
             for ext in (".opus", ".flac", ".wav"):
                 ap_ = audio_dir / f"pdmx_{pid}{ext}"
                 if ap_.exists():
