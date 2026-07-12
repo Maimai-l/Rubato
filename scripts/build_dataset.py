@@ -303,7 +303,10 @@ def main():
         except Exception as e:
             print(f"  ⚠ 读 .nemo 配置失败({type(e).__name__}),max_target_len 用缺省 512")
     print(f"  目标序列上限 = {max_tgt} tok(体检实测位置表);超长样本将丢弃并记账…")
-    train_ds = RubatoDataset(train_utts, labels, tok, train=True, max_target_len=max_tgt)
+    # 冒烟关增强:alpha 重切分/tiling 每 epoch 换答案,"背下来"在增强下不可能(实测 sem 钉 1.1/
+    # ts 钉 6.4)。全量训练保持增强(论文设计)。
+    train_ds = RubatoDataset(train_utts, labels, tok, train=True, max_target_len=max_tgt,
+                             augment=not args.smoke)
     lf = train_ds.len_filter_report
     print(f"  超长过滤: 保留 {lf.get('kept_pairs')} 对,丢弃 {lf.get('dropped_by_dialect') or 0}")
     _dropped = sum((lf.get("dropped_by_dialect") or {}).values())

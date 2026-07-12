@@ -230,7 +230,8 @@ class RubatoDataset:
                  seed: int = 20260706, sr: int = 16000,
                  alpha: float = 0.25, train: bool = True,
                  dialect_mix: dict | None = None,
-                 max_target_len: int | None = None):
+                 max_target_len: int | None = None,
+                 augment: bool | None = None):
         self.utts = {u["utt_id"]: u for u in utts}
         self.labels = labels
         self.tok = tokenizer
@@ -240,6 +241,10 @@ class RubatoDataset:
         self.train = train
         self.dialect_mix = dialect_mix          # None → sampling.DIALECT_MIX 缺省;可从配置注入
         self.max_target_len = max_target_len    # decoder 位置表上限(canary=512);None=不过滤
+        # 增强开关(缺省跟随 train):alpha 子词重采样 + tiling 时间戳平移。过拟合冒烟必须关 ——
+        # 两者每 epoch 换答案,sem 被切分熵钉在 ~1.1、ts 被 t0 随机钉在 ~6.4(执行端 4000 步实测),
+        # "背不下来"是增强的设计属性,不是收敛失败。全量训练保持开启(论文 R-S9.4/R-S11.3)。
+        self.augment = bool(train) if augment is None else bool(augment)
         self.len_filter_report: dict = {}
         self.last_mix_report: dict = {}         # 每 epoch 的池大小/配额/过采样倍数,给日志看
         self._len_ok = self._build_len_filter() if max_target_len else None
@@ -305,14 +310,15 @@ class RubatoDataset:
         u = self.utts[uid]
         text = self.labels[uid][dialect]
 
-        # tiling(R-S11.3):TAST/AMT 每 epoch 每样本 t0~U[0, 40-dur]
+        # tiling(R-S11.3):TAST/AMT 每 epoch 每样本 t0~U[0, 40-dur](augment=False 时恒 0)
         t0_s = tiling_offset(dialect, u.get("dur_s", 0.0), uid, self.epoch, self.seed) \
-            if self.train else 0.0
+            if (self.train and self.augment) else 0.0
         t0_bins = int(round(t0_s / (TS_MS / 1000.0)))
         text = apply_tiling_text(text, t0_bins)
 
         enc = encode_target(self.tok, dialect, text,
-                            sample=self.train, alpha=self.alpha, domain=u.get("domain"))
+                            sample=self.train and self.augment,
+                            alpha=self.alpha, domain=u.get("domain"))
         # alpha 采样切分可能比确定性切分更长 → 超上限就退回确定性切分(预过滤保证它必然合规)
         if self.max_target_len and len(enc["input_ids"]) + 1 > self.max_target_len:
             enc = encode_target(self.tok, dialect, text, sample=False, domain=u.get("domain"))

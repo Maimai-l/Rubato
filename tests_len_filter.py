@@ -65,4 +65,22 @@ print("[3] 不限长(None):行为与从前完全一致")
 ds2 = RubatoDataset(utts, labels, Tok(), train=False, max_target_len=None)
 check("nolimit_all", set(ds2._available()) == {"u_short", "u_long", "u_mixed"})
 
+print("[4] augment 开关:冒烟(关)→ 同一样本跨 epoch 恒等;训练(开)→ tiling 会动时间戳")
+lab_t = {"u_t": {"TAST": "<|1.00|>ab <|3.50|>cd"}}
+utt_t = [{"utt_id": "u_t", "kind": "pdmx", "audio_path": str(wav), "dur_s": 5.0,
+          "dialects": ["TAST"], "split": "train", "domain": "synth"}]
+ds_off = RubatoDataset(utt_t, lab_t, Tok(), train=True, augment=False)
+ds_off.set_epoch(0)
+ids0 = ds_off[0]["input_ids"]
+ds_off.set_epoch(3)
+check("smoke_deterministic", ds_off[0]["input_ids"] == ids0)   # 关增强:答案固定,可背诵
+ds_on = RubatoDataset(utt_t, lab_t, Tok(), train=True)         # 缺省=开(论文 R-S9.4/R-S11.3)
+changed = False
+for e in range(6):
+    ds_on.set_epoch(e)
+    if ds_on._plan and ds_on[0]["input_ids"] != ids0:
+        changed = True
+        break
+check("train_tiling_varies", changed)   # 开增强:时间戳随 epoch 平移 —— 背不下来是设计属性
+
 print(f"\n全部通过: {PASS} 项")
