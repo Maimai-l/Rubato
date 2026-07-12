@@ -19,7 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from rubato.platform import harden_stdout
 from rubato.data.assemble import assemble, partition_by_split
+harden_stdout()   # 执行端 P8 实测:第 155 行打 '⚠' 在 GBK 控制台崩;此前全库硬化时漏了本脚本
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 WORK = ROOT / "work"
@@ -31,7 +33,9 @@ SOURCES = [
     {"path": str(WORK / "pdmx_perf_labels.jsonl"), "kind": "pdmx", "domain": "synth"},
     {"path": str(WORK / "pdmx_a2s_labels.jsonl"),  "kind": "pdmx", "domain": "synth"},
     {"path": str(WORK / "nasap_labels.jsonl"),     "kind": "nasap",   "domain": "real"},
-    {"path": str(WORK / "maestro_amt_labels.jsonl"), "kind": "maestro", "domain": "real"},
+    # 【必须用切窗版】整曲版 maestro_amt_labels.jsonl 是几分钟长的不可训行(P8 实测只装出
+    # 1,276 条、AMT 全灭);切窗版 23,657 条 12-25s 窗,行带 win=[t0,t1] + split(来自 MAESTRO CSV)。
+    {"path": str(WORK / "maestro_amt_windows.jsonl"), "kind": "maestro", "domain": "real"},
 ]
 
 # ---------------------------------------------------------------- 音频时长缓存
@@ -101,10 +105,14 @@ def resolve_audio(utt_id: str, kind: str, row: dict):
         d = _flac_dur(str(p))
         return (str(p), d) if d is not None else None
     if kind == "nasap":
-        ref = row.get("audio_path") or row.get("perf_audio")   # s7 若带上音频引用则用之
+        ref = row.get("audio_path") or row.get("perf_audio")   # s7 行带演奏音频引用(修 no_audio 全灭)
         if ref:
-            d = _flac_dur(ref)
-            return (ref, d) if d is not None else None
+            cand = Path(str(ref))
+            if not cand.exists():          # "{maestro}/2006/xx.wav" 是引用不是路径 → 映射到本地 FLAC
+                cand = WORK / "maestro_audio" / Path(str(ref)).with_suffix(".flac").name
+            d = _flac_dur(str(cand))
+            if d is not None:
+                return (str(cand), d)      # 引用能配上就用;配不上落到 xml_score 映射兜底
         # 【EXECUTOR】nASAP→MAESTRO FLAC 映射：从 ASAP metadata CSV 的
         # maestro_audio_performance 列找到 WAV 名→对应 FLAC 在 work/maestro_audio/
         import pandas as pd
@@ -134,6 +142,47 @@ def resolve_audio(utt_id: str, kind: str, row: dict):
     return None
 
 
+def _pdmx_row_fn():
+    """PDMX 行注入:manifest 的 split/work_key(标签行不带,P8 实测全体默认 train、val/test≈0);
+    命中 nASAP-test/Beyer 黑名单的工作【过滤出训练】(问题#14 的装配层强制,P4 曾以空名单跑过)。"""
+    import json as _json
+    m = {}
+    mani = WORK / "manifest_pieces.jsonl"
+    if mani.exists():
+        with open(mani, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = _json.loads(line)
+                except Exception:
+                    continue
+                if r.get("piece_id"):
+                    m[r["piece_id"]] = (r.get("split"), r.get("work_key"))
+    bl = set()
+    try:
+        from scripts.s3_filter_pdmx import get_nasap_test_works, get_beyer_work_keys
+        from rubato.data.pdmx import build_blacklist
+        bl = build_blacklist(get_nasap_test_works(WORK),
+                             get_beyer_work_keys(ROOT / "asap-dataset" / "asap-dataset" / "asap_annotations.json"))
+    except Exception as e:
+        print(f"  ⚠ 黑名单构建失败({type(e).__name__}),本次不过滤 —— 训练前必须解决,别静默带病训")
+    if not m:
+        print("  ⚠ manifest 缺失,PDMX split/work_key 无法注入(全体将默认 train)")
+
+    def row_fn(row):
+        info = m.get(row.get("piece_id"))
+        if info:
+            split, wk = info
+            if wk and wk in bl:
+                return None                # 黑名单工作:计 filtered,不进任何 split
+            if split and not row.get("split"):
+                row["split"] = split
+        return row
+    return row_fn
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="只装配 + 打印 stats,不建模型/不训练")
@@ -143,6 +192,10 @@ def main():
     ap.add_argument("--from-scratch", action="store_true")
     args = ap.parse_args()
 
+    pdmx_fn = _pdmx_row_fn()
+    for src in SOURCES:
+        if src["kind"] == "pdmx":
+            src["row_fn"] = pdmx_fn
     utts, labels, stats = assemble(SOURCES, resolve_audio)
     print("=== 装配统计(每一步丢弃都计数,不静默)===")
     for kind, s in stats["per_source"].items():

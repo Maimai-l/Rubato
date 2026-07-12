@@ -66,10 +66,17 @@ def assemble(sources: list[dict], audio_resolver, default_split: str = "train") 
     for src in sources:
         kind = src["kind"]
         domain = src.get("domain")
+        row_fn = src.get("row_fn")          # 可选:行级注入/过滤(如 manifest 的 split/work_key、黑名单)
         st = per_source.setdefault(kind, {"rows": 0, "kept": 0, "bad_schema": 0,
-                                          "no_dialect": 0, "no_audio": 0, "dup": 0})
+                                          "no_dialect": 0, "no_audio": 0, "dup": 0,
+                                          "filtered": 0})
         for row in read_jsonl(src["path"]):
             st["rows"] += 1
+            if row_fn is not None:
+                row = row_fn(row)
+                if row is None:             # row_fn 返回 None = 过滤(如黑名单工作),计数不静默
+                    st["filtered"] += 1
+                    continue
             norm = normalize_row(row, kind)
             if norm is None:
                 st["bad_schema"] += 1

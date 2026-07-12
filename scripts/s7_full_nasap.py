@@ -242,6 +242,16 @@ def main():
                     if k in tm:
                         results["timemap_stats"][k] += tm[k]
 
+            # 【配对必需,修 no_audio=11526 全灭】行内带演奏音频引用(resolve_audio 据此配
+            # work/maestro_audio/<base>.flac);utt_id 加演奏号 —— 同曲多演奏不再撞名互踢;
+            # split 沿用 metadata(无则留空,assemble 默认 train)。
+            _perf_ref = str(row.get("maestro_audio_performance") or "")
+            _perf_stem = Path(str(row.get("midi_performance") or _perf_ref or "p")).stem
+            for lr in label_rows:
+                lr["perf_audio"] = _perf_ref
+                lr["utt_id"] = lr["utt_id"].replace("nasap_", f"nasap_{_perf_stem}_", 1)
+                if row.get("split"):
+                    lr["split"] = str(row["split"])
             if label_rows and len(label_rows) > 0:
                 results["successful"] += 1
                 results["total_segments"] += len(label_rows)

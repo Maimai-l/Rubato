@@ -103,4 +103,21 @@ u2, l2, s2 = assemble([{"path": dup_src, "kind": "pdmx", "domain": "synth"}], re
 check("dup_counted", s2["per_source"]["pdmx"]["dup"] == 1, s2["per_source"]["pdmx"])
 check("dup_kept_first", len(u2) == 1 and l2["dup_1"]["A2S"] == "|4/4k0C4 1/4c4", l2)
 
+print("[X] row_fn:行级注入 split + 黑名单过滤(filtered 计数,不静默)")
+import json as _json, tempfile as _tf, os as _os
+_d = _tf.mkdtemp()
+_lp = _os.path.join(_d, "rf.jsonl")
+with open(_lp, "w", encoding="utf-8") as f:
+    f.write(_json.dumps({"utt_id": "pdmx_A_000", "piece_id": "A", "A2S": "x"}) + "\n")
+    f.write(_json.dumps({"utt_id": "pdmx_B_000", "piece_id": "B", "A2S": "y"}) + "\n")
+def _rf(row):
+    if row.get("piece_id") == "B":
+        return None                      # 黑名单
+    row["split"] = "val"                 # manifest 注入
+    return row
+_u, _l, _st = assemble([{"path": _lp, "kind": "pdmx", "domain": "synth", "row_fn": _rf}],
+                       lambda uid, kind, row: ("a.flac", 3.0))
+check("rowfn_filtered", _st["per_source"]["pdmx"]["filtered"] == 1, _st)
+check("rowfn_split_injected", _u[0]["split"] == "val" and len(_u) == 1, _u)
+
 print(f"\n全部通过: {PASS} 项")
