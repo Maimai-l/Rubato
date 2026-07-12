@@ -116,6 +116,12 @@ def _steps():
                     "nasap_failed": r"nasap_failed=(\d+)"},
              require=lambda n: None if int(n.get("nasap_segments", 0)) > 1000
                      else f"nasap_segments={n.get('nasap_segments')} 过少,对齐/标签管线有问题,停"),
+        dict(id="P5c2", title="nASAP utt 唯一化(ASAP 谱文件全叫 xml_score → 同演奏者跨曲撞 id;修 P5d 泄漏根因)",
+             cmds=[S("scripts/s7_fix_uttids.py", "--apply")],
+             parse={"dup_before": r"重写前重复 utt_id = (\d+)", "rewritten": r"已重写 (\d+) 行",
+                    "dup_after": r"重写后重复 utt_id = (\d+)"},
+             require=lambda n: None if n.get("dup_after") == "0"
+                     else f"唯一化后仍有重复({n.get('dup_after')}),停"),
         dict(id="P5d", title="nASAP 保守 split 分配(R-S7.4:val≈512 段,work_key 隔离)",
              cmds=[S("scripts/s7_assign_split.py", "--apply")],
              parse={"nasap_val": r"val 段 = (\d+)", "nasap_test": r"test 段 = (\d+)"}),

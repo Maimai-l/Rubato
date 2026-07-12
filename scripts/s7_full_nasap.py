@@ -268,9 +268,16 @@ def main():
             _perf_stem = Path(str(row.get("midi_performance") or _perf_ref or "p")).stem
             from rubato.data.pdmx import work_key as _mk_wk
             _wk = _mk_wk(str(row.get("composer") or ""), str(row.get("title") or ""))
+            # 【utt 必须含演奏音频 hash】ASAP 每首曲的谱一律叫 xml_score.musicxml,旧版
+            # nasap_{演奏者}_xml_score_{段号} 在"同一演奏者的不同曲"上撞名:split 把两曲并成
+            # 一 piece(跨 split 泄漏,P5d 实测拦下 5 例)、装配静默去重丢整曲。
+            # (perf_audio, 段号) 天然唯一 —— 一场录音只对应一首曲。
+            import hashlib as _hl
+            _tag = _hl.sha256(_perf_ref.encode()).hexdigest()[:8]
             for lr in label_rows:
                 lr["perf_audio"] = _perf_ref
-                lr["utt_id"] = lr["utt_id"].replace("nasap_", f"nasap_{_perf_stem}_", 1)
+                _si = lr["utt_id"].rsplit("_", 1)[1]
+                lr["utt_id"] = f"nasap_{_perf_stem}_{_tag}_{_si}"
                 lr["work_key"] = _wk
                 if row.get("split"):
                     lr["split"] = str(row["split"])
