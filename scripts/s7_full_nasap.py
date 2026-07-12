@@ -268,12 +268,13 @@ def main():
             _perf_stem = Path(str(row.get("midi_performance") or _perf_ref or "p")).stem
             from rubato.data.pdmx import work_key as _mk_wk
             _wk = _mk_wk(str(row.get("composer") or ""), str(row.get("title") or ""))
-            # 【utt 必须含演奏音频 hash】ASAP 每首曲的谱一律叫 xml_score.musicxml,旧版
-            # nasap_{演奏者}_xml_score_{段号} 在"同一演奏者的不同曲"上撞名:split 把两曲并成
-            # 一 piece(跨 split 泄漏,P5d 实测拦下 5 例)、装配静默去重丢整曲。
-            # (perf_audio, 段号) 天然唯一 —— 一场录音只对应一首曲。
+            # 【utt 必须含 hash(音频|work_key)】ASAP 每首曲的谱一律叫 xml_score.musicxml,
+            # 旧版 nasap_{演奏者}_xml_score_{段号} 在"同一演奏者的不同曲"上撞名(P5d 拦下
+            # 跨 split 泄漏 5 例);只 hash 音频仍不够 —— 一个 MAESTRO 录音是完整演出,
+            # 对应同一奏鸣曲的多个乐章条目(共用音频,靠 win 各取一段),乐章间照样撞
+            # (执行端实测 dup_after=584)。work_key 带乐章号,(音频, 乐章, 段号) 才唯一。
             import hashlib as _hl
-            _tag = _hl.sha256(_perf_ref.encode()).hexdigest()[:8]
+            _tag = _hl.sha256(f"{_perf_ref}|{_wk}".encode()).hexdigest()[:8]
             for lr in label_rows:
                 lr["perf_audio"] = _perf_ref
                 _si = lr["utt_id"].rsplit("_", 1)[1]
