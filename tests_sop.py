@@ -11,6 +11,7 @@ tmp = Path(tempfile.mkdtemp())
 os.environ["SOP_ROOT"] = str(tmp)
 os.environ["SOP_STATE"] = str(tmp / "state.json")
 os.environ["SOP_LOGS"] = str(tmp / "logs")
+os.environ["SOP_AUTO_REPORT"] = "0"   # 假步骤禁真 git:上报路径曾把测试垃圾推上共享分支
 sys.path.insert(0, ".")
 
 import scripts.sop_next as sop
@@ -93,6 +94,19 @@ check("require_fail_rc1", rc == 1, rc)
 sp = Path(os.environ["SOP_STATE"])
 st = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {"done": []}
 check("require_not_done", st["done"] == [], st["done"])
+
+print("[5b] resets:某步完成 → 自动把下游步骤标回未完成(--go 按序补跑,不再要人记得 reset)")
+sop._steps = lambda: [
+    dict(id="X", title="产出步(触发下游重跑)",
+         cmds=[[PY, "-c", "print('x')"]], resets=["Y", "Z"]),
+    dict(id="Y", title="下游1", cmds=[[PY, "-c", "print('y')"]]),
+    dict(id="Z", title="下游2", cmds=[[PY, "-c", "print('z')"]]),
+]
+sp.write_text(json.dumps({"done": ["Y", "Z"], "approvals": {}, "numbers": {}}), encoding="utf-8")
+rc = sop.main(["--go"])                       # X 跑完重置 Y/Z → 循环按序把 Y/Z 补跑回来
+check("resets_rc0", rc == 0, rc)
+st = json.loads(sp.read_text(encoding="utf-8"))
+check("resets_reran_downstream", st["done"] == ["X", "Y", "Z"], st["done"])
 
 print("[6] 真实步骤表:无任何 gate 字段残留")
 check("no_gates_left", all(not s.get("gate") for s in sop._steps())

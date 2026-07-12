@@ -90,6 +90,12 @@ def _steps():
         dict(id="P2d", title="VN 段抽听采样(5 段音频+标签 → 贴文件夹路径给用户听)",
              cmds=[S("scripts/spot_check.py", "--labels", str(WORK / "pdmx_perf_labels.jsonl"),
                      "--n", "5", "--tag", "vn")]),
+        dict(id="P2c0", title="钳制 TAST 整曲清场(D18 用户拍板重渲;证据取 .bak;无受影响曲秒过)",
+             cmds=[S("scripts/rerender_tast_clamped.py", "--apply")],
+             parse={"affected_pieces": r"受影响: (\d+) 曲", "rows_dropped": r"标签行剔除 (\d+)"},
+             # 清场后下游必须重跑:P2c 续跑补渲被清的曲 → P2e 复扫验证(应报 0 clamped)
+             # → 语料/tokenizer/装配跟着重来。自动标回,不再要人记得 --reset-step。
+             resets=["P2c", "P2e", "P6c", "P7", "P8"]),
         dict(id="P2e", title="TAST 戳修复(绝对演奏秒→段内相对秒;钳制行置 null;幂等)",
              cmds=[S("scripts/repair_tast_labels.py", "--apply")],
              parse={"tast_shifted": r"已修 (\d+) 行", "tast_nulled": r"置 null (\d+) 行"}),
@@ -161,6 +167,46 @@ def _steps():
     ]
 
 
+# ---------------------------------------------------------------- 自动上报(git,best-effort)
+
+def _git_report(sid: str, ok: bool, title: str, nums: dict, tail: list[str]):
+    """步骤结果自动写进 repo 并推送 —— 规划端从 git 直接看到每步成败,不再依赖人肉转述
+    (实测教训:SOP 日志落在数据盘 reports/,不在 repo 里,失败信息到不了规划端)。
+    全程 best-effort:git 任何一步失败只打印一行,绝不影响 SOP 主流程。
+    SOP_AUTO_REPORT=0 完全关闭(测试必须关 —— 假步骤真推送把垃圾提交推上过共享分支)。"""
+    if os.environ.get("SOP_AUTO_REPORT", "1") == "0":
+        return
+    d = REPO / "reports" / "sop_blocks"
+    d.mkdir(parents=True, exist_ok=True)
+    body = [f"# [{sid}] {'完成' if ok else '失败'} — {title}",
+            f"- time: {time.strftime('%Y-%m-%d %H:%M:%S')}"]
+    body += [f"- {k} = {v}" for k, v in nums.items()]
+    if not ok and tail:
+        body += ["", "## 日志尾部", "```", *tail[-30:], "```"]
+    text = "\n".join(body) + "\n"
+    (d / f"{sid}.md").write_text(text, encoding="utf-8")
+    paths = [f"reports/sop_blocks/{sid}.md"]
+    if not ok:
+        (REPO / "reports" / "sop_last_failure.md").write_text(text, encoding="utf-8")
+        paths.append("reports/sop_last_failure.md")
+
+    def _git(*a):
+        return subprocess.run(["git", *a], cwd=str(REPO), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=180)
+    try:
+        _git("add", *paths)
+        if _git("commit", "-m", f"sop-auto: [{sid}] {'ok' if ok else 'FAIL'}").returncode != 0:
+            return                                    # 无变化可提交
+        if _git("push").returncode != 0:
+            _git("pull", "--rebase", "--autostash")   # 分支被规划端推进过 → 变基后再推
+            if _git("push").returncode != 0:
+                print("  (状态块已提交,推送失败 —— 之后手动 git push 即可)")
+                return
+        print(f"  (状态块已自动推送 → reports/sop_blocks/{sid}.md)")
+    except Exception as e:
+        print(f"  (自动上报失败: {type(e).__name__} —— 不影响主流程)")
+
+
 # ---------------------------------------------------------------- 状态机
 
 def _load():
@@ -230,13 +276,18 @@ def _run_step(step, st) -> bool:
     print(f"  {step['title']}")
     for k, v in nums.items():
         print(f"  {k} = {v}")
+    _git_report(sid, ok, step["title"], nums, lines)
     if not ok:
         print(f"  ✗ {'退出码 ' + str(rc) if rc else ''}{err or ''}")
         print(f"  日志尾部({log_path}):")
         for s in lines[-12:]:
             print("    " + s)
-        print("  【停】把这一块整段贴给用户,等指示。不要自己修、不要重试别的命令。")
+        print("  【停】失败块已自动推送给规划端;把这一块贴给用户即可。不要自己修、不要重试别的命令。")
         return False
+    for r in step.get("resets", ()):
+        if r in st["done"]:
+            st["done"].remove(r)
+            print(f"  ↺ [{r}] 已自动标回未完成(本步产出使其必须重跑,--go 会按序补上)")
     st["done"].append(sid)
     st["numbers"][sid] = nums
     _save(st)

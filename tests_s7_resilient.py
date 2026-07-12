@@ -91,5 +91,28 @@ print("[5] --restart:清干净重来")
 rc5 = rz.main([*base, "--restart"])
 check("restart_rc0", rc5 == 0)
 check("restart_rows", len([l for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]) == 10)
+check("lock_released", not state.with_suffix(".lock").exists())
+
+print("[6] 单实例锁:活锁 → --no-wait 退出码 3 且不动产物;陈旧锁 → 接管照跑")
+import time as _t
+lock = state.with_suffix(".lock")
+lock.write_text("99999", encoding="utf-8")            # 新鲜锁 = 有实例在跑
+rows_before = out.read_text(encoding="utf-8")
+rc6 = rz.main([*base, "--no-wait"])
+check("locked_rc3", rc6 == 3, rc6)
+check("locked_untouched", out.read_text(encoding="utf-8") == rows_before)
+check("lock_not_stolen", lock.exists())
+import os as _os
+_os.utime(lock, (_t.time() - 99999, _t.time() - 99999))   # 陈旧锁 = 持有者已死
+rc7 = rz.main([*base, "--no-wait"])
+check("stale_takeover_rc0", rc7 == 0, rc7)
+check("stale_lock_released", not lock.exists())
+
+print("[7] 孤儿 .part 清扫 + _try_unlink 容错")
+orphan_part = out.parent / (out.stem + ".part999_1234")
+orphan_part.write_text("junk", encoding="utf-8")
+rz.main(base)                                          # 续跑(无待办)顺带清扫
+check("orphan_part_swept", not orphan_part.exists())
+check("unlink_missing_ok", rz._try_unlink(tmp / "no_such_file", tries=1, delay=0.0))
 
 print(f"\n全部通过: {PASS} 项")

@@ -61,8 +61,9 @@ def main(argv=None):
     labels = Path(args.labels)
     audio_dir = Path(args.audio_dir)
     if not labels.exists():
-        print(f"✗ 标签文件不存在: {labels}")
-        return 1
+        # 本脚本现在是常驻 SOP 步骤(P2c0):全新管线跑到这一步时标签还没生成,无事可做
+        print(f"标签文件不存在({labels})→ 受影响: 0 曲,无事可做。")
+        return 0
     pids, st = find_affected(labels)
     cur_rows = [r for r in read_jsonl(str(labels)) if r.get("piece_id") in pids]
     n_files = sum(len(_files_s5(audio_dir, p)) for p in pids)
