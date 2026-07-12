@@ -136,15 +136,31 @@ split: train=112,166  validation=137  test=177
 
 ---
 
-## 八、已知问题（3 项，planning side 已修复）
+## 七点五、P2e TAST 时间戳修复（新增步骤）
+
+| 指标 | 数值 |
+|------|------|
+| 扫描行数 | 34,887 |
+| 已是相对戳，无需修复 | 5,888 |
+| 精确平移修复 | 15,917 |
+| 钳制/非单调 → TAST 置 null | 13,082 |
+| 验证 shift | 0 |
+| 验证 clamped | 0 |
+
+---
+
+## 八、已知问题
+
+### planning side 已修复（3 项）
 
 1. **nASAP no_audio=11,526 全灭** -> `s7_full_nasap.py` 加 `perf_audio` 引用 + `assemble.py` 加 `row_fn` + local FLAC 映射（已修，需重跑 s7）
 2. **P8 build_dataset GBK 崩溃** -> 加 `harden_stdout()`（已修）
 3. **P8 MAESTRO 用错文件（整曲版 vs 切窗版）** -> SOURCES 改为 `maestro_amt_windows.jsonl`（已修）
 
-### 未解决问题
+### 未解决问题（执行端）
 4. **P4 巨曲 63/85 未完成** — partitura 反复展开超时（>300s），损失约 2,000-3,000 标签段
 5. **P8 pdmx no_audio=46,740（42%）** — 含 S4 未渲染曲 + VN failed 曲 + 63 巨曲
+6. **P5c nASAP 僵尸进程** — `s7_full_nasap.py` 在 Beethoven 奏鸣曲段（~140/519）partitura 反复展开卡死。3 次重试均同位置死亡，每次残留僵尸 Python 进程。根因与巨曲相同（`Found repeat without start` → 小节数爆炸）。需逐个处理 + 超时策略。
 
 ---
 
