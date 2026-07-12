@@ -194,6 +194,7 @@ def main():
                     help="过拟合冒烟:N 条 utt 小集反复过拟合,验证【代码链路】(模型/损失/"
                          "tokenizer/数据管线)没 bug —— 判据 final_sem<0.05(关标签平滑跑,"
                          "开着平滑时逐 token CE 有 ~1.2 的下界,0.05 永远达不到)")
+    args = ap.parse_args()
 
     pdmx_fn = _pdmx_row_fn()
     for src in SOURCES:
