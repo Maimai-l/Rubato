@@ -194,6 +194,10 @@ def main():
                     help="过拟合冒烟:N 条 utt 小集反复过拟合,验证【代码链路】(模型/损失/"
                          "tokenizer/数据管线)没 bug —— 判据 final_sem<0.05(关标签平滑跑,"
                          "开着平滑时逐 token CE 有 ~1.2 的下界,0.05 永远达不到)")
+    ap.add_argument("--cpu", action="store_true",
+                    help="诊断模式:全程 CPU 跑 3 步。CUDA 的索引越界是异步 device assert,"
+                         "栈指向随机后续 kernel(实测三次崩溃三个栈);CPU 上同一越界给出"
+                         "精确 Python 栈 + 肇事索引。配 --smoke 用,慢但一锤定音")
     args = ap.parse_args()
 
     pdmx_fn = _pdmx_row_fn()
@@ -237,6 +241,21 @@ def main():
                                 from_scratch=args.from_scratch)
     print(f"build_model: {report.get('vocab_swap')} encoder_ok={report['encoder_verify']['ok']}")
 
+    # 【训前体检,problems 非空禁止开训】把所有 Embedding/大 Linear 与 tokenizer 逐个对账,
+    # 词表替换不完整/位置表上限在这里以明文数字暴露 —— 不再靠 GPU 异步 assert 的随机栈猜。
+    from rubato.model.build import vocab_position_preflight
+    pf = vocab_position_preflight(model, tok)
+    print(f"体检: tokenizer={pf['vocab']} 位置表最小={pf['max_pos']}")
+    for n, num, dim in pf["embeddings"]:
+        print(f"  Embedding {n}: {num} × {dim}")
+    for n, of in pf["big_linears"]:
+        print(f"  Linear→词表 {n}: out={of}")
+    if pf["problems"]:
+        for p in pf["problems"]:
+            print(f"  ✗ {p}")
+        print("体检不过,禁止开训 —— 把上面整块贴回给规划端。")
+        return
+
     if args.smoke:
         # 确定性小集,尽量均衡覆盖四方言(轮转取样;某方言池空则跳过)
         import hashlib
@@ -264,17 +283,20 @@ def main():
         print(f"--smoke:{len(train_utts)} utts,方言覆盖 "
               f"{sorted({d for u in picked for d in u['dialects']})}")
 
-    # 【必须限长】canary decoder 位置编码表 512 行;AMT 密集窗可编出 1000+ token,
-    # position_ids 越界 = CUDA device assert(冒烟实测,整个进程报废)。上限从 .nemo 配置读。
-    max_tgt = 512
-    try:
-        from rubato.model.build import extract_nemo_config
-        _ncfg = extract_nemo_config(args.nemo)
-        max_tgt = int((_ncfg.get("transf_decoder", {}).get("config_dict", {})
-                       or {}).get("max_sequence_length") or 512)
-    except Exception as e:
-        print(f"  ⚠ 读 .nemo 配置失败({type(e).__name__}),max_target_len 用缺省 512")
-    print(f"  目标序列上限 = {max_tgt} tok(decoder 位置表);超长样本将丢弃并记账…")
+    # 【必须限长】decoder 位置编码表行数有限,AMT 密集窗可编出 1000+ token,
+    # position_ids 越界 = CUDA device assert。上限以【体检读到的真实模块行数】为准
+    # (yaml 可能与实际模块不一致),体检读不到才退回 yaml/512。
+    max_tgt = pf["max_pos"]
+    if not max_tgt:
+        max_tgt = 512
+        try:
+            from rubato.model.build import extract_nemo_config
+            _ncfg = extract_nemo_config(args.nemo)
+            max_tgt = int((_ncfg.get("transf_decoder", {}).get("config_dict", {})
+                           or {}).get("max_sequence_length") or 512)
+        except Exception as e:
+            print(f"  ⚠ 读 .nemo 配置失败({type(e).__name__}),max_target_len 用缺省 512")
+    print(f"  目标序列上限 = {max_tgt} tok(体检实测位置表);超长样本将丢弃并记账…")
     train_ds = RubatoDataset(train_utts, labels, tok, train=True, max_target_len=max_tgt)
     lf = train_ds.len_filter_report
     print(f"  超长过滤: 保留 {lf.get('kept_pairs')} 对,丢弃 {lf.get('dropped_by_dialect') or 0}")
@@ -289,6 +311,8 @@ def main():
         "precision": "bf16",                       # 5070 Ti 支持;fp32 想开就删这行
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
         "eval_max": 128,                           # 每次 eval 抽的 val 子集(全量=数千段×beam,小时级)
+        # 训练步前置守卫:越界在 forward 之前拦下,报错自带肇事数字(不吃 CUDA 异步栈的亏)
+        "guards": {"vocab": pf["vocab"], "max_pos": max_tgt},
     }
     eval_every = 3000
     if args.smoke:
@@ -301,6 +325,11 @@ def main():
             "loss": {"sem_label_smooth": 0.0, "p_center": 0.999, "w": 1},
         })
         eval_every = 10 ** 9                       # 冒烟不跑 eval(生成路径另测)
+        dm.max_batch_sec = 120                     # 冒烟小批:16GB 卡上先别一口 560s 音频
+    if args.cpu:
+        cfg.update({"device": "cpu", "max_steps": 3, "grad_accum_to_audio_sec": 30,
+                    "log_every": 1, "precision": ""})
+        print("--cpu 诊断:CPU 跑 3 步(慢),越界会给精确 Python 栈,把完整报错贴回。")
     report = train(model, dm, cfg, tok, eval_every_steps=eval_every)
     # optimizer/scheduler 由 train() 内部 build(别在这重复建一份)
 

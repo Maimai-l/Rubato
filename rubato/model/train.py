@@ -113,7 +113,8 @@ def resolve_log_probs(output):
     raise TypeError(f"无法从 forward 输出提取 log_probs: {type(output)}")
 
 
-def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=None):
+def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=None,
+                        guards: dict | None = None):
     """
     单训练步。返回 {loss(带梯度), semantic_loss, ordinal_loss, ...}。
 
@@ -147,6 +148,20 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
     if ts_token_ids is None:
         ts_token_ids = build_ts_token_ids(tokenizer)
     ts_token_ids = ts_token_ids.to(device)
+
+    # 【前置守卫】索引越界在 GPU 上是异步 device assert,栈指向随机后续 kernel(执行端三次
+    # 崩溃三个不同栈)。在 forward 之前用精确断言拦下,报错自带肇事数字。
+    if guards:
+        v = guards.get("vocab")
+        if v:
+            mi, ml = int(input_ids.max()), int(labels.max())
+            assert mi < v and ml < v, \
+                f"token id 越界:input.max={mi} labels.max={ml} ≥ 词表 {v} —— tokenizer/词表替换不一致"
+        p = guards.get("max_pos")
+        if p:
+            L = int(input_ids.shape[1])
+            assert L <= p, \
+                f"目标序列长 {L} > 位置表 {p} 行 —— 超长过滤没生效或上限读错(utt 见 batch 首条)"
 
     # 1. raw wav → mel(必须走 canary 自带 preprocessor,R-S10.3 前端一致性)
     processed, processed_len = model.preprocessor(input_signal=audio, length=audio_len)
@@ -305,7 +320,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
     from rubato.model.losses import build_ts_token_ids
     # 【必须在建 optimizer 前搬 GPU】build_model 是 map_location="cpu" 恢复的,谁都不搬的话
     # 整套训练【静默】跑 CPU(batch 张量跟着模型设备走,不报错,只是慢百倍)。
-    if torch.cuda.is_available():
+    # cfg["device"]="cpu" 是诊断模式:CUDA 的 device assert 是异步的、栈不可信,
+    # CPU 上同一越界会给出精确 Python 栈 + 肇事索引(--smoke N --cpu 用)。
+    if torch.cuda.is_available() and cfg.get("device") != "cpu":
         model = model.cuda()
     opt, sched = build_optimizer(model, cfg)
     stopper = StopController()
@@ -343,7 +360,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
         for batch in datamodule.train_batches(epoch):
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,
-                                            ts_token_ids=ts_token_ids, loss_cfg=loss_cfg)
+                                            ts_token_ids=ts_token_ids, loss_cfg=loss_cfg,
+                                            guards=cfg.get("guards"))
             batch_sec = parts.get("batch_audio_sec", accum_target_sec)
             # R-S11.4:梯度累积至有效 ≈2000 audio-sec/步;按音频秒数等比缩放各 micro-batch
             scale = min(1.0, batch_sec / max(accum_target_sec, 1e-6))

@@ -265,6 +265,38 @@ def resize_decoder_vocab(model, new_vocab: int, old_vocab: int | None = None) ->
             "old_vocab": old_vocab, "new_vocab": new_vocab}
 
 
+# ---------------------------------------------------------------- 词表/位置表体检(训前必跑)
+
+def vocab_position_preflight(model, tokenizer) -> dict:
+    """
+    训前体检:把模型里【所有】Embedding 行数与大 Linear 输出维逐个打出来,和 tokenizer
+    对账 —— 词表替换不完整/位置表上限,这两类问题在 GPU 上只表现为异步 device assert
+    (栈指向随机的后续 kernel,三次崩溃三个栈,执行端实测不可诊断)。体检在 CPU 上一次
+    说清:problems 非空 = 结构性不一致,禁止开训;max_pos = 真实位置表行数(别信 yaml)。
+
+    判读:行数 ≥4000 的 Embedding 视为词表(必须 == tokenizer 词表);<4000 的视为
+    位置表(取最小值为目标序列硬上限);out_features ≥4000 的 Linear 视为输出投影
+    (必须 == tokenizer 词表)。
+    """
+    import torch.nn as nn
+    vocab = tokenizer.get_piece_size()
+    embs = [(n, m.num_embeddings, m.embedding_dim)
+            for n, m in model.named_modules() if isinstance(m, nn.Embedding)]
+    outs = [(n, m.out_features)
+            for n, m in model.named_modules()
+            if isinstance(m, nn.Linear) and m.out_features >= 4000]
+    problems = []
+    for n, num, _ in embs:
+        if num >= 4000 and num != vocab:
+            problems.append(f"词表 Embedding {n}: {num} 行 ≠ tokenizer {vocab}(替换漏了它)")
+    for n, of in outs:
+        if of != vocab:
+            problems.append(f"输出投影 {n}: out_features {of} ≠ tokenizer {vocab}(替换漏了它)")
+    pos_rows = [num for _, num, _ in embs if num < 4000]
+    return {"vocab": vocab, "embeddings": embs, "big_linears": outs,
+            "max_pos": min(pos_rows) if pos_rows else None, "problems": problems}
+
+
 # ---------------------------------------------------------------- 主构建(本地,NeMo 路线)
 
 def reinit_all_parameters(model) -> int:
