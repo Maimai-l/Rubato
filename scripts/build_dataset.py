@@ -194,6 +194,9 @@ def main():
                     help="过拟合冒烟:N 条 utt 小集反复过拟合,验证【代码链路】(模型/损失/"
                          "tokenizer/数据管线)没 bug —— 判据 final_sem<0.05(关标签平滑跑,"
                          "开着平滑时逐 token CE 有 ~1.2 的下界,0.05 永远达不到)")
+    ap.add_argument("--smoke-steps", type=int, default=800,
+                    help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
+                         "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
     ap.add_argument("--cpu", action="store_true",
                     help="诊断模式:全程 CPU 跑 3 步。CUDA 的索引越界是异步 device assert,"
                          "栈指向随机后续 kernel(实测三次崩溃三个栈);CPU 上同一越界给出"
@@ -320,7 +323,7 @@ def main():
     eval_every = 3000
     if args.smoke:
         cfg.update({
-            "max_steps": 800, "warmup_steps": 50, "max_epochs": 10 ** 6,
+            "max_steps": args.smoke_steps, "warmup_steps": 50, "max_epochs": 10 ** 6,
             "grad_accum_to_audio_sec": 200,        # 小集上 2000s 累积一步太久,冒烟用小步
             "log_every": 20,
             "ckpt_dir": str(ROOT / "outputs" / "ckpt_smoke"),
