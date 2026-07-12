@@ -303,6 +303,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
     """
     import torch
     from rubato.model.losses import build_ts_token_ids
+    # 【必须在建 optimizer 前搬 GPU】build_model 是 map_location="cpu" 恢复的,谁都不搬的话
+    # 整套训练【静默】跑 CPU(batch 张量跟着模型设备走,不报错,只是慢百倍)。
+    if torch.cuda.is_available():
+        model = model.cuda()
     opt, sched = build_optimizer(model, cfg)
     stopper = StopController()
     ckpt_dir = Path(cfg.get("ckpt_dir", "outputs/ckpt"))
@@ -310,9 +314,18 @@ def train(model, datamodule, cfg: dict, tokenizer,
 
     step = 0
     max_steps = cfg.get("max_steps", 100000)
+    log_every = int(cfg.get("log_every", 50))
     ckpt_ring = []      # 滚动保留 6
     best_omr = float("inf")
+    recent, recent_sem, recent_ts = [], [], []      # 近 50 步窗口(日志 + final_* 判据)
     report = {"stop_events": [], "eval_history": []}
+
+    def _finish(tag: str):
+        report["final"] = tag
+        report["final_loss"] = round(sum(recent) / len(recent), 4) if recent else None
+        report["final_sem"] = round(sum(recent_sem) / len(recent_sem), 4) if recent_sem else None
+        report["final_ts"] = round(sum(recent_ts) / len(recent_ts), 4) if recent_ts else None
+        return report
 
     # 一次性预备:时间戳 id 映射 / 梯度累积额度 / bf16
     ts_token_ids = build_ts_token_ids(tokenizer)
@@ -344,6 +357,18 @@ def train(model, datamodule, cfg: dict, tokenizer,
             sched.step()
             opt.zero_grad()
             step += 1
+
+            # 训练可观测性:没有这几行,执行端只能对着黑屏猜收敛(冒烟判据也取自这窗口)
+            for buf, v in ((recent, float(parts["loss"])),
+                           (recent_sem, float(parts["semantic_loss"])),
+                           (recent_ts, float(parts["ts_loss"]))):
+                buf.append(v)
+                if len(buf) > 50:
+                    buf.pop(0)
+            if step % log_every == 0 or step == 1:
+                print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
+                      f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
+                      f"lr={opt.param_groups[0]['lr']:.2e} audio={batch_sec:.0f}s", flush=True)
 
             # 评测 + 止损
             if step % eval_every_steps == 0:
@@ -377,11 +402,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 # 处理止损动作
                 act = action["action"]
                 if act in ("pause_unparseable", "stop_bad_labels"):
-                    report["final"] = f"stopped:{act}:{action['reason']}"
-                    return report
+                    return _finish(f"stopped:{act}:{action['reason']}")
                 if act == "converged":
-                    report["final"] = f"converged:{action['reason']}"
-                    return report
+                    return _finish(f"converged:{action['reason']}")
                 if act == "rollback_lr":
                     # 回滚上一 ckpt + lr×0.5。
                     # 注意:LambdaLR 每步用 base_lrs×lambda(step) 重算 lr,直接改
@@ -396,8 +419,6 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 model.train()
 
             if step >= max_steps:
-                report["final"] = "max_steps_reached"
-                return report
+                return _finish("max_steps_reached")
 
-    report["final"] = "max_epochs_reached"
-    return report
+    return _finish("max_epochs_reached")

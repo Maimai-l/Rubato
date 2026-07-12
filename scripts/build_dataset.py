@@ -190,7 +190,10 @@ def main():
     ap.add_argument("--nemo", default=str(ROOT / "canary-180m-flash.nemo"))
     ap.add_argument("--vocab-spec", default="configs/vocab_spec.json")
     ap.add_argument("--from-scratch", action="store_true")
-    args = ap.parse_args()
+    ap.add_argument("--smoke", type=int, default=0, metavar="N",
+                    help="过拟合冒烟:N 条 utt 小集反复过拟合,验证【代码链路】(模型/损失/"
+                         "tokenizer/数据管线)没 bug —— 判据 final_sem<0.05(关标签平滑跑,"
+                         "开着平滑时逐 token CE 有 ~1.2 的下界,0.05 永远达不到)")
 
     pdmx_fn = _pdmx_row_fn()
     for src in SOURCES:
@@ -233,6 +236,33 @@ def main():
                                 from_scratch=args.from_scratch)
     print(f"build_model: {report.get('vocab_swap')} encoder_ok={report['encoder_verify']['ok']}")
 
+    if args.smoke:
+        # 确定性小集,尽量均衡覆盖四方言(轮转取样;某方言池空则跳过)
+        import hashlib
+        by_d: dict = {}
+        for u in sorted(train_utts,
+                        key=lambda u: hashlib.sha256(u["utt_id"].encode()).hexdigest()):
+            for d in u["dialects"]:
+                by_d.setdefault(d, []).append(u)
+        cycle = [d for d in ("A2S", "A2S_lite", "TAST", "AMT") if by_d.get(d)]
+        picked, seen = [], set()
+        di = 0
+        while len(picked) < args.smoke and cycle:
+            d = cycle[di % len(cycle)]
+            di += 1
+            pool = by_d[d]
+            while pool and pool[0]["utt_id"] in seen:
+                pool.pop(0)
+            if not pool:
+                cycle.remove(d)
+                continue
+            u = pool.pop(0)
+            seen.add(u["utt_id"])
+            picked.append(u)
+        train_utts = picked
+        print(f"--smoke:{len(train_utts)} utts,方言覆盖 "
+              f"{sorted({d for u in picked for d in u['dialects']})}")
+
     train_ds = RubatoDataset(train_utts, labels, tok, train=True)
     # labels 全量传入(不只 train)—— eval hook 的参照(AMT ref/A2S NED)按 val/test utt_id 查
     dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels)
@@ -243,7 +273,30 @@ def main():
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
         "eval_max": 128,                           # 每次 eval 抽的 val 子集(全量=数千段×beam,小时级)
     }
-    train(model, dm, cfg, tok)   # optimizer/scheduler 由 train() 内部 build(别在这重复建一份)
+    eval_every = 3000
+    if args.smoke:
+        cfg.update({
+            "max_steps": 800, "warmup_steps": 50, "max_epochs": 10 ** 6,
+            "grad_accum_to_audio_sec": 200,        # 小集上 2000s 累积一步太久,冒烟用小步
+            "log_every": 20,
+            "ckpt_dir": str(ROOT / "outputs" / "ckpt_smoke"),
+            # 关平滑:判据是"逐 token 语义 NLL 压到 ~0",平滑开着有 ~1.2 下界
+            "loss": {"sem_label_smooth": 0.0, "p_center": 0.999, "w": 1},
+        })
+        eval_every = 10 ** 9                       # 冒烟不跑 eval(生成路径另测)
+    report = train(model, dm, cfg, tok, eval_every_steps=eval_every)
+    # optimizer/scheduler 由 train() 内部 build(别在这重复建一份)
+
+    print(f"\ntrain 收尾: {report.get('final')} final_loss={report.get('final_loss')} "
+          f"final_sem={report.get('final_sem')} final_ts={report.get('final_ts')}")
+    if args.smoke:
+        fs = report.get("final_sem")
+        ok = fs is not None and fs < 0.05
+        print("冒烟判定: " + (f"【通过】final_sem={fs}<0.05,代码链路无 bug,可开全量"
+                             if ok else
+                             f"【不通过】final_sem={fs}(目标 <0.05)—— 查 tokenizer 编码/"
+                             "标签对齐/损失分流,别开全量;ts 参考值 final_ts="
+                             f"{report.get('final_ts')}(目标 <0.2)"))
 
 
 if __name__ == "__main__":
