@@ -111,9 +111,15 @@ def process_piece(xml_path: str, alignment_rows: list[dict]) -> tuple[list[dict]
             score_offset = bounds[a] if a < len(bounds) else bounds[-1]
             labels, fails = make_labels(sub_ir, "nasap", tmap=tmap, score_offset=score_offset)
             if labels:
+                # 【win 必带】段在演奏音频里的窗口(绝对演奏秒)。行不带 win 时 assemble 会把
+                # 4–32 小节的段标签配上【整场演奏】的 FLAC(几分钟)且 dur_s 全错 —— 训练对
+                # 直接是毒药。TAST 戳经 _shift_tmap 已归零为段内相对秒,与窗读音频对齐。
+                seg_t0 = float(tmap(score_offset))
+                seg_t1 = float(tmap(score_offset + sub_ir.score_end))
                 label_rows.append({
                     "utt_id": f"nasap_{Path(xml_path).stem}_{si:03d}",
                     "measure_range": [a, b],
+                    "win": [round(seg_t0, 3), round(seg_t1, 3)],
                     **{k: labels.get(k) for k in ("A2S", "A2S_lite", "TAST")},
                     "AMT": None,
                 })
@@ -131,10 +137,20 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--out-labels", type=str, default="")
     ap.add_argument("--out-corpus", type=str, default="")
+    ap.add_argument("--fresh", action="store_true",
+                    help="先删旧输出再写(输出是 append 模式,整轮重跑不删会二次追加)")
     args = ap.parse_args()
 
     # 输出句柄只开一次(在循环外)。append 模式:配合 --offset/--limit 分块累积;
-    # 整轮重跑前请先删旧文件,否则会二次追加。
+    # 整轮重跑前必须 --fresh(或手删旧文件),否则二次追加。--fresh 只许全量首块用。
+    if args.fresh:
+        if args.offset:
+            print("✗ --fresh 只能配 offset=0(分块跑会把前块删掉)")
+            return
+        for f in (args.out_labels, args.out_corpus):
+            if f and Path(f).exists():
+                Path(f).unlink()
+                print(f"--fresh: 已删旧输出 {f}")
     label_fh = open(args.out_labels, "a", encoding="utf-8") if args.out_labels else None
     corpus_fh = open(args.out_corpus, "a", encoding="utf-8") if args.out_corpus else None
 
@@ -244,12 +260,16 @@ def main():
 
             # 【配对必需,修 no_audio=11526 全灭】行内带演奏音频引用(resolve_audio 据此配
             # work/maestro_audio/<base>.flac);utt_id 加演奏号 —— 同曲多演奏不再撞名互踢;
-            # split 沿用 metadata(无则留空,assemble 默认 train)。
+            # work_key 带上供 s7_assign_split 做 R-S7.4 保守划分(ASAP metadata 没有 split 列,
+            # 不划分则 nASAP 全体默认 train → nasap_val=0,eval hook 无 nASAP 可评)。
             _perf_ref = str(row.get("maestro_audio_performance") or "")
             _perf_stem = Path(str(row.get("midi_performance") or _perf_ref or "p")).stem
+            from rubato.data.pdmx import work_key as _mk_wk
+            _wk = _mk_wk(str(row.get("composer") or ""), str(row.get("title") or ""))
             for lr in label_rows:
                 lr["perf_audio"] = _perf_ref
                 lr["utt_id"] = lr["utt_id"].replace("nasap_", f"nasap_{_perf_stem}_", 1)
+                lr["work_key"] = _wk
                 if row.get("split"):
                     lr["split"] = str(row["split"])
             if label_rows and len(label_rows) > 0:

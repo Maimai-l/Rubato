@@ -20,8 +20,11 @@
 | D12 | tokenizer 语料【不】按 split 过滤,全量文本都进(原 O1) | 2026-07-11 | 用户:能多点数据多点;文本级词表不算泄漏 | rebuild_corpus 不过滤 |
 | D13 | nASAP 分段保持论文 4–32 重叠窗(原 O2) | 2026-07-11 | 用户:尊重论文 | nasap 路径不动 |
 | D14 | 单小节超窗段(华彩/延音/极慢演绎,实测 ~0.12%)丢弃不产出 | 2026-07-11 | 分段下限是 1 小节切不进小节内部;超训练窗产出即废 | S5_SEG_MAX_SEC 守卫(40+1s),S4 切割器原有同标准 |
+| D15 | 混响【不重渲】现网音频(O3 关闭) | 2026-07-12 | 用户实听裁决:"修了听着差不多,还不如不修" | 现网音频保持原状;能量归一混音(wet_mode="energy")保留为今后一切渲染的默认;rerender_presets.py 备而不用 |
+| D16 | TAST 绝对戳毒药:代码修 _shift_tmap 秒轴归零;存量标签【文本级修复】不重渲 | 2026-07-12 | 旧版秒轴保持绝对演奏时间:多段曲后续段整体偏移、超 40s 全钳末 bin(过单调校验,纯静默);首戳=段起点秒 → 全体减首戳即精确修复(±1 bin),钳制行信息已丢 → TAST 置 null 退出 TAST 池(A2S/音频保留) | segment._shift_tmap + scripts/repair_tast_labels.py(SOP P2e);nASAP 标签整套重跑自带修复 |
+| D17 | nASAP split = conservative_split 后置分配(val≈512 段,work_key 隔离);训练 eval 每次抽 128 段确定性子集 | 2026-07-12 | ASAP metadata 无 split 列,不分配则 nASAP 全 train、eval hook 无 nASAP 可评;R-S7.4 的实现一直没人调用。全量 val×beam 解码每 3000 步一次要小时级,抽子集(hash 排序前 128)保训练吞吐 | scripts/s7_assign_split.py(SOP P5d);train.run_eval_hooks eval_max=128 |
 
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
-| O3 | 混响/噪底最终数值(用户实听"IR 糊+吵、混响大") | 已修 DSP bug(湿声峰值对齐→能量归一,同 wet 数值响度虚高数 dB);配置本身仍偏湿(~57% 权重 wet≥0.40)+噪底偏响(-44~-46)。执行端跑 preset_audition.py 产 legacy/fixed/fixed_w70 对照,用户听后定:全局 WET_SCALE 档位、单独降湿的预设名单、噪底统一偏移;再决定重渲范围(按预设哈希可【外科式】只重渲受影响 utt) |
+| (空) | — | O3 已由用户裁决关闭(见 D15) |

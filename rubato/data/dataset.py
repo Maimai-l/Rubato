@@ -293,15 +293,19 @@ class RubatoDataset:
 
 class RubatoDataModule:
     """
-    train.py:train() 依赖的接口:train_batches(epoch) 生成器 + nasap_val + maestro_val。
+    train.py:train() 依赖的接口:train_batches(epoch) 生成器 + nasap_val + maestro_val + labels。
     train_batches 每 epoch 按混比重采样、bucketing(≤max_batch_sec)、collate。
+    val 列表就是 assemble 的 utt dict(audio_path/win/dur_s),eval hook 按需窗读音频;
+    labels 是全量 {utt_id: {A2S..AMT}} —— eval 的参照(AMT ref_notes / A2S NED)从这里取,
+    缺省退回 train_ds.labels(build_dataset 传的本就是全 split 的标签字典)。
     """
     def __init__(self, train_ds: RubatoDataset, nasap_val: list[dict],
                  maestro_val: list[dict], pad_id: int = 0,
-                 max_batch_sec: float = 560.0):
+                 max_batch_sec: float = 560.0, labels: dict | None = None):
         self.train_ds = train_ds
-        self.nasap_val = nasap_val          # [{audio, ref_xml?}](infer_a2s 用)
-        self.maestro_val = maestro_val      # [{audio, ref_notes}](infer_amt/note_f1 用)
+        self.nasap_val = nasap_val          # [utt dict](infer_a2s 用,audio 按需加载)
+        self.maestro_val = maestro_val      # [utt dict](infer_amt/note_f1 用)
+        self.labels = labels if labels is not None else getattr(train_ds, "labels", {})
         self.pad_id = pad_id
         self.max_batch_sec = max_batch_sec
 

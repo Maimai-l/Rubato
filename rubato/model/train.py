@@ -186,53 +186,108 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
 
 # ---------------------------------------------------------------- 评测钩子(R-S11.5)
 
-def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, legato_omr_fn=None) -> dict:
-    """
-    R-S11.5:nASAP val 跑 可解析率/OMR-NED/A2S F1;MAESTRO val 跑 AMT F1。
-    legato_omr_fn: LEGATO OMR-NED 计算函数(本地注入,U10 已验证可用)。
-    返回指标 dict,喂给 StopController。
-    """
-    from rubato.model.infer import infer_a2s, infer_amt   # S12
-    from rubato.intermo.core import text_to_units, validate_units
+def _eval_subset(samples: list[dict], eval_max: int) -> list[dict]:
+    """确定性抽 eval 子集(按 utt_id 哈希排序取前 N)—— nasap/maestro val 可达数千段,
+    每 3000 步全量跑 beam 解码要小时级;子集稳定(与步数/epoch 无关),指标可跨 eval 对比。"""
+    if eval_max <= 0 or len(samples) <= eval_max:
+        return samples
+    import hashlib
+    return sorted(samples, key=lambda s: hashlib.sha256(
+        str(s.get("utt_id", id(s))).encode()).hexdigest())[:eval_max]
 
+
+def _sample_audio(sample: dict):
+    """eval 样本音频:既收预载数组(sample["audio"]),也收 assemble 的 utt dict
+    (audio_path + 可选 win —— build_dataset 传进来的就是这种,旧版直接 KeyError)。"""
+    if sample.get("audio") is not None:
+        return sample["audio"]
+    path = sample.get("audio_path")
+    if not path:
+        return None
+    from rubato.data.dataset import load_audio
+    try:
+        return load_audio(path, win=sample.get("win"))
+    except Exception:
+        return None
+
+
+def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None = None,
+                   legato_omr_fn=None, eval_max: int = 128) -> dict:
+    """
+    R-S11.5:nASAP val 跑 可解析率/OMR-NED;MAESTRO val 跑 AMT F1。
+    样本 = assemble 的 utt dict(audio_path/win/dur_s)或预载 {audio, ...};音频按需窗读。
+    labels: {utt_id: {A2S..AMT}} —— 参照标签的唯一来源:AMT F1 的 ref_notes 由参照 AMT
+      文本反解(amt_text_to_notes),OMR-NED 无 LEGATO 时用 A2S 文本 NED 代理(text_ned)。
+      【无参照的样本跳过、不打 0 分】—— 旧版把缺 ref_notes 记 F1=0,会在 8000 步被
+      StopController 误判"标签管线有 bug"停训。
+    legato_omr_fn: LEGATO OMR-NED(执行端注入);缺省用 text_ned 代理,保证 best.pt
+      挑选与收敛判定始终有指标。
+    返回指标 dict(含诊断量 empty_rate/n_eval),喂给 StopController。
+    """
+    from rubato.model.infer import infer_a2s, infer_amt, _EMPTY_A2S   # S12
+    from rubato.intermo.core import text_to_units, validate_units
+    from rubato.model.evaluate import note_f1, amt_text_to_notes, text_ned
+
+    labels = labels or {}
     metrics = {"parseable_rate": 0.0, "val_omr_ned": None,
-               "a2s_note_f1": None, "maestro_amt_f1": None}
+               "a2s_note_f1": None, "maestro_amt_f1": None,
+               "empty_rate": None, "n_eval_nasap": 0, "n_eval_maestro": 0}
 
     # nASAP val:生成 + 可解析率。
     # 注意:infer_a2s 失败时兜底返回 _EMPTY_A2S(合法空谱)—— 若把它算"可解析",
     # 可解析率会被结构性钉在 ~1.0,R-S11.7 的 <80% 止损永远不触发。空谱按不可解析计。
-    from rubato.model.infer import _EMPTY_A2S
-    n_ok, n_total = 0, 0
+    # empty_rate 单列:≈1.0 说明是解码 API 胶水没接上(NeMo generate 签名),不是模型烂 ——
+    # 两者都表现为 pause_unparseable,诊断量必须能区分。
+    n_ok, n_total, n_empty = 0, 0, 0
     omr_scores = []
-    for sample in nasap_val:
-        pred = infer_a2s(model, sample["audio"], tokenizer)
+    for sample in _eval_subset(nasap_val, eval_max):
+        audio = _sample_audio(sample)
+        if audio is None:
+            continue
+        pred = infer_a2s(model, audio, tokenizer)
         n_total += 1
         viol = validate_units(text_to_units(pred)) if pred else ["empty"]
         if pred == _EMPTY_A2S:
+            n_empty += 1
             viol = viol or ["empty_fallback"]
         if not viol:
             n_ok += 1
+            ref_a2s = labels.get(sample.get("utt_id"), {}).get("A2S")
             if legato_omr_fn and sample.get("ref_xml"):
                 omr_scores.append(legato_omr_fn(pred, sample["ref_xml"]))
+            elif ref_a2s:
+                omr_scores.append(text_ned(pred, ref_a2s))    # 代理指标,见 evaluate.text_ned
     metrics["parseable_rate"] = n_ok / max(n_total, 1)
+    metrics["empty_rate"] = (n_empty / n_total) if n_total else None
+    metrics["n_eval_nasap"] = n_total
     if omr_scores:
         metrics["val_omr_ned"] = sum(omr_scores) / len(omr_scores)
 
-    # MAESTRO val:AMT note F1(mir_eval)。此前只有注释 —— 但 R-S11.7 的
-    # "步≥8000 且 AMT F1<70 → 停训" 依赖它,不算等于止损规则永不触发。
-    if maestro_val:
-        from rubato.model.evaluate import note_f1, amt_text_to_notes
-        f1s = []
-        for sample in maestro_val:
-            pred_text = infer_amt(model, sample["audio"], tokenizer)
-            try:
-                est_notes = amt_text_to_notes(pred_text)
-            except Exception:
-                est_notes = []
-            ref_notes = sample.get("ref_notes") or []
-            f1s.append(note_f1(ref_notes, est_notes)["f1"])
-        if f1s:
-            metrics["maestro_amt_f1"] = 100.0 * sum(f1s) / len(f1s)
+    # MAESTRO val:AMT note F1(mir_eval)。R-S11.7 的"步≥8000 且 AMT F1<70 → 停训"
+    # 依赖它;参照音符从该窗的真值 AMT 文本反解。无参照样本跳过(不打 0 分)。
+    f1s = []
+    for sample in _eval_subset(maestro_val, eval_max):
+        ref_text = labels.get(sample.get("utt_id"), {}).get("AMT")
+        if not ref_text:
+            continue
+        try:
+            ref_notes = amt_text_to_notes(ref_text)
+        except Exception:
+            continue
+        if not ref_notes:
+            continue
+        audio = _sample_audio(sample)
+        if audio is None:
+            continue
+        pred_text = infer_amt(model, audio, tokenizer)
+        try:
+            est_notes = amt_text_to_notes(pred_text)
+        except Exception:
+            est_notes = []
+        f1s.append(note_f1(ref_notes, est_notes)["f1"])
+    metrics["n_eval_maestro"] = len(f1s)
+    if f1s:
+        metrics["maestro_amt_f1"] = 100.0 * sum(f1s) / len(f1s)
 
     return metrics
 
@@ -296,7 +351,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 with torch.no_grad():
                     m = run_eval_hooks(model, datamodule.nasap_val,
                                        getattr(datamodule, "maestro_val", []),
-                                       tokenizer, legato_omr_fn)
+                                       tokenizer,
+                                       labels=getattr(datamodule, "labels", None),
+                                       legato_omr_fn=legato_omr_fn,
+                                       eval_max=int(cfg.get("eval_max", 128)))
                 report["eval_history"].append({"step": step, **m})
 
                 action = stopper.update(

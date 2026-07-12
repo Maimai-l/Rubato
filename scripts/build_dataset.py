@@ -226,7 +226,7 @@ def main():
     import sentencepiece as spm
     from rubato.data.dataset import RubatoDataset, RubatoDataModule
     from rubato.model.build import build_model
-    from rubato.model.train import build_optimizer, train
+    from rubato.model.train import train
 
     tok = spm.SentencePieceProcessor(model_file=args.tokenizer)
     model, report = build_model(args.nemo, args.tokenizer, args.vocab_spec,
@@ -234,11 +234,16 @@ def main():
     print(f"build_model: {report.get('vocab_swap')} encoder_ok={report['encoder_verify']['ok']}")
 
     train_ds = RubatoDataset(train_utts, labels, tok, train=True)
-    dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val)
-    cfg = {"lr_encoder": 1e-4, "lr_decoder": 5e-4} if not args.from_scratch \
-        else {"lr_encoder": 5e-4, "lr_decoder": 5e-4}   # 从头训:统一 lr
-    opt, sched = build_optimizer(model, cfg)
-    train(model, dm, cfg, tok)
+    # labels 全量传入(不只 train)—— eval hook 的参照(AMT ref/A2S NED)按 val/test utt_id 查
+    dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels)
+    cfg = {
+        "lr_encoder": 1e-4 if not args.from_scratch else 5e-4,   # 从头训:统一 lr
+        "lr_decoder": 5e-4,
+        "precision": "bf16",                       # 5070 Ti 支持;fp32 想开就删这行
+        "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
+        "eval_max": 128,                           # 每次 eval 抽的 val 子集(全量=数千段×beam,小时级)
+    }
+    train(model, dm, cfg, tok)   # optimizer/scheduler 由 train() 内部 build(别在这重复建一份)
 
 
 if __name__ == "__main__":

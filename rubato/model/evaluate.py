@@ -142,6 +142,24 @@ def _has_duplicate_measures(a2s: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------- 文本 NED 代理(ckpt 选择用)
+
+def text_ned(est: str, ref: str) -> float:
+    """
+    A2S 文本级归一化差异 ∈[0,1](0=全同)。用 difflib 的匹配率近似(1−ratio),
+    不是严格编辑距离 —— 只用作【checkpoint 选择/收敛判定的代理指标】:
+    train.run_eval_hooks 在执行端没注入 LEGATO OMR-NED 时用它,保证 best.pt
+    的挑选与 StopController 的收敛规则始终有指标可依,而不是静默悬空。
+    论文对照的正式 OMR-NED 仍以 LEGATO 官方脚本为准(omr_ned_via_legato)。
+    """
+    if not ref and not est:
+        return 0.0
+    if not ref or not est:
+        return 1.0
+    import difflib
+    return 1.0 - difflib.SequenceMatcher(None, est, ref, autojunk=False).ratio()
+
+
 # ---------------------------------------------------------------- OMR-NED(R-S13.1,本地)
 
 def omr_ned_via_legato(est_xml: str, ref_xml: str, legato_fn) -> float:

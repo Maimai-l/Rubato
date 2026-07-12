@@ -90,6 +90,9 @@ def _steps():
         dict(id="P2d", title="VN 段抽听采样(5 段音频+标签 → 贴文件夹路径给用户听)",
              cmds=[S("scripts/spot_check.py", "--labels", str(WORK / "pdmx_perf_labels.jsonl"),
                      "--n", "5", "--tag", "vn")]),
+        dict(id="P2e", title="TAST 戳修复(绝对演奏秒→段内相对秒;钳制行置 null;幂等)",
+             cmds=[S("scripts/repair_tast_labels.py", "--apply")],
+             parse={"tast_shifted": r"已修 (\d+) 行", "tast_nulled": r"置 null (\d+) 行"}),
         dict(id="P3", title="S4 补渲被删的离谱速度曲(其余自动跳过)",
              cmds=[S("scripts/s4_parallel.py")],
              parse={"ok": r"ok=(\d+)", "fail": r"fail=(\d+)"}),
@@ -103,6 +106,16 @@ def _steps():
              cmds=[S("scripts/s6_amt_windows.py")],
              parse={"windows": r"windows=(\d+)", "labels": r"labels=(\d+)",
                     "win_fail": r"win_fail=(\d+)"}),
+        dict(id="P5c", title="nASAP 标签全量重生成(带 perf_audio/win/work_key,--fresh 防二次追加)",
+             cmds=[S("scripts/s7_full_nasap.py", "--fresh",
+                     "--out-labels", str(WORK / "nasap_labels.jsonl"))],
+             parse={"nasap_ok": r"Successfully processed:\s+(\d+)",
+                    "nasap_segments": r"Total segments produced:\s+(\d+)"},
+             require=lambda n: None if int(n.get("nasap_segments", 0)) > 1000
+                     else f"nasap_segments={n.get('nasap_segments')} 过少,对齐/标签管线有问题,停"),
+        dict(id="P5d", title="nASAP 保守 split 分配(R-S7.4:val≈512 段,work_key 隔离)",
+             cmds=[S("scripts/s7_assign_split.py", "--apply")],
+             parse={"nasap_val": r"val 段 = (\d+)", "nasap_test": r"test 段 = (\d+)"}),
         dict(id="P6a", title="S4 段切割·冒烟(20 曲)",
              cmds=[S("scripts/s4_slice_segments.py", "--limit", "20")],
              parse={"sliced": r"sliced = (\d+)", "structure_mismatch": r"structure_mismatch = (\d+)"}),
@@ -132,7 +145,20 @@ def _steps():
                      and float(n.get("split_rate", 1)) < 0.30
                      else f"vocab={n.get('vocab')} split_rate={n.get('split_rate')} 未达标,停"),
         dict(id="P8", title="装配终检:build_dataset --dry-run(每源 kept>0,no_audio 不占大头)",
-             cmds=[S("scripts/build_dataset.py", "--dry-run")]),
+             cmds=[S("scripts/build_dataset.py", "--dry-run")],
+             parse={"nasap_kept": r"nasap\s+rows=\s*\d+ kept=\s*(\d+)",
+                    "maestro_kept": r"maestro\s+rows=\s*\d+ kept=\s*(\d+)",
+                    "nasap_val": r"nasap_val=(\d+)", "maestro_val": r"maestro_val=(\d+)",
+                    "train": r"train=(\d+)"},
+             # 上轮 P8 的三大坑必须挡死:nasap kept=0(配不上音频)、maestro=整曲 1276 条、
+             # val 全空(split 没进来)—— 任一复发,直接停,别带病开训。
+             require=lambda n: None if (int(n.get("nasap_kept", 0)) > 0
+                                        and int(n.get("maestro_kept", 0)) >= 5000
+                                        and int(n.get("nasap_val", 0)) > 0
+                                        and int(n.get("maestro_val", 0)) > 0)
+                     else (f"装配红线未过:nasap_kept={n.get('nasap_kept')} "
+                           f"maestro_kept={n.get('maestro_kept')}(整曲版才会只有 ~1276)"
+                           f" nasap_val={n.get('nasap_val')} maestro_val={n.get('maestro_val')},停")),
     ]
 
 
@@ -249,14 +275,15 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="SOP 状态机:--go 自动干到底(失败才停);--status 看进度")
     ap.add_argument("--go", action="store_true")
     ap.add_argument("--status", action="store_true")
-    ap.add_argument("--reset-step", default="", help="把某步标回未完成(仅用户指示时用)")
+    ap.add_argument("--reset-step", default="", help="把某步标回未完成(逗号可多步,仅用户指示时用)")
     args = ap.parse_args(argv)
     steps = _steps()
     st = _load()
     if args.reset_step:
-        st["done"] = [d for d in st["done"] if d != args.reset_step]
+        targets = {t.strip() for t in args.reset_step.split(",") if t.strip()}
+        st["done"] = [d for d in st["done"] if d not in targets]
         _save(st)
-        print(f"[{args.reset_step}] 已标回未完成。")
+        print(f"{sorted(targets)} 已标回未完成。")
         return 0
     if args.go:
         return cmd_go(steps, st)

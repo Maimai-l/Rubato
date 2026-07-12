@@ -203,13 +203,19 @@ def make_labels(ir: ScoreIR, kind: str, tmap: TimeMap | None = None,
 
 def _shift_tmap(sub_ir: ScoreIR, tmap: TimeMap, offset: Fraction) -> TimeMap:
     """
-    构造段内局部 tmap:local(x) = tmap(x + offset)。用段内小节起点做锚点。
-    offset==0 时直接返回原 tmap(全曲/测试路径)。
+    构造段内局部 tmap:local(x) = tmap(x + offset) − tmap(offset)。用段内小节起点做锚点。
+
+    秒轴必须一并归零(减 tmap(offset)):段音频是从 tmap(offset) 秒切/读出来的,
+    时间戳要的是【段内相对秒】。旧版只平移乐谱轴、秒轴保持绝对演奏时间 ——
+    S5 多段曲与 nASAP 所有段的 TAST 戳随段起点整体偏移,超 40s 的段被
+    stamp_units 全钳到末 bin(4000-bin 编码上限),且与切片/窗读音频错位。
+    offset==0 且 tmap(0)==0 时返回原 tmap(常见于每段独立渲染的路径,无需重建)。
     """
-    if offset == 0:
+    base = float(tmap(offset))
+    if offset == 0 and abs(base) < 1e-9:
         return tmap
     pts = sorted({m.start for m in sub_ir.measures} | {Fraction(0), sub_ir.score_end})
-    anchors = [(p, float(tmap(p + offset))) for p in pts]
+    anchors = [(p, float(tmap(p + offset)) - base) for p in pts]
     # 去重同秒锚点保持 TimeMap 可构建
     seen, uniq = set(), []
     for p, s in anchors:
@@ -217,8 +223,8 @@ def _shift_tmap(sub_ir: ScoreIR, tmap: TimeMap, offset: Fraction) -> TimeMap:
             seen.add(p)
             uniq.append((p, s))
     if len(uniq) < 2:
-        uniq = [(Fraction(0), float(tmap(offset))),
-                (sub_ir.score_end, float(tmap(offset + sub_ir.score_end)))]
+        uniq = [(Fraction(0), 0.0),
+                (sub_ir.score_end, float(tmap(offset + sub_ir.score_end)) - base)]
     return TimeMap(uniq)
 
 
