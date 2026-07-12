@@ -23,6 +23,7 @@
 简化)。对训练数据增强足够真实——我们要的是"多样且合理的空间染色",不是声学仿真级精度。
 """
 from __future__ import annotations
+import os
 import numpy as np
 
 
@@ -124,11 +125,15 @@ def _highshelf(x: np.ndarray, sr: int, gain_db: float, f0: float = 4000.0) -> np
 def apply_preset(audio: np.ndarray, preset: dict, sr: int = 16000,
                  seed: int = 0, ir_override: np.ndarray | None = None,
                  preset_id: str | None = None,
-                 irs_dir: str = "assets/irs/real") -> np.ndarray:
+                 irs_dir: str = "assets/irs/real",
+                 wet_mode: str = "energy") -> np.ndarray:
     """
     把一个录音预设完整作用到干声上。audio: mono float32 @ sr。返回同格式。
     IR 优先级:ir_override > 真实 IR(assets/irs/real/<preset_id>.wav)> 程序化 synth_ir。
     传 preset_id 即自动启用真实 IR(存在时);不传则维持旧行为(程序化)。
+    wet_mode="energy"(默认,听感修复)|"legacy"(旧峰值对齐,仅供 A/B 对照)。
+    全局旋钮(用户实听调音,不改配置):RUBATO_WET_SCALE(默认 1.0,湿度整体缩放)、
+    RUBATO_NOISE_DB_OFFSET(默认 0,噪底整体加减 dB,负数=更安静)。
     """
     from scipy.signal import fftconvolve, butter, lfilter
     rng = np.random.default_rng(seed)
@@ -139,10 +144,19 @@ def apply_preset(audio: np.ndarray, preset: dict, sr: int = 16000,
         ir = ir_override
     else:
         ir = resolve_ir(preset, preset_id, sr, seed, irs_dir)
-    wet = fftconvolve(x, ir, mode="full")[:len(x) + len(ir)]
-    wet = wet[:len(x)]                       # 对齐到原长(尾巴溢出可选保留,这里截断求简)
-    mix = float(preset["wet"])
-    y = (1 - mix) * x + mix * (wet / (np.max(np.abs(wet)) + 1e-9) * np.max(np.abs(x)))
+    mix = float(preset["wet"]) * float(os.environ.get("RUBATO_WET_SCALE", "1.0"))
+    mix = min(max(mix, 0.0), 1.0)
+    if wet_mode == "legacy":
+        # 旧算法【听感 bug,仅留作 A/B】:湿声按"峰值"对齐干声峰值再混 —— 混响把能量摊平后
+        # 峰值低而 RMS 高,峰值对齐等于把湿声响度抬高数 dB,同一 wet 数值下听感远比标称湿
+        # (用户实听"糊/混响过大"的主放大器)。
+        wet = fftconvolve(x, ir, mode="full")[:len(x)]
+        y = (1 - mix) * x + mix * (wet / (np.max(np.abs(wet)) + 1e-9) * np.max(np.abs(x)))
+    else:
+        # 【听感修复】IR 归一到单位能量:卷积保持响度,mix 才是真实的湿/干能量比。
+        ir_e = ir / (np.sqrt(np.sum(ir.astype(np.float64) ** 2)) + 1e-12)
+        wet = fftconvolve(x, ir_e.astype(np.float32), mode="full")[:len(x)]
+        y = (1 - mix) * x + mix * wet
 
     # 2) 高架 EQ(麦克风特性)
     y = _highshelf(y, sr, preset["shelf4k"])
@@ -155,8 +169,8 @@ def apply_preset(audio: np.ndarray, preset: dict, sr: int = 16000,
         b, a = butter(4, min(preset["lp"], sr/2 - 1) / (sr / 2), btype="low")
         y = lfilter(b, a, y).astype(np.float32)
 
-    # 4) 房噪底
-    noise_db = preset.get("noise", -60)
+    # 4) 房噪底(RUBATO_NOISE_DB_OFFSET 全局加减,负数=更安静;用户实听"吵"的调音旋钮)
+    noise_db = preset.get("noise", -60) + float(os.environ.get("RUBATO_NOISE_DB_OFFSET", "0"))
     noise_amp = 10 ** (noise_db / 20.0)
     y = y + rng.standard_normal(len(y)).astype(np.float32) * noise_amp
 
