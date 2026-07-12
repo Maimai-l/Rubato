@@ -23,11 +23,13 @@ def check(name, cond, detail=""):
 
 
 class M(nn.Module):
-    def __init__(self, v_tok, v_out, pos):
+    def __init__(self, v_tok, v_out, pos, ffn=0):
         super().__init__()
         self.tok_emb = nn.Embedding(v_tok, 16)
         self.pos_emb = nn.Embedding(pos, 16)
         self.head = nn.Linear(16, v_out)
+        if ffn:
+            self.dense_in = nn.Linear(16, ffn)   # canary decoder FFN 隐层(1024→4096)
 
 
 class Tok:
@@ -35,16 +37,17 @@ class Tok:
         return 8000
 
 
-print("[1] 体检:一致模型 → 无问题,max_pos = 位置表行数")
-pf = vocab_position_preflight(M(8000, 8000, 512), Tok())
-check("clean_no_problems", pf["problems"] == [], pf["problems"])
+print("[1] 体检:一致模型 → 无问题,max_pos = 位置表行数;FFN 4096 隐层【不】误报")
+pf = vocab_position_preflight(M(8000, 8000, 512, ffn=4096), Tok(), old_vocab=5248)
+check("clean_no_problems", pf["problems"] == [], pf["problems"])   # 执行端第 4 次运行的误报回归
+check("ffn_in_notes", any("dense_in" in w for w in pf["notes"]), pf["notes"])
 check("max_pos_512", pf["max_pos"] == 512, pf["max_pos"])
 check("vocab_8000", pf["vocab"] == 8000)
 
-print("[2] 体检:输出头没换(5248)→ 点名;词表 Embedding 没换 → 点名")
-pf2 = vocab_position_preflight(M(8000, 5248, 512), Tok())
+print("[2] 体检:输出头没换(旧词表 5248)→ 点名;词表 Embedding 没换 → 点名")
+pf2 = vocab_position_preflight(M(8000, 5248, 512), Tok(), old_vocab=5248)
 check("stale_head_flagged", any("head" in p and "5248" in p for p in pf2["problems"]), pf2["problems"])
-pf3 = vocab_position_preflight(M(5248, 8000, 512), Tok())
+pf3 = vocab_position_preflight(M(5248, 8000, 512), Tok(), old_vocab=5248)
 check("stale_emb_flagged", any("tok_emb" in p for p in pf3["problems"]), pf3["problems"])
 
 print("[3] 训练步前置守卫:越界 token / 超长序列在 forward 之前拦下,报错带肇事数字")

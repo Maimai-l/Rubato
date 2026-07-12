@@ -267,16 +267,20 @@ def resize_decoder_vocab(model, new_vocab: int, old_vocab: int | None = None) ->
 
 # ---------------------------------------------------------------- 词表/位置表体检(训前必跑)
 
-def vocab_position_preflight(model, tokenizer) -> dict:
+def vocab_position_preflight(model, tokenizer, old_vocab: int | None = None) -> dict:
     """
     训前体检:把模型里【所有】Embedding 行数与大 Linear 输出维逐个打出来,和 tokenizer
     对账 —— 词表替换不完整/位置表上限,这两类问题在 GPU 上只表现为异步 device assert
     (栈指向随机的后续 kernel,三次崩溃三个栈,执行端实测不可诊断)。体检在 CPU 上一次
     说清:problems 非空 = 结构性不一致,禁止开训;max_pos = 真实位置表行数(别信 yaml)。
 
-    判读:行数 ≥4000 的 Embedding 视为词表(必须 == tokenizer 词表);<4000 的视为
-    位置表(取最小值为目标序列硬上限);out_features ≥4000 的 Linear 视为输出投影
-    (必须 == tokenizer 词表)。
+    判读(v2,修误报:decoder FFN 隐层 dense_in 是 1024→4096,4096≥4000 曾被当成
+    "漏换的词表投影"点名 —— 把它换成 8000 行等于随机重置 FFN,绝不能干):
+      Embedding ≥4000 行:== tokenizer 词表 ✓;== old_vocab(换形前的旧词表)= 漏换,
+        problem;两者都不是 → 只列出供人眼核对(notes),不拦。
+      Linear out_features ≥4000:同上三分。4096 的 FFN 隐层落进 notes,不再误伤。
+      Embedding <4000 行:位置表,取最小值为目标序列硬上限。
+    old_vocab 从 resize_decoder_vocab 的返回里传(不传则只有 ==vocab 的强校验)。
     """
     import torch.nn as nn
     vocab = tokenizer.get_piece_size()
@@ -285,16 +289,25 @@ def vocab_position_preflight(model, tokenizer) -> dict:
     outs = [(n, m.out_features)
             for n, m in model.named_modules()
             if isinstance(m, nn.Linear) and m.out_features >= 4000]
-    problems = []
+    problems, notes = [], []
     for n, num, _ in embs:
-        if num >= 4000 and num != vocab:
-            problems.append(f"词表 Embedding {n}: {num} 行 ≠ tokenizer {vocab}(替换漏了它)")
+        if num < 4000 or num == vocab:
+            continue
+        if old_vocab and num == old_vocab:
+            problems.append(f"词表 Embedding {n}: 仍是旧词表 {num} 行(替换漏了它)")
+        else:
+            notes.append(f"Embedding {n}: {num} 行(非词表尺寸,人工核对)")
     for n, of in outs:
-        if of != vocab:
-            problems.append(f"输出投影 {n}: out_features {of} ≠ tokenizer {vocab}(替换漏了它)")
+        if of == vocab:
+            continue
+        if old_vocab and of == old_vocab:
+            problems.append(f"输出投影 {n}: 仍是旧词表 {of}(替换漏了它)")
+        else:
+            notes.append(f"Linear {n}: out={of}(FFN 隐层等非词表大层,不动它)")
     pos_rows = [num for _, num, _ in embs if num < 4000]
     return {"vocab": vocab, "embeddings": embs, "big_linears": outs,
-            "max_pos": min(pos_rows) if pos_rows else None, "problems": problems}
+            "max_pos": min(pos_rows) if pos_rows else None,
+            "problems": problems, "notes": notes}
 
 
 # ---------------------------------------------------------------- 主构建(本地,NeMo 路线)

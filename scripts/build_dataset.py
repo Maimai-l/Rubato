@@ -244,12 +244,15 @@ def main():
     # 【训前体检,problems 非空禁止开训】把所有 Embedding/大 Linear 与 tokenizer 逐个对账,
     # 词表替换不完整/位置表上限在这里以明文数字暴露 —— 不再靠 GPU 异步 assert 的随机栈猜。
     from rubato.model.build import vocab_position_preflight
-    pf = vocab_position_preflight(model, tok)
+    pf = vocab_position_preflight(model, tok,
+                                  old_vocab=(report.get("vocab_swap") or {}).get("old_vocab"))
     print(f"体检: tokenizer={pf['vocab']} 位置表最小={pf['max_pos']}")
     for n, num, dim in pf["embeddings"]:
         print(f"  Embedding {n}: {num} × {dim}")
     for n, of in pf["big_linears"]:
-        print(f"  Linear→词表 {n}: out={of}")
+        print(f"  大 Linear {n}: out={of}")
+    for w in pf.get("notes", []):
+        print(f"  · {w}")
     if pf["problems"]:
         for p in pf["problems"]:
             print(f"  ✗ {p}")
