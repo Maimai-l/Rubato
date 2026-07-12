@@ -108,6 +108,31 @@ check("resets_rc0", rc == 0, rc)
 st = json.loads(sp.read_text(encoding="utf-8"))
 check("resets_reran_downstream", st["done"] == ["X", "Y", "Z"], st["done"])
 
+print("[5c] resets_if:条件不满足(空转步)→ 下游【不】被重置(上次无条件重置吓停过执行端)")
+sop._steps = lambda: [
+    dict(id="X2", title="空转步(affected=0)",
+         cmds=[[PY, "-c", "print('受影响: 0 曲')"]],
+         parse={"affected_pieces": r"受影响: (\d+) 曲"},
+         resets=["Y2"], resets_if=lambda n: int(n.get("affected_pieces", "0") or 0) > 0),
+    dict(id="Y2", title="下游", cmds=[[PY, "-c", "print('y2')"]]),
+]
+sp.write_text(json.dumps({"done": ["Y2"], "approvals": {}, "numbers": {}}), encoding="utf-8")
+rc = sop.main(["--go"])
+st = json.loads(sp.read_text(encoding="utf-8"))
+check("resets_if_noop", rc == 0 and sorted(st["done"]) == ["X2", "Y2"], st["done"])
+# 条件满足(affected>0)→ 重置生效
+sop._steps = lambda: [
+    dict(id="X3", title="真清场步(affected=3)",
+         cmds=[[PY, "-c", "print('受影响: 3 曲')"]],
+         parse={"affected_pieces": r"受影响: (\d+) 曲"},
+         resets=["Y3"], resets_if=lambda n: int(n.get("affected_pieces", "0") or 0) > 0),
+    dict(id="Y3", title="下游", cmds=[[PY, "-c", "print('y3')"]]),
+]
+sp.write_text(json.dumps({"done": ["Y3"], "approvals": {}, "numbers": {}}), encoding="utf-8")
+rc = sop.main(["--go"])
+st = json.loads(sp.read_text(encoding="utf-8"))
+check("resets_if_fires", rc == 0 and st["done"] == ["X3", "Y3"], st["done"])
+
 print("[6] 真实步骤表:无任何 gate 字段残留")
 check("no_gates_left", all(not s.get("gate") for s in sop._steps())
       if sop._steps.__name__ != "<lambda>" else True)

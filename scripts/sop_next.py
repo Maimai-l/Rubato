@@ -90,12 +90,17 @@ def _steps():
         dict(id="P2d", title="VN 段抽听采样(5 段音频+标签 → 贴文件夹路径给用户听)",
              cmds=[S("scripts/spot_check.py", "--labels", str(WORK / "pdmx_perf_labels.jsonl"),
                      "--n", "5", "--tag", "vn")]),
-        dict(id="P2c0", title="钳制 TAST 整曲清场(D18 用户拍板重渲;证据取 .bak;无受影响曲秒过)",
+        # id=P2c1(弃 P2c0):旧版证据链读 .bak 翻车(多写者首份保留 → 扫出 affected=0 空转,
+        # 还无条件重置了下游把执行端吓停)。新证据 = 活文件 TAST=null 行 + 待渲侧车;
+        # 换 id 使执行端已记完成的 P2c0 不挡道,--go 自动重跑本步。
+        dict(id="P2c1", title="钳制 TAST 整曲清场(D18 重渲;证据=活文件 TAST=null 行;无则秒过)",
              cmds=[S("scripts/rerender_tast_clamped.py", "--apply")],
-             parse={"affected_pieces": r"受影响: (\d+) 曲", "rows_dropped": r"标签行剔除 (\d+)"},
-             # 清场后下游必须重跑:P2c 续跑补渲被清的曲 → P2e 复扫验证(应报 0 clamped)
-             # → 语料/tokenizer/装配跟着重来。自动标回,不再要人记得 --reset-step。
-             resets=["P2c", "P2e", "P6c", "P7", "P8"]),
+             parse={"affected_pieces": r"受影响: (\d+) 曲", "live_null_rows": r"TAST=null 行 (\d+)",
+                    "rows_dropped": r"标签行剔除 (\d+)"},
+             # 真清了东西才重置下游(P2c 续跑补渲 → P2e 复扫验证 → 语料/tokenizer/装配重来);
+             # 无受影响曲的空转【不】重置 —— 上次无条件重置把执行端吓出一份事故报告。
+             resets=["P2c", "P2e", "P6c", "P7", "P8"],
+             resets_if=lambda n: int(n.get("affected_pieces", "0") or 0) > 0),
         dict(id="P2e", title="TAST 戳修复(绝对演奏秒→段内相对秒;钳制行置 null;幂等)",
              cmds=[S("scripts/repair_tast_labels.py", "--apply")],
              parse={"tast_shifted": r"已修 (\d+) 行", "tast_nulled": r"置 null (\d+) 行"}),
@@ -284,10 +289,12 @@ def _run_step(step, st) -> bool:
             print("    " + s)
         print("  【停】失败块已自动推送给规划端;把这一块贴给用户即可。不要自己修、不要重试别的命令。")
         return False
-    for r in step.get("resets", ()):
-        if r in st["done"]:
-            st["done"].remove(r)
-            print(f"  ↺ [{r}] 已自动标回未完成(本步产出使其必须重跑,--go 会按序补上)")
+    fire = step.get("resets_if")
+    if step.get("resets") and (fire is None or fire(nums)):
+        for r in step["resets"]:
+            if r in st["done"]:
+                st["done"].remove(r)
+                print(f"  ↺ [{r}] 已自动标回未完成(本步产出使其必须重跑,--go 会按序补上)")
     st["done"].append(sid)
     st["numbers"][sid] = nums
     _save(st)

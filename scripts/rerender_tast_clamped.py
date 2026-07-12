@@ -5,9 +5,13 @@
 39.99(多对一,文本不可逆)。P2e 已把这批置 null 下架;本脚本把受影响的【整曲】清场,
 交给 S5 续跑机制用【修好的代码】重渲重打戳 —— TAST 全量找回,不是凑合。
 
-圈定(证据来自备份,不猜):
-  受影响曲 = pdmx_perf_labels.bak(P2e 修复前的原件)里 TAST 被判 clamped/nonmonotone
-  的行所属 piece_id;无 .bak 时退化为扫当前标签文件。
+圈定(证据 = 活文件,不再信 .bak 的身份 —— 执行端实测翻车:.bak 路径有三个写者、
+"首份保留"语义,盘上那份是更早世代的备份,按它扫出 affected=0,重渲空转):
+  受影响曲 = 当前标签文件里【A2S 非空 ∧ TAST=null】的行所属 piece_id。这正是 P2e 置 null
+  的集合:本世代 TAST 覆盖率 34,859/34,859(P2c 实测),不存在"天然无 TAST"的行,
+  故该判据恰好圈住毒药段、重渲后自动收敛为空(修好代码后 TAST 不再置 null)。
+  另并【待渲侧车】pdmx_perf_labels_rerender_pending.json:清场前先写意向,防"清完就崩"
+  的窗口把已清的曲弄丢;曲重渲回来(有 TAST 行)即自动消账,全消则删侧车。
 清场(粒度必须是整曲 —— S5 续跑按"该曲有无标签行"判断做没做完,留半曲的行会被跳过):
   该曲全部标签行(purge_label_rows,首份 .bak 不覆盖)+ 全部 VN 段音频 pdmxperf_{pid}_*
   + {pid}.done。该曲本来正常的段会被一并重渲,产出等价(同曲同哈希同预设)。
@@ -30,23 +34,46 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import harden_stdout, read_jsonl
 from rubato.data.cleanup import purge_label_rows
 from scripts.rerender_presets import _files_s5
-from scripts.repair_tast_labels import classify
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 
 
+def _sidecar(labels: Path) -> Path:
+    return labels.with_name(labels.stem + "_rerender_pending.json")
+
+
 def find_affected(labels: Path) -> tuple[set, dict]:
-    """返回 (受影响 piece_id 集, 统计)。证据源:.bak(修复前原件)优先。"""
-    src = labels.with_suffix(".bak") if labels.with_suffix(".bak").exists() else labels
+    """返回 (受影响 piece_id 集, 统计)。证据 = 活文件的【A2S 非空 ∧ TAST=null】行
+    ∪ 待渲侧车(清场意向,防清完就崩的窗口)。侧车里已重渲回来的曲(现有非空 TAST 行)
+    自动消账;全消则删侧车。不读 .bak —— 它的身份不可靠(多写者、首份保留)。"""
     pids: set = set()
-    st = {"source": src.name, "rows": 0, "bad_rows": 0}
-    for r in read_jsonl(str(src)):
+    healthy: set = set()                    # 有非空 TAST 行的曲(已健康)
+    st = {"rows": 0, "live_null_rows": 0, "pending": 0}
+    for r in read_jsonl(str(labels)):
         st["rows"] += 1
-        t = r.get("TAST")
-        if isinstance(t, str) and t.strip() and classify(t) in ("clamped", "nonmonotone"):
-            st["bad_rows"] += 1
-            if r.get("piece_id"):
-                pids.add(r["piece_id"])
+        pid = r.get("piece_id")
+        if not pid:
+            continue
+        a2s, t = r.get("A2S"), r.get("TAST")
+        if isinstance(t, str) and t.strip():
+            healthy.add(pid)
+        elif isinstance(a2s, str) and a2s.strip():
+            st["live_null_rows"] += 1
+            pids.add(pid)
+    sc = _sidecar(labels)
+    if sc.exists():
+        try:
+            pending = set(json.loads(sc.read_text(encoding="utf-8")).get("pieces", []))
+        except Exception:
+            pending = set()
+        still = pending - healthy           # 还没渲回来的才算账
+        st["pending"] = len(still)
+        pids |= still
+        if not still:
+            sc.unlink(missing_ok=True)      # 全部渲回 → 侧车消账
+        elif still != pending:
+            sc.write_text(json.dumps({"pieces": sorted(still)}, ensure_ascii=False),
+                          encoding="utf-8")
     return pids, st
 
 
@@ -67,7 +94,8 @@ def main(argv=None):
     pids, st = find_affected(labels)
     cur_rows = [r for r in read_jsonl(str(labels)) if r.get("piece_id") in pids]
     n_files = sum(len(_files_s5(audio_dir, p)) for p in pids)
-    print(f"证据源: {st['source']}(共 {st['rows']} 行,钳制/非单调 {st['bad_rows']} 行)")
+    print(f"证据: 活文件 {st['rows']} 行,其中 TAST=null 行 {st['live_null_rows']}"
+          f"(+侧车待渲 {st['pending']} 曲)")
     print(f"受影响: {len(pids)} 曲(整曲清场)→ 现有标签行 {len(cur_rows)},VN 段音频/.done 文件 {n_files}")
     print(f"预估重渲: 每曲 VN ~0.4s(GPU)+ 渲染切片 ~5-20s(CPU,受影响曲偏长)"
           f" → 约 {len(pids) * 10 / 3600:.1f} 小时量级(续跑式,可中断)")
@@ -78,6 +106,16 @@ def main(argv=None):
         print("\n干跑结束(未改任何文件)。加 --apply 实施。")
         return 0
 
+    # 清场【前】先写意向侧车:清完标签行后活文件就没证据了,中途崩溃会把这批曲弄丢
+    sc = _sidecar(labels)
+    old = set()
+    if sc.exists():
+        try:
+            old = set(json.loads(sc.read_text(encoding="utf-8")).get("pieces", []))
+        except Exception:
+            pass
+    sc.write_text(json.dumps({"pieces": sorted(old | pids)}, ensure_ascii=False),
+                  encoding="utf-8")
     deleted = 0
     for p in pids:
         for f in _files_s5(audio_dir, p):
