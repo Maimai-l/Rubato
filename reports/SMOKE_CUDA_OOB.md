@@ -23,11 +23,12 @@ tokenizer (vocab=8000) 产出的 token ID 超出 embedding 表范围。build_mod
 
 需要加 `CUDA_LAUNCH_BLOCKING=1` 定位具体越界的 token ID 和值。
 
-第二次运行（CUDA_LAUNCH_BLOCKING=1）：
+第二次运行（CUDA_LAUNCH_BLOCKING=1）：position embedding 处 launch timeout（GPU 污染）。
 
-```
-position_embeddings = self.position_embedding(position_ids)
-CUDA error: the launch timed out and was terminated
-```
+第三次运行（pull 后，含 dataset.py 长度过滤修复）：
 
-位置编码处触发 launch timeout —— GPU 被前一次崩溃污染，需重置 GPU 上下文。可能同时存在词表越界和 GPU 状态问题。
+依然崩溃，两次错误：
+1. **CUDA device-side assert** — self_attn → dropout → 同 token index OOB
+2. **CUDA OOM** — 0 bytes free, PyTorch allocated 28.89 GiB（GPU 仅 15.92 GiB）
+
+**结论：** 词表替换（5248→8000）不完整。dataset 长度过滤没触及根因。GPU 每次 crash 后 OOM 需要重置。
