@@ -160,7 +160,7 @@ split: train=112,166  validation=137  test=177
 ### 未解决问题（执行端）
 4. **P4 巨曲 63/85 未完成** — partitura 反复展开超时（>300s），损失约 2,000-3,000 标签段
 5. **P8 pdmx no_audio=46,740（42%）** — 含 S4 未渲染曲 + VN failed 曲 + 63 巨曲
-6. **P5c nASAP 僵尸进程** — `s7_full_nasap.py` 在 Beethoven 奏鸣曲段（~140/519）partitura 反复展开卡死。3 次重试均同位置死亡，每次残留僵尸 Python 进程。根因与巨曲相同（`Found repeat without start` → 小节数爆炸）。需逐个处理 + 超时策略。
+6. **P5c nASAP 僵尸进程** — `s7_full_nasap.py` 在 Beethoven 奏鸣曲段（~140/519）partitura 反复展开卡死。帮手已提供 `s7_resilient.py` 韧性驱动器（逐块超时 + 断点续跑）。当前进度：**424/519（82%），5,941 标签，0 失败**。仍在跑但缓慢，剩余 95 首可能包含更多 Beethoven 卡点。
 
 ---
 

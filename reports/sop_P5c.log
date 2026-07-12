@@ -1,0 +1,14 @@
+  $ D:\ProgramData\envs\nemo_test\python.exe scripts/s7_resilient.py
+pieces=519 done=360 failed=0 pending=159
+Traceback (most recent call last):
+  File "D:\vscode_projects\ee_download\Rubato\scripts\s7_resilient.py", line 178, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "D:\vscode_projects\ee_download\Rubato\scripts\s7_resilient.py", line 136, in main
+    ok, reason, lines = run_span(i0, k)
+                        ^^^^^^^^^^^^^^^
+  File "D:\vscode_projects\ee_download\Rubato\scripts\s7_resilient.py", line 112, in run_span
+    tmp.unlink(missing_ok=True)
+  File "D:\ProgramData\envs\nemo_test\Lib\pathlib.py", line 1147, in unlink
+    os.unlink(self)
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'D:\\vscode_projects\\ee_download\\work\\nasap_labels.part360'
