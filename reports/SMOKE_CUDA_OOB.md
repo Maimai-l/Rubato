@@ -31,4 +31,16 @@ tokenizer (vocab=8000) 产出的 token ID 超出 embedding 表范围。build_mod
 1. **CUDA device-side assert** — self_attn → dropout → 同 token index OOB
 2. **CUDA OOM** — 0 bytes free, PyTorch allocated 28.89 GiB（GPU 仅 15.92 GiB）
 
-**结论：** 词表替换（5248→8000）不完整。dataset 长度过滤没触及根因。GPU 每次 crash 后 OOM 需要重置。
+**结论：** 词表替换（5248→8000）不完整。
+
+第四次运行（pull 含 vocab_position_preflight 体检，GPU 重启后）：
+
+体检在 CPU 查出根因，没碰 GPU：
+
+```
+✓ token_embedding: 8000 行
+✓ log_softmax.mlp.layer0: out=8000
+✗ decoder layer 0/1/2/3 third_sub_layer.dense_in: out_features=4096 ≠ tokenizer 8000
+```
+
+embedding 和 output 层替换了，但 4 个 decoder 内部 dense_in 层（4096）没换。`build.py` 的 `resize_decoder_vocab` 需要加这些层的替换。
