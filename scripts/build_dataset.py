@@ -264,7 +264,23 @@ def main():
         print(f"--smoke:{len(train_utts)} utts,方言覆盖 "
               f"{sorted({d for u in picked for d in u['dialects']})}")
 
-    train_ds = RubatoDataset(train_utts, labels, tok, train=True)
+    # 【必须限长】canary decoder 位置编码表 512 行;AMT 密集窗可编出 1000+ token,
+    # position_ids 越界 = CUDA device assert(冒烟实测,整个进程报废)。上限从 .nemo 配置读。
+    max_tgt = 512
+    try:
+        from rubato.model.build import extract_nemo_config
+        _ncfg = extract_nemo_config(args.nemo)
+        max_tgt = int((_ncfg.get("transf_decoder", {}).get("config_dict", {})
+                       or {}).get("max_sequence_length") or 512)
+    except Exception as e:
+        print(f"  ⚠ 读 .nemo 配置失败({type(e).__name__}),max_target_len 用缺省 512")
+    print(f"  目标序列上限 = {max_tgt} tok(decoder 位置表);超长样本将丢弃并记账…")
+    train_ds = RubatoDataset(train_utts, labels, tok, train=True, max_target_len=max_tgt)
+    lf = train_ds.len_filter_report
+    print(f"  超长过滤: 保留 {lf.get('kept_pairs')} 对,丢弃 {lf.get('dropped_by_dialect') or 0}")
+    _dropped = sum((lf.get("dropped_by_dialect") or {}).values())
+    if _dropped > 0.10 * max(lf.get("kept_pairs", 1), 1):
+        print("  ⚠ 超长丢弃 >10% —— 值得扩位置表(resize position embedding)找回,贴回给规划端")
     # labels 全量传入(不只 train)—— eval hook 的参照(AMT ref/A2S NED)按 val/test utt_id 查
     dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels)
     cfg = {

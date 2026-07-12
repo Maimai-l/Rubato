@@ -229,7 +229,8 @@ class RubatoDataset:
     def __init__(self, utts: list[dict], labels: dict, tokenizer,
                  seed: int = 20260706, sr: int = 16000,
                  alpha: float = 0.25, train: bool = True,
-                 dialect_mix: dict | None = None):
+                 dialect_mix: dict | None = None,
+                 max_target_len: int | None = None):
         self.utts = {u["utt_id"]: u for u in utts}
         self.labels = labels
         self.tok = tokenizer
@@ -238,16 +239,44 @@ class RubatoDataset:
         self.alpha = alpha
         self.train = train
         self.dialect_mix = dialect_mix          # None → sampling.DIALECT_MIX 缺省;可从配置注入
+        self.max_target_len = max_target_len    # decoder 位置表上限(canary=512);None=不过滤
+        self.len_filter_report: dict = {}
         self.last_mix_report: dict = {}         # 每 epoch 的池大小/配额/过采样倍数,给日志看
+        self._len_ok = self._build_len_filter() if max_target_len else None
         self._plan: list[tuple[str, str]] = []
         self.set_epoch(0)
 
+    def _build_len_filter(self) -> set:
+        """(utt_id, dialect) 白名单:目标序列(prompt+标签+eot,确定性切分)≤ max_target_len。
+        为什么必须有(执行端冒烟实测):canary decoder 位置编码表只有 512 行,AMT 密集窗
+        (25s 炫技段几百音符)能编出 1000+ token → position_ids 越界 = CUDA device assert,
+        整个训练进程报废。超长样本【丢弃并记账】—— 截断会破坏 InterMo 的 Dyck 闭合,不可取。
+        长度按确定性切分量;训练期 alpha 采样可能更长,__getitem__ 有确定性回退兜底。"""
+        ok: set = set()
+        drop: dict = {}
+        for uid, u in self.utts.items():
+            lab = self.labels.get(uid, {})
+            for d in u.get("dialects", []):
+                t = lab.get(d)
+                if not t:
+                    continue
+                n = len(self.tok.encode(t, out_type=str)) + len(DIALECT_PROMPT[d]) + 2  # +domain+eot
+                if n <= self.max_target_len:
+                    ok.add((uid, d))
+                else:
+                    drop[d] = drop.get(d, 0) + 1
+        self.len_filter_report = {"max_target_len": self.max_target_len,
+                                  "dropped_by_dialect": drop,
+                                  "kept_pairs": len(ok)}
+        return ok
+
     def _available(self) -> dict:
-        """{utt_id: [有标签的 dialect]}(标签为 None 的 dialect 不可用)。"""
+        """{utt_id: [有标签的 dialect]}(标签为 None / 超长的 dialect 不可用)。"""
         av = {}
         for uid, u in self.utts.items():
             lab = self.labels.get(uid, {})
-            ds = [d for d in u.get("dialects", []) if lab.get(d)]
+            ds = [d for d in u.get("dialects", []) if lab.get(d)
+                  and (self._len_ok is None or (uid, d) in self._len_ok)]
             if ds:
                 av[uid] = ds
         return av
@@ -284,6 +313,12 @@ class RubatoDataset:
 
         enc = encode_target(self.tok, dialect, text,
                             sample=self.train, alpha=self.alpha, domain=u.get("domain"))
+        # alpha 采样切分可能比确定性切分更长 → 超上限就退回确定性切分(预过滤保证它必然合规)
+        if self.max_target_len and len(enc["input_ids"]) + 1 > self.max_target_len:
+            enc = encode_target(self.tok, dialect, text, sample=False, domain=u.get("domain"))
+            if len(enc["input_ids"]) + 1 > self.max_target_len:
+                raise ValueError(f"目标序列超长(预过滤应已拦下):{uid}/{dialect} "
+                                 f"{len(enc['input_ids']) + 1} > {self.max_target_len}")
         enc["audio"] = load_audio(u["audio_path"], self.sr, tile_pad_s=t0_s,
                                   win=u.get("win"))  # LOCAL;win=窗内 utt 只读整曲的 [t0,t1]
         enc["utt_id"] = uid
