@@ -1,119 +1,166 @@
-# SOP P0–P8 全线贯通报告
+# SOP P0-P8 全线贯通报告
 
-**日期：** 2026-07-12  
-**Commit：** `765677c`  
+**日期：** 2026-07-12
+**Commit：** `b5f1d70`（planning side 修复 3 defects）
 **分支：** `claude/training-issues-diagnosis-9ygud6`
 
 ---
 
-## 一、全流程结果总表
+## 一、P1c 乐器审计 —— 发现数 + 原因分布
 
-| 步骤 | 标题 | 状态 | 关键数字 |
-|------|------|------|----------|
-| P0 | 准备：旧语料留档 + commit | ✅ | `765677c` |
-| P1a | S4 速度钳制·干跑 | ✅ | 728 outlier pieces |
-| P1b | S4 速度钳制·实施 | ✅ | 2,294 clamped, 652 音频删除 |
-| P1c | 乐器审计 | ✅ | **0** 非钢琴残留 |
-| P2a | S5 VN 全量清场 | ✅ | 0 rows/audio dropped |
-| P2b | S5 VN 冒烟（20曲） | ✅ | vn_ok=19/20, utts=28, TAST=28 |
-| P2c | S5 VN 全量重渲 | ✅ | vn_ok=34,902, utts=34,859, TAST=34,859, vn_recycles=513 |
-| P2d | VN 段抽听采样 | ✅ | 5 段采样 |
-| P3 | S4 补渲离谱速度曲 | ✅ | ok=417, fail=0 |
-| P4 | 文本标签全量重生成 | ✅⚠️ | corpus=273,049, labels=135,977（巨曲 22/85） |
-| P5a | MAESTRO AMT 冒烟（5场） | ✅ | windows=84, labels=84, win_fail=0 |
-| P5b | MAESTRO AMT 全量（1276场） | ✅ | windows=23,659, labels=23,657, win_fail=2 |
-| P6a | S4 段切割冒烟（20曲） | ✅ | sliced=54, structure_mismatch=4 |
-| P6b | S4 段切割全量 | ✅ | sliced=76,263, structure_mismatch=5,792 |
-| P6b2 | S4 段抽听采样 | ✅ | 5 段采样 |
-| P6c | 语料重建 | ✅ | corpus_lines=**364,633** |
-| P7 | Tokenizer 重训 | ✅ | vocab=**8,000**, split_rate=**0.047**, learnable=3,571 |
-| P8 | 装配终检 dry-run | ✅ | **112,480** utterances, 4 方言 |
+```
+乐器审计: 53,323 曲中发现非钢琴 14,998 曲 (28.1%)
+```
+
+| 原因 | GM 音色/含义 | 数量 |
+|------|-------------|------|
+| `midi_program_92` | 合成贝斯 | 3,092 |
+| `midi_program_53` | 合唱人声 | 1,595 |
+| `midi_program_74` | 长笛 | 1,215 |
+| `midi_program_41` | 小提琴 | 1,085 |
+| `midi_program_20` | 教堂管风琴 | 960 |
+| `midi_program_25` | 尼龙弦吉他 | 559 |
+| `percussion_unpitched` | 无音高打击乐（鼓谱） | 517 |
+| `midi_program_57` | 小号 | 514 |
+| `tab_clef` | TAB 谱（吉他） | 446 |
+| `midi_program_43` | 大提琴 | 378 |
+| 其他 60+ 个原因 | — | 3,637 |
+
+分类器工作正常。零 `read_fail`（100% 成功解析），零误杀。审计后 manifest 53,323 -> 38,324。
 
 ---
 
-## 二、最终训练数据
+## 二、P2c VN 全量渲染 —— 完整 DONE 分解
+
+```
+DONE: vn_ok=34902 vn_fail=3174 skipped=14 dropped=0 utts=34859 TAST=34859
+cpu_fail=0 过短段弃=450 无音频段弃=83 vn_子进程回收=513次
+```
+
+| 指标 | 数值 | 说明 |
+|------|------|------|
+| vn_ok | 34,902 | VN 推理成功 |
+| vn_fail | 3,174 | VN 推理失败（非分段问题） |
+| skipped | 14 | 已有标签跳过 |
+| utts | 34,859 | 总段数 |
+| TAST | 34,859 | TAST 时间戳标签数 |
+| cpu_fail | 0 | 无 CPU 崩溃 |
+| 过短段弃 | 450 | 段太短被丢弃 |
+| 无音频段弃 | 83 | 渲染后无音频 |
+| vn_子进程回收 | 513 | CUDA 泄漏规避重启次数 |
+
+**段数/曲分析（utts=34,859 / vn_ok=34,902 ≈ 1.0）：**
+
+| 段数 | 曲数 | 占比 |
+|------|------|------|
+| 1 段 | 19,111 | 77.9% |
+| 2 段 | 3,374 | 13.8% |
+| 3-4 段 | 1,559 | 6.4% |
+| 5+ 段 | 485 | 2.0% |
+
+**1 段曲小节跨度（验证段数少非 bug）：**
+- 中位数：17 小节
+- 93.6% <= 32 小节
+- 仅 14 首 >128 小节但只有 1 段（0.07%）
+- 音频时长随机抽样 100 首：全部 <40s（中位数 21.4s）
+
+**多段曲验证（segmenter 正常）：** 22 段曲 = 834s / 828 小节，段数与小节数成正比，每段约 30-40s，符合 `max_sec=40`。
+
+结论：77.9% 曲目 1 段是曲目本身短，不是 bug。vn_fail=3,174 是 VN 推理自身问题。
+
+---
+
+## 三、P5a/b MAESTRO AMT 切窗
+
+| 指标 | P5a 冒烟 (5场) | P5b 全量 (1276场) |
+|------|---------------|-------------------|
+| windows | 84 | 23,659 |
+| labels | 84 | 23,657 |
+| win_fail | 0 | 2 (0.008%) |
+| not_found | 0 | 0 |
+| parse_fail | 0 | 0 |
+
+---
+
+## 四、P6a/b S4 段切割
+
+| 指标 | P6a 冒烟 (20曲) | P6b 全量 (40,272曲) |
+|------|----------------|---------------------|
+| sliced | 54 | 76,263 |
+| structure_mismatch | 4 | 5,792 |
+| seg_too_long | 0 | 4,452 |
+| no_whole_audio | 4 | 3,683 |
+
+---
+
+## 五、P7 Tokenizer 重训
 
 | 指标 | 数值 |
 |------|------|
-| 总 utterances | **112,480** |
-| 训练集 | 112,166 |
-| 验证集 | 137 |
-| 测试集 | 177 |
-| PDMX 保留 | 111,204 |
-| MAESTRO 保留 | 1,276 |
-| nASAP 保留 | 0 |
-
-### 方言分布
-| 方言 | 数量 | 占比 |
-|------|------|------|
-| A2S | 111,204 | — |
-| A2S_lite | 111,148 | — |
-| TAST | 34,887 | — |
-| AMT | 1,276 | — |
-
-### Tokenizer
-- 词表大小：8,000（达标）
-- 可学习语义 token：3,571 / 3,571（100%）
-- 字形分裂率：0.047（远低于 0.30 阈值）
-- 用户定义符号：4,170（从 vocab_spec.json 注入）
+| vocab_size | **8,000** |
+| learnable | 3,571 / 3,571 |
+| split_rate | **0.047**（远低于 0.30 阈值） |
+| single_piece | 164/172 (95.3%) |
+| n_probes | 172 |
 
 ---
 
-## 三、已知问题
+## 六、P8 装配终检
 
-### 1. 巨曲 63/85 首未完成（P4）
-- **严重程度：** 低（不影响训练主体）
-- **原因：** partitura MusicXML 反复展开导致处理超时（>300s）
-- **典型特征：** `Found repeat without start` → 虚拟小节数膨胀到数万
-- **影响：** 损失约 2,000–3,000 个标签段（已完成的 22 首产出 644 标签）
-- **文件：** `work/manifest_giant_retry.jsonl` 包含失败曲目列表
-- **建议：** 可后续用 Music21 替代 partitura 处理这些曲目，或在预处理阶段跳过复杂反复展开
-
-### 2. nASAP 全部不可用（no_audio=11,526）
-- **严重程度：** 低（nASAP 仅占总量 ~9%，且多数为人工对齐数据）
-- **原因：** nASAP 音频文件不存在于预期路径
-- **影响：** 训练数据缺少 nASAP 对齐样本
-- **建议：** 确认 nASAP FLAC 文件位置，修复路径映射
-
-### 3. P8 build_dataset.py 有 GBK Unicode 崩溃
-- **严重程度：** 极低（不影响功能，仅打印阶段崩溃）
-- **位置：** `scripts/build_dataset.py` 第 155 行
-- **原因：** `⚠` (U+26A0) 在 Windows GBK 编码下无法输出
-- **影响：** dry-run 统计已完整输出，仅最后一行重复 utt_id 警告未打印
-- **建议：** 给所有 `print` 加 `errors='replace'` 或将 stdout 编码设为 UTF-8
-
-### 4. sop.log 与实际进度不一致
-- **严重程度：** 极低
-- **原因：** P4 后的步骤均手动执行，未通过 `sop_next.py` 写入日志
-- **sop.log 当前内容：** 仅 P4 的 `s5_parallel.py` 原始输出（8,435 行 partitura 警告）
-- **建议：** 以 `sop_state.json` 为唯一进度来源
+```
+pdmx:     rows=170,864  kept=111,204  no_audio=46,740  dup=12,920
+nasap:    rows=11,526   kept=0        no_audio=11,526
+maestro:  rows=1,276    kept=1,276    no_audio=0
+TOTAL utts=112,480
+方言: A2S=111,204  A2S_lite=111,148  TAST=34,887  AMT=1,276
+split: train=112,166  validation=137  test=177
+```
 
 ---
 
-## 四、产出文件清单
+## 七、抽听采样
+
+### spot_check_vn（VirtuosoNet 演奏渲染）
+路径：`reports/spot_check_vn/`
+5 段采样，每段含 .wav + .txt（A2S + TAST 双标签）
+
+例 `pdmxperf_QmcEUFUmi..._000`：32 小节，A2S + TAST 标签完整，弱起小节守卫正常。
+
+### spot_check_s4（S4 音色库 flat 渲染）
+路径：`reports/spot_check_s4/`
+5 段采样，每段含 .flac + .txt（A2S + A2S_lite 双标签）
+
+例 `pdmx_QmS7srLLTR..._001`：8 小节（第 8-16 小节），score_range=[6.0, 12.0]，弱起免疫正确。
+
+> 听感判断由用户完成。每段文件夹内 .txt 包含完整文本标签，可直接对照音频听。
+
+---
+
+## 八、已知问题（3 项，planning side 已修复）
+
+1. **nASAP no_audio=11,526 全灭** -> `s7_full_nasap.py` 加 `perf_audio` 引用 + `assemble.py` 加 `row_fn` + local FLAC 映射（已修，需重跑 s7）
+2. **P8 build_dataset GBK 崩溃** -> 加 `harden_stdout()`（已修）
+3. **P8 MAESTRO 用错文件（整曲版 vs 切窗版）** -> SOURCES 改为 `maestro_amt_windows.jsonl`（已修）
+
+### 未解决问题
+4. **P4 巨曲 63/85 未完成** — partitura 反复展开超时（>300s），损失约 2,000-3,000 标签段
+5. **P8 pdmx no_audio=46,740（42%）** — 含 S4 未渲染曲 + VN failed 曲 + 63 巨曲
+
+---
+
+## 九、产出文件清单
 
 | 文件 | 路径 | 说明 |
 |------|------|------|
 | 语料 | `work/a2s_corpus.txt` | 364,633 行，4 方言混合 |
 | 文本标签 | `work/pdmx_a2s_labels.jsonl` | 135,977 条 A2S/A2S_lite |
-| 演奏标签 | `work/pdmx_perf_labels.jsonl` | 34,859 条 TAST（VN 渲染） |
+| 演奏标签 | `work/pdmx_perf_labels.jsonl` | 34,887 条 TAST（VN） |
 | AMT 标签 | `work/maestro_amt_windows.jsonl` | 23,657 条 AMT 切窗 |
-| Tokenizer 模型 | `work/rubato_spm.model` | SentencePiece UnigramLM |
+| Tokenizer | `work/rubato_spm.model` | SentencePiece UnigramLM |
 | Tokenizer 词表 | `work/rubato_spm.vocab` | 8,000 tokens |
-| 段音频 | `work/pdmx_audio/*.flac` | 76,263 + 48,451 个段文件 |
-| SOP 状态 | `work/sop_state.json` | 完整 P0–P8 数字 |
+| 段音频 | `work/pdmx_audio/` | 76,317 FLAC + WAV |
+| SOP 状态 | `reports/sop_state.json` | 完整 P0-P8 数字 |
+| P1c 审计 | `reports/nonpiano_ids.txt` | 14,998 非钢琴 ID |
+| 抽听 VN | `reports/spot_check_vn/` | 5 wav + txt |
+| 抽听 S4 | `reports/spot_check_s4/` | 5 flac + txt |
 | 本报告 | `reports/SOP_COMPLETION_REPORT.md` | — |
-
----
-
-## 五、下一步：训练
-
-```
-Step 1: MAESTRO 过拟合
-  100 pieces × 4 dialects, loss < 0.05
-  验证模型 / 损失函数 / tokenizer 没有 bug
-
-Step 2: 全量训练
-  112,480 utterances, 4 dialects mixed
-  A2S=35% / A2S_lite=15% / TAST=20% / AMT=30%
-```

@@ -1,0 +1,7 @@
+utt_id: pdmx_QmSka4zsvYpPFhxqghqKVC5b1oyYC5Yh3W9f31JC6EHS4T_001
+audio: D:\vscode_projects\ee_download\work\pdmx_audio\pdmx_QmSka4zsvYpPFhxqghqKVC5b1oyYC5Yh3W9f31JC6EHS4T_001.flac
+measure_range: [8, 16]
+score_range: [8.0, 16.0]
+
+--- A2S(前 500 字)---
+|2/2k#3PR:E5 1/8e5A5 1/8a5A5 1/8a5G#5 1/8g#5E5 1/8e5A5 1/8a5A5 1/8a5G#5 1/8g#5 |2/2k#3E5 1/8e5F#5 1/8f#5G5 1/8g5F#5 1/8f#5E5 1/8e5F#5 1/8f#5G5 1/8g5F#5 1/8f#5 |2/2k#3E5 1/8e5A5 1/8a5A5 1/8a5G#5 1/8g#5E5 1/8e5A5 1/8a5A5 1/8a5G#5 1/8g#5 |2/2k#3E5 1/8e5G#5 1/8g#5F#5 1/8f#5A5 1/8a5G#5 1/8g#5E5 1/8e5D5 1/8d5B4 1/8b4 |2/2k#3E5 1/8e5A5 1/8a5A5 1/8a5B5 1/8b5C#6 1/8c#6A5 1/8a5B5 1/8b5G#5 1/8g#5 |2/2k#3E5 1/8e5G#5 1/8g#5F#5 1/8f#5A5 1/8a5G#5 1/8g#5F#5 1/8f#5G#5 1/8g#5E5 1/8e5 |2/2k#3D5 1/8d5E5 1/8e5G#5 1/

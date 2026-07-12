@@ -1,0 +1,7 @@
+utt_id: pdmx_QmQLnxLee66z9zgyZYqtzJRvww73jp72GX9CYm7UhRKB4Y_001
+audio: D:\vscode_projects\ee_download\work\pdmx_audio\pdmx_QmQLnxLee66z9zgyZYqtzJRvww73jp72GX9CYm7UhRKB4Y_001.flac
+measure_range: [9, 19]
+score_range: [8.0, 16.75]
+
+--- A2S(前 500 字)---
+|3/4k-4PL:E-3G3PR:E-4 3/4PL:e-3g3PR:e-4 |1/4k-4PL:E-3B-3PR:G4E-5 3/16PL:e-3b-3E-3E-4PR:g4e-5B-4D-5 1/16PL:e-3e-4PR:b-4d-5 |4/4k-4PL:A-3E-4A-4PR:C5 3/16PL:a-3e-4a-4A-3E-4A-4PR:c5C5 1/16PL:a-3e-4a-4A-3E-4A-4PR:c5C5 3/16PL:a-3e-4a-4A-3E-4A-4PR:c5C5 1/16PL:a-3e-4a-4A-3E-4A-4PR:c5C5 1/4PL:a-3e-4a-4A-3D-4F4PR:c5A-4 3/16PL:a-3d-4f4A-3D-4PR:a-4F4 1/16PL:a-3d-4PR:f4 |4/4k-4PL:A-3PR:C4E-4 1/4PL:a-3A-3 3/16a-3A-3 1/16a-3A-3 1/4a-3PR:c4e-4B-4 3/16b-4C5 1/16c5 |4/4k-4D-5 1/4PL:E-3E-4PR:G4 3/16PL:e-3e-4E-3E-4
