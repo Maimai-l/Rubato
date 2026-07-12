@@ -90,17 +90,10 @@ def _steps():
         dict(id="P2d", title="VN 段抽听采样(5 段音频+标签 → 贴文件夹路径给用户听)",
              cmds=[S("scripts/spot_check.py", "--labels", str(WORK / "pdmx_perf_labels.jsonl"),
                      "--n", "5", "--tag", "vn")]),
-        # id=P2c1(弃 P2c0):旧版证据链读 .bak 翻车(多写者首份保留 → 扫出 affected=0 空转,
-        # 还无条件重置了下游把执行端吓停)。新证据 = 活文件 TAST=null 行 + 待渲侧车;
-        # 换 id 使执行端已记完成的 P2c0 不挡道,--go 自动重跑本步。
-        dict(id="P2c1", title="钳制 TAST 整曲清场(D18 重渲;证据=活文件 TAST=null 行;无则秒过)",
-             cmds=[S("scripts/rerender_tast_clamped.py", "--apply")],
-             parse={"affected_pieces": r"受影响: (\d+) 曲", "live_null_rows": r"TAST=null 行 (\d+)",
-                    "rows_dropped": r"标签行剔除 (\d+)"},
-             # 真清了东西才重置下游(P2c 续跑补渲 → P2e 复扫验证 → 语料/tokenizer/装配重来);
-             # 无受影响曲的空转【不】重置 —— 上次无条件重置把执行端吓出一份事故报告。
-             resets=["P2c", "P2e", "P6c", "P7", "P8"],
-             resets_if=lambda n: int(n.get("affected_pieces", "0") or 0) > 0),
+        # 【D19 取消】曾有 P2c0/P2c1 = 钳制 TAST 整曲清场重渲(D18)。用户 2026-07-12 反悔:
+        # 主要目标是 A2S,那 13,082 行的 A2S/A2S_lite/音频全在、只缺 TAST → 不重渲,直接训练。
+        # 工具 scripts/rerender_tast_clamped.py 保留:训后 TAST 指标掉队再定点补渲
+        # (证据=活文件 TAST=null 行,自收敛,随时可加回本表)。
         dict(id="P2e", title="TAST 戳修复(绝对演奏秒→段内相对秒;钳制行置 null;幂等)",
              cmds=[S("scripts/repair_tast_labels.py", "--apply")],
              parse={"tast_shifted": r"已修 (\d+) 行", "tast_nulled": r"置 null (\d+) 行"}),

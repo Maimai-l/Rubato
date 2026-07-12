@@ -23,7 +23,8 @@
 | D15 | 混响【不重渲】现网音频(O3 关闭) | 2026-07-12 | 用户实听裁决:"修了听着差不多,还不如不修" | 现网音频保持原状;能量归一混音(wet_mode="energy")保留为今后一切渲染的默认;rerender_presets.py 备而不用 |
 | D16 | TAST 绝对戳毒药:代码修 _shift_tmap 秒轴归零;存量标签【文本级修复】不重渲 | 2026-07-12 | 旧版秒轴保持绝对演奏时间:多段曲后续段整体偏移、超 40s 全钳末 bin(过单调校验,纯静默);首戳=段起点秒 → 全体减首戳即精确修复(±1 bin),钳制行信息已丢 → TAST 置 null 退出 TAST 池(A2S/音频保留) | segment._shift_tmap + scripts/repair_tast_labels.py(SOP P2e);nASAP 标签整套重跑自带修复 |
 | D17 | nASAP split = conservative_split 后置分配(val≈512 段,work_key 隔离);训练 eval 每次抽 128 段确定性子集 | 2026-07-12 | ASAP metadata 无 split 列,不分配则 nASAP 全 train、eval hook 无 nASAP 可评;R-S7.4 的实现一直没人调用。全量 val×beam 解码每 3000 步一次要小时级,抽子集(hash 排序前 128)保训练吞吐 | scripts/s7_assign_split.py(SOP P5d);train.run_eval_hooks eval_max=128 |
-| D18 | 钳制 TAST 的曲【全量定点重渲找回】(推翻规划端"先训、掉队再补"的建议) | 2026-07-12 | 用户拍板:13,082 行被 D16 bug 毁掉的 TAST 必须重渲找回,不接受缩池训练。整曲清场(S5 续跑粒度是曲)+ 修好的 _shift_tmap 重打戳;重渲走当前默认能量归一混音,与存量 legacy 混音并存(用户实听"差不多",D15) | scripts/rerender_tast_clamped.py;P2e 复扫=验证门(应报 0 clamped) |
+| D18 | 钳制 TAST 的曲【全量定点重渲找回】(推翻规划端"先训、掉队再补"的建议)【已被 D19 撤销】 | 2026-07-12 | 用户拍板:13,082 行被 D16 bug 毁掉的 TAST 必须重渲找回,不接受缩池训练。整曲清场(S5 续跑粒度是曲)+ 修好的 _shift_tmap 重打戳;重渲走当前默认能量归一混音,与存量 legacy 混音并存(用户实听"差不多",D15) | scripts/rerender_tast_clamped.py;P2e 复扫=验证门(应报 0 clamped) |
+| D19 | 撤销 D18:【不】重渲,直接开训("本来也只要 A2S") | 2026-07-12 | 用户反悔于清场执行之前(P2c1 未跑,零损失):13,082 行的 A2S/A2S_lite/音频完好在池,仅 TAST 缺席;TAST 池余 ~21.8k(pdmx)+ nASAP,混比 0.20 靠过采样可支撑 | SOP 移除 P2c1;rerender_tast_clamped.py 保留,训后 TAST 指标掉队可随时定点补渲 |
 
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
