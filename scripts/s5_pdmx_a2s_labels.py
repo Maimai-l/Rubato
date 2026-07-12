@@ -38,8 +38,7 @@ def load_musicxml_part(xml_path: str):
 
 def process_piece(piece: dict, xml_root: Path,
                   min_measures: int, max_measures: int | None, max_sec: float,
-                  lenient: bool, overlap: bool = False,
-                  skip_midi_tempo: bool = False) -> tuple[list[dict], dict]:
+                  lenient: bool, overlap: bool = False) -> tuple[list[dict], dict]:
     """
     单曲:归一化 XML → IR → 小节对齐切段 → A2S/A2S_lite 标签。
     返回 (label_rows, stats)。lenient 用于浪漫派非标准小节(华彩/延长)。
@@ -70,17 +69,26 @@ def process_piece(piece: dict, xml_root: Path,
     # 不一致 → 回退恒速并计数,此时该曲的段在 s4_slice_segments 处也会被 structure_mismatch 跳过)。
     tmap = None
     midi_path = piece.get("midi_path")
-    if not skip_midi_tempo and midi_path and Path(midi_path).exists():
-        try:
-            from rubato.data.midi_time import midi_time
-            mtmap, mmeasures, mtotal = midi_time(midi_path)
-            if (len(mmeasures) == len(ir.measures)
-                    and abs(float(mtotal - ir.score_end)) <= 1.0 / 16):
-                tmap = mtmap
-            else:
-                stats["tempo_fallback"] = "structure_mismatch"
-        except Exception as e:
-            stats["tempo_fallback"] = f"midi_fail:{type(e).__name__}"
+    if midi_path and Path(midi_path).exists():
+        # 【巨曲守卫】(执行端痛点的正确解法,替代其 --no-midi-tempo 全局开关):个别"黑乐谱"式
+        # 巨 MIDI 解析要几分钟,卡住整个 P4;只对【超阈值的那几首】回退恒速并计数,其余曲保持真速度。
+        # 全局关掉真速度 = 为几首巨曲把全体分段正确性交出去,不干;且旧开关在 run() 里引用 __main__
+        # 的 args,经 s5_parallel 导入调用时必 NameError —— 已一并撤除。
+        import os as _os
+        max_mb = float(_os.environ.get("S5_TEMPO_MIDI_MAX_MB", "20"))
+        if Path(midi_path).stat().st_size > max_mb * 1e6:
+            stats["tempo_fallback"] = "midi_too_big"
+        else:
+            try:
+                from rubato.data.midi_time import midi_time
+                mtmap, mmeasures, mtotal = midi_time(midi_path)
+                if (len(mmeasures) == len(ir.measures)
+                        and abs(float(mtotal - ir.score_end)) <= 1.0 / 16):
+                    tmap = mtmap
+                else:
+                    stats["tempo_fallback"] = "structure_mismatch"
+            except Exception as e:
+                stats["tempo_fallback"] = f"midi_fail:{type(e).__name__}"
     else:
         stats["tempo_fallback"] = "no_midi"
     try:
@@ -155,12 +163,15 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
             continue
         try:
             rows, stats = process_piece(piece, xml_root, min_measures, max_measures,
-                                        max_sec, lenient, overlap,
-                                        skip_midi_tempo=args.no_midi_tempo)
+                                        max_sec, lenient, overlap)
         except Exception:
             report["failures"].append({"piece_id": piece.get("piece_id"),
                                        "reason": "exception", "tb": traceback.format_exc()[:200]})
             continue
+        if stats.get("tempo_fallback"):
+            tf = report.setdefault("tempo_fallback", {})
+            key = str(stats["tempo_fallback"]).split(":")[0]
+            tf[key] = tf.get(key, 0) + 1
         if rows:
             report["processed"] += 1
             report["total_segments"] += stats["segments"]
@@ -204,7 +215,6 @@ if __name__ == "__main__":
                     help="0=不设小节数上限(用户决定:时间 max-sec 是唯一上限,段尽量长)")
     ap.add_argument("--overlap", type=int, default=1)
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--no-midi-tempo", action="store_true", help="跳过 MIDI 速度提取,用恒速 120bpm(巨曲加速)")
     args = ap.parse_args()
 
     ROOT = Path(r"D:\vscode_projects\ee_download")
