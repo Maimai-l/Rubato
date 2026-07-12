@@ -132,6 +132,8 @@ def process_piece(xml_path: str, alignment_rows: list[dict]) -> tuple[list[dict]
 
 def main():
     import argparse
+    from rubato.platform import harden_stdout
+    harden_stdout()          # GBK 控制台/管道下打 ✗ 等字符不再崩(全库硬化此前漏了本脚本)
     ap = argparse.ArgumentParser()
     ap.add_argument("--offset", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0)
@@ -146,7 +148,7 @@ def main():
     if args.fresh:
         if args.offset:
             print("✗ --fresh 只能配 offset=0(分块跑会把前块删掉)")
-            return
+            raise SystemExit(1)
         for f in (args.out_labels, args.out_corpus):
             if f and Path(f).exists():
                 Path(f).unlink()
