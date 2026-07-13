@@ -194,6 +194,9 @@ def main():
                     help="过拟合冒烟:N 条 utt 小集反复过拟合,验证【代码链路】(模型/损失/"
                          "tokenizer/数据管线)没 bug —— 判据 final_sem<0.05(关标签平滑跑,"
                          "开着平滑时逐 token CE 有 ~1.2 的下界,0.05 永远达不到)")
+    ap.add_argument("--eval-every", type=int, default=1000,
+                    help="每多少优化步跑一次 eval+存滚动 ckpt。这台卡 ~1600 步/epoch、"
+                         "每步几十秒 —— 3000 步一评是两天一评,太稀;1000 步≈半天一评")
     ap.add_argument("--smoke-steps", type=int, default=800,
                     help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
                          "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
@@ -323,7 +326,7 @@ def main():
         # 训练步前置守卫:越界在 forward 之前拦下,报错自带肇事数字(不吃 CUDA 异步栈的亏)
         "guards": {"vocab": pf["vocab"], "max_pos": max_tgt},
     }
-    eval_every = 3000
+    eval_every = args.eval_every
     if args.smoke:
         cfg.update({
             "max_steps": args.smoke_steps, "warmup_steps": 50, "max_epochs": 10 ** 6,

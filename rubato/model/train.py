@@ -307,6 +307,39 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     return metrics
 
 
+# ---------------------------------------------------------------- 断点续训(长跑生死线)
+
+def save_snapshot(path, model, opt, sched, step: int, epoch: int):
+    """全状态快照(模型+优化器+调度器+进度),原子替换写。为什么必须有:执行端 16GB 卡
+    余量 45MiB,数周长跑必然中途崩;只存模型权重的 ckpt 恢复不了 Adam 动量和 lr 进度,
+    崩一次等于从头再来。"""
+    import torch
+    from pathlib import Path as _P
+    path = _P(path)
+    tmp = path.with_suffix(".tmp")
+    torch.save({"model": model.state_dict(), "optimizer": opt.state_dict(),
+                "scheduler": sched.state_dict(), "step": step, "epoch": epoch}, tmp)
+    tmp.replace(path)                          # 原子:写一半崩不会毁掉上一份
+
+
+def load_snapshot(path, model, opt, sched):
+    """恢复快照 → (step, epoch);文件不存在/损坏 → None(从头开始,打印原因)。"""
+    import torch
+    from pathlib import Path as _P
+    path = _P(path)
+    if not path.exists():
+        return None
+    try:
+        snap = torch.load(str(path), map_location="cpu")
+        model.load_state_dict(snap["model"])
+        opt.load_state_dict(snap["optimizer"])     # state 张量随参数设备自动就位
+        sched.load_state_dict(snap["scheduler"])
+        return int(snap.get("step", 0)), int(snap.get("epoch", 0))
+    except Exception as e:
+        print(f"⚠ 快照恢复失败({type(e).__name__}: {e}),从头开始")
+        return None
+
+
 # ---------------------------------------------------------------- 主循环(R-S11.6/11.7)
 
 def train(model, datamodule, cfg: dict, tokenizer,
@@ -330,12 +363,25 @@ def train(model, datamodule, cfg: dict, tokenizer,
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     step = 0
+    start_epoch = 0
     max_steps = cfg.get("max_steps", 100000)
     log_every = int(cfg.get("log_every", 50))
+    save_every = int(cfg.get("save_every_steps", 200))
     ckpt_ring = []      # 滚动保留 6
     best_omr = float("inf")
     recent, recent_sem, recent_ts = [], [], []      # 近 50 步窗口(日志 + final_* 判据)
     report = {"stop_events": [], "eval_history": []}
+
+    # 断点续训:last.pt 存在且未禁用 → 全状态恢复(所在 epoch 从头重放,至多重复
+    # save_every-1 步的样本 —— 每 epoch 采样确定,重复无害,远好于从 step 0 重来)
+    last_pt = ckpt_dir / "last.pt"
+    if cfg.get("resume", True):
+        got = load_snapshot(last_pt, model, opt, sched)
+        if got:
+            step, start_epoch = got
+            print(f"续训:恢复 step={step} epoch={start_epoch}(优化器/调度器状态一并恢复)")
+            if step >= max_steps:
+                return _finish("max_steps_reached")
 
     def _finish(tag: str):
         report["final"] = tag
@@ -356,7 +402,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     model.train()
     opt.zero_grad()
     accum_sec = 0.0
-    for epoch in range(cfg.get("max_epochs", 1000)):
+    for epoch in range(start_epoch, cfg.get("max_epochs", 1000)):
         for batch in datamodule.train_batches(epoch):
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,
@@ -387,6 +433,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
                       f"lr={opt.param_groups[0]['lr']:.2e} audio={batch_sec:.0f}s", flush=True)
+            if step % save_every == 0:
+                save_snapshot(last_pt, model, opt, sched, step, epoch)
 
             # 评测 + 止损
             if step % eval_every_steps == 0:
