@@ -83,4 +83,33 @@ for e in range(6):
         break
 check("train_tiling_varies", changed)   # 开增强:时间戳随 epoch 平移 —— 背不下来是设计属性
 
+print("[5] 桶预算 = 补零后的真实音频秒(29.5GB OOM 回归):batch 实载音频 ≤ 预算")
+from rubato.data.dataset import RubatoDataModule
+lab5 = {f"t{i}": {"TAST": f"<|{i}.00|>ab <|{i}.50|>cd"} for i in range(20)}
+utt5 = [{"utt_id": k, "kind": "pdmx", "audio_path": str(wav), "dur_s": 1.0,
+         "dialects": ["TAST"], "split": "train", "domain": "synth"} for k in lab5]
+ds5 = RubatoDataset(utt5, lab5, Tok(), train=True)          # 增强开 → tiling 会膨胀到 ≤40s
+dm5 = RubatoDataModule(ds5, nasap_val=[], maestro_val=[], max_batch_sec=60.0)
+budget_ok = True
+loaded_ok = True
+n_batches = 0
+for batch in dm5.train_batches(epoch=1):
+    n_batches += 1
+    actual_sec = float(batch["audio_lens"].sum()) / 16000.0
+    if actual_sec > 60.0 + 0.5:
+        loaded_ok = False
+        break
+check("post_tiling_budget_respected", loaded_ok, actual_sec)
+check("tiling_inflates_batches", n_batches >= 3, n_batches)   # 旧账法 20×1s=1 批;膨胀后必须分多批
+
+print("[6] B×Lmax² 预算:长文本批被限条数(短音频长文本从这个口子爆显存)")
+from rubato.model.train import bucket_batches
+long_samples = [{"utt_id": f"u{i}", "dialect": "AMT", "dur_s": 2.0, "tok": 1024}
+                for i in range(30)]
+bs = bucket_batches(long_samples, max_batch_sec=600.0, max_attn_sq=8 * 1024 * 1024)
+check("attn_cap_bites", all(len(b) <= 8 for b in bs), [len(b) for b in bs])
+check("attn_cap_all_kept", sum(len(b) for b in bs) == 30)
+bs2 = bucket_batches(long_samples, max_batch_sec=600.0, max_attn_sq=None)
+check("attn_cap_optional", len(bs2) == 1, len(bs2))           # 不传 = 旧行为
+
 print(f"\n全部通过: {PASS} 项")

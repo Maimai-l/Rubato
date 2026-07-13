@@ -246,6 +246,7 @@ class RubatoDataset:
         # "背不下来"是增强的设计属性,不是收敛失败。全量训练保持开启(论文 R-S9.4/R-S11.3)。
         self.augment = bool(train) if augment is None else bool(augment)
         self.len_filter_report: dict = {}
+        self._tok_len: dict = {}
         self.last_mix_report: dict = {}         # 每 epoch 的池大小/配额/过采样倍数,给日志看
         self._len_ok = self._build_len_filter() if max_target_len else None
         self._plan: list[tuple[str, str]] = []
@@ -259,6 +260,7 @@ class RubatoDataset:
         长度按确定性切分量;训练期 alpha 采样可能更长,__getitem__ 有确定性回退兜底。"""
         ok: set = set()
         drop: dict = {}
+        self._tok_len: dict = {}
         for uid, u in self.utts.items():
             lab = self.labels.get(uid, {})
             for d in u.get("dialects", []):
@@ -268,12 +270,18 @@ class RubatoDataset:
                 n = len(self.tok.encode(t, out_type=str)) + len(DIALECT_PROMPT[d]) + 2  # +domain+eot
                 if n <= self.max_target_len:
                     ok.add((uid, d))
+                    self._tok_len[(uid, d)] = n
                 else:
                     drop[d] = drop.get(d, 0) + 1
         self.len_filter_report = {"max_target_len": self.max_target_len,
                                   "dropped_by_dialect": drop,
                                   "kept_pairs": len(ok)}
         return ok
+
+    def tok_len(self, uid: str, dialect: str) -> int:
+        """(utt, dialect) 的确定性目标 token 数(_build_len_filter 顺带记的);未知返回 0。
+        供 bucketing 的 B×Lmax² 显存预算用。"""
+        return self._tok_len.get((uid, dialect), 0)
 
     def _available(self) -> dict:
         """{utt_id: [有标签的 dialect]}(标签为 None / 超长的 dialect 不可用)。"""
@@ -342,20 +350,31 @@ class RubatoDataModule:
     """
     def __init__(self, train_ds: RubatoDataset, nasap_val: list[dict],
                  maestro_val: list[dict], pad_id: int = 0,
-                 max_batch_sec: float = 560.0, labels: dict | None = None):
+                 max_batch_sec: float = 560.0, labels: dict | None = None,
+                 max_attn_sq: int = 8 * 1024 * 1024):
         self.train_ds = train_ds
         self.nasap_val = nasap_val          # [utt dict](infer_a2s 用,audio 按需加载)
         self.maestro_val = maestro_val      # [utt dict](infer_amt/note_f1 用)
         self.labels = labels if labels is not None else getattr(train_ds, "labels", {})
         self.pad_id = pad_id
         self.max_batch_sec = max_batch_sec
+        self.max_attn_sq = max_attn_sq      # B×Lmax² 预算(≈8 条满长 1024 文本/批)
 
     def train_batches(self, epoch: int):
         self.train_ds.set_epoch(epoch)
         meta = self.train_ds.sample_meta()
         idx_of = {(u, d): i for i, (u, d) in enumerate(self.train_ds._plan)}
-        samples = [{"utt_id": u, "dialect": d, "dur_s": s} for u, d, s in meta]
-        batches = bucket_batches(samples, self.max_batch_sec)
+        # 【显存正确性,执行端 29.5GB OOM 实测】tiling 会把音频前置补零到 t0+dur(最长 40s):
+        # 按补零【前】时长记账,2s 样本装 30 个、取样时各自膨胀到 40s → 实际 batch 上千秒。
+        # tiling_offset 是 (utt, epoch) 确定性哈希 —— 这里预算用的 t0 与 __getitem__ 取到的
+        # 严格同值,预算 = 真实进 GPU 的音频秒数。tok 喂 B×Lmax² 预算(短音频长文本的批)。
+        samples = []
+        for u, d, dur in meta:
+            t0 = tiling_offset(d, dur, u, epoch, self.train_ds.seed) \
+                if (self.train_ds.train and self.train_ds.augment) else 0.0
+            samples.append({"utt_id": u, "dialect": d, "dur_s": dur + t0,
+                            "tok": self.train_ds.tok_len(u, d)})
+        batches = bucket_batches(samples, self.max_batch_sec, self.max_attn_sq)
         # bucket_batches 按时长排序装桶,返回顺序恒为短→长。若照此逐 epoch 产出,
         # 等于固定的长度课程且跨 epoch 零随机 —— 会给优化引入方向性偏置。
         # 桶【内部】保持长度同质(算力效率),只把桶的【顺序】按 epoch 确定性打乱。

@@ -68,20 +68,34 @@ def build_optimizer(model, cfg: dict):
 
 # ---------------------------------------------------------------- 动态 bucketing(R-S11.4)
 
-def bucket_batches(samples: list[dict], max_batch_sec: float = 560.0):
+def bucket_batches(samples: list[dict], max_batch_sec: float = 560.0,
+                   max_attn_sq: int | None = None):
     """
     R-S11.4:动态 bucketing,每 batch 音频总时长 ≤max_batch_sec。
     samples 按时长排序后贪心装桶。返回 [[sample,...], ...]。
+
+    【必须喂"补零后"的时长】(执行端 29.5GB OOM 实测):tiling 会把音频前置补零到
+    t0+dur(最长 40s),按补零前时长记账会让 2s 样本装 30 个、实际膨胀到上千秒。
+    调用方(train_batches)负责把 dur_s 换算成有效时长。
+    max_attn_sq:第二预算 B×Lmax²(decoder 自注意力显存 ∝ 批内条数×最长文本²;
+    短音频长文本的批会从这个口子爆)。sample 带 "tok"=目标 token 数时生效。
     """
     ordered = sorted(samples, key=lambda s: s.get("dur_s", 0))
-    batches, cur, cur_sec = [], [], 0.0
+    batches, cur, cur_sec, cur_lmax = [], [], 0.0, 0
     for s in ordered:
         d = s.get("dur_s", 0)
-        if cur and cur_sec + d > max_batch_sec:
+        L = int(s.get("tok", 0) or 0)
+        new_lmax = max(cur_lmax, L)
+        over_sec = cur and cur_sec + d > max_batch_sec
+        over_attn = (cur and max_attn_sq
+                     and (len(cur) + 1) * new_lmax * new_lmax > max_attn_sq)
+        if over_sec or over_attn:
             batches.append(cur)
-            cur, cur_sec = [], 0.0
+            cur, cur_sec, cur_lmax = [], 0.0, 0
+            new_lmax = L
         cur.append(s)
         cur_sec += d
+        cur_lmax = new_lmax
     if cur:
         batches.append(cur)
     return batches
