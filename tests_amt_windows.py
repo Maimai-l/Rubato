@@ -71,17 +71,67 @@ csvp = tmp / "maestro.csv"
 csvp.write_text("midi_filename,audio_filename,split\n"
                 "2018/perf1.midi,2018/perf1.wav,train\n", encoding="utf-8")
 import scripts.s6_amt_windows as s6w
+
+# 真 spm(小词表):token 把关必须用真 tokenizer 数,不再估(估算翻车两次的回归)
+import sentencepiece as sp_train
+from rubato.intermo.core import perf_to_amt
+corp = tmp / "amt_corpus.txt"
+with open(corp, "w", encoding="utf-8") as f:
+    for k in range(40):
+        ns = [{"pitch": 40 + (i * (k + 3)) % 48, "on": i * 0.11, "off": i * 0.11 + 0.3,
+               "vel": 40 + (i + k) % 50} for i in range(50)]
+        f.write(perf_to_amt(ns, [])[0] + "\n")
+sp_train.SentencePieceTrainer.train(
+    input=str(corp), model_prefix=str(tmp / "sp"), vocab_size=120,
+    model_type="unigram", character_coverage=1.0)
+spm_path = str(tmp / "sp.model")
+
 out = tmp / "win.jsonl"
-rc = s6w.main(["--zip", str(zpath), "--csv", str(csvp), "--out", str(out)])
+rc = s6w.main(["--zip", str(zpath), "--csv", str(csvp), "--out", str(out),
+               "--spm", spm_path])
 check("s6w_rc0", rc == 0)
 rows = [json.loads(l) for l in open(out, encoding="utf-8") if l.strip()]
 check("windows_made", len(rows) >= 2, len(rows))
 check("amt_nonempty", all(r["AMT"] for r in rows), rows[:1])
 check("win_bounds_valid", all(0 <= r["win"][0] < r["win"][1] for r in rows), rows[:1])
-check("win_len_in_range", all(5.0 <= r["win"][1] - r["win"][0] <= 40.0 for r in rows),
+check("win_len_in_range", all(2.0 <= r["win"][1] - r["win"][0] <= 40.0 for r in rows),
       [(r["win"][1] - r["win"][0]) for r in rows])
 check("utt_ids_unique", len({r["utt_id"] for r in rows}) == len(rows))
-check("consecutive_windows", all(abs(rows[i + 1]["win"][0] - rows[i]["win"][1]) < 1e-6
-                                 for i in range(len(rows) - 1)), [r["win"] for r in rows])
+check("ntok_recorded", all(r.get("n_tok", 0) > 0 and r["n_tok"] <= 950 for r in rows),
+      [r.get("n_tok") for r in rows])
+
+print("[4] 密集演奏 + 小 token 预算:逐窗实测把关,超算的窗自动对半再切,产出全部 ≤ 预算")
+mid2 = mido.MidiFile(ticks_per_beat=480)
+tr2 = mido.MidiTrack(); mid2.tracks.append(tr2)
+tr2.append(mido.MetaMessage("set_tempo", tempo=500000, time=0))    # 120bpm
+for i in range(600):                                               # 5 音/秒 × 120s,持续密集
+    tr2.append(mido.Message("note_on", note=40 + (i % 40), velocity=70, time=0 if i == 0 else 192))
+    tr2.append(mido.Message("note_off", note=40 + (i % 40), velocity=0, time=144))
+    tr2.append(mido.Message("note_on", note=40 + (i % 40), velocity=0, time=0))
+buf2 = io.BytesIO(); mid2.save(file=buf2)
+zpath2 = tmp / "maestro2.zip"
+with zipfile.ZipFile(zpath2, "w") as z:
+    z.writestr("maestro-v3.0.0/2018/dense.midi", buf2.getvalue())
+csvp2 = tmp / "maestro2.csv"
+csvp2.write_text("midi_filename,audio_filename,split\n"
+                 "2018/dense.midi,2018/dense.wav,train\n", encoding="utf-8")
+out2 = tmp / "win2.jsonl"
+rc2 = s6w.main(["--zip", str(zpath2), "--csv", str(csvp2), "--out", str(out2),
+                "--spm", spm_path, "--token-budget", "400"])
+check("dense_rc0", rc2 == 0)
+rows2 = [json.loads(l) for l in open(out2, encoding="utf-8") if l.strip()]
+check("dense_windows_many", len(rows2) >= 8, len(rows2))
+check("dense_all_within_budget", all(r["n_tok"] <= 400 for r in rows2),
+      sorted(r["n_tok"] for r in rows2)[-3:])
+covered2 = sum(r["n_notes"] for r in rows2)
+check("dense_coverage", covered2 >= 0.85 * 600, covered2)   # 切短≠丢内容(容许边界少量)
+# 对照:同一密集流不限预算 → 单窗 token 远超 400(证明把关真在工作)
+from rubato.data.maestro import midi_to_events
+import zipfile as _z
+notes_d, pedal_d = midi_to_events(_z.ZipFile(zpath2).read("maestro-v3.0.0/2018/dense.midi"))
+from rubato.data.segment import amt_windows_token_budget
+wins_nb, _ = amt_windows_token_budget(notes_d, pedal_d, s6w._count_tokens_factory(spm_path),
+                                      token_budget=10 ** 9, max_notes=10 ** 9)
+check("no_budget_exceeds", max(w[4] for w in wins_nb) > 400, max(w[4] for w in wins_nb))
 
 print(f"\n全部通过: {PASS} 项")

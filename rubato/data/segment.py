@@ -178,6 +178,69 @@ def _pedal_at(pedal, t: float) -> bool:
     return state
 
 
+# ---------------------------------------------------------------- AMT 切窗·token 实测把关
+
+def amt_windows_token_budget(notes: list[dict], pedal: list[tuple[float, bool]],
+                             count_tokens, token_budget: int = 950,
+                             target_lo: float = 12.0, target_hi: float = 25.0,
+                             max_notes: int = 100):
+    """
+    切窗 + 逐窗【实测 token 数】把关:超预算的窗在乐句边界对半再切,切不动才丢。
+    count_tokens(text)->int 必须喂真 tokenizer —— 每音符 token 数依赖序列化细节与 spm
+    合并,【估算已经翻车两次】(不设预算 → 78% 超长;按"4-5 tok/音符"设 160 音符预算 →
+    实测 ≥5.1 起步、spm 细分后 6-9,窗数翻倍丢弃也翻倍)。从此只测不估。
+    返回 (wins, dropped):wins = [(win_notes, win_pedal, (t0,t1), amt_text, n_tok)],
+    每个 text 已过校验、n_tok ≤ token_budget【由构造保证】。
+    """
+    out: list = []
+    dropped = 0
+    stack = list(reversed(segment_amt(notes, pedal, target_lo, target_hi,
+                                      max_notes=max_notes)))
+    guard = 0
+    while stack and guard < 10000:
+        guard += 1
+        win_notes, win_pedal, (t0, t1) = stack.pop()
+        labels, _fails = make_amt_label(win_notes, win_pedal)
+        text = labels.get("AMT")
+        if not text:
+            dropped += 1
+            continue
+        n_tok = int(count_tokens(text))
+        if n_tok <= token_budget:
+            out.append((win_notes, win_pedal, (t0, t1), text, n_tok))
+            continue
+        # 超预算 → 先试乐句边界二分(静音+踏板抬起处);找不到或窗已太小,按音符索引
+        # 硬对半(牺牲边界美观,保内容 —— 触底即丢曾在极端密度下丢掉 2/3 音符)。
+        subs: list = []
+        if (t1 - t0) >= 1.5 and len(win_notes) >= 8:
+            abs_notes = [dict(n, on=n["on"] + t0, off=n["off"] + t0) for n in win_notes]
+            abs_pedal = [(s + t0, d) for s, d in win_pedal]
+            half = (t1 - t0) / 2.0
+            subs = segment_amt(abs_notes, abs_pedal,
+                               target_lo=max(1.0, half * 0.5), target_hi=max(1.6, half),
+                               max_notes=max(8, len(win_notes) // 2))
+        if len(subs) > 1:
+            for sub in reversed(subs):      # (a,b) 已是绝对坐标(输入就是绝对时间)
+                stack.append(sub)
+            continue
+        if len(win_notes) < 4:
+            dropped += 1                    # 4 个音都装不下 = 病态(预算过小),丢弃记账
+            continue
+        onsets_rel = sorted(n["on"] for n in win_notes)
+        tmid = onsets_rel[len(onsets_rel) // 2]
+        left = [dict(n, off=min(n["off"], tmid)) for n in win_notes if n["on"] < tmid]
+        right = [dict(n, on=n["on"] - tmid, off=n["off"] - tmid)
+                 for n in win_notes if n["on"] >= tmid]
+        if not left or not right:
+            dropped += 1
+            continue
+        lp = [(s, d) for s, d in win_pedal if s < tmid]
+        rp = [(s - tmid, d) for s, d in win_pedal if s >= tmid]
+        stack.append((right, rp, (t0 + tmid, t1)))
+        stack.append((left, lp, (t0, t0 + tmid)))
+    return out, dropped
+
+
 # ---------------------------------------------------------------- 标签生成(R-S8.3/8.4)
 
 _DIALECTS_BY_KIND = {

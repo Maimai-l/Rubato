@@ -194,6 +194,9 @@ def main():
                     help="过拟合冒烟:N 条 utt 小集反复过拟合,验证【代码链路】(模型/损失/"
                          "tokenizer/数据管线)没 bug —— 判据 final_sem<0.05(关标签平滑跑,"
                          "开着平滑时逐 token CE 有 ~1.2 的下界,0.05 永远达不到)")
+    ap.add_argument("--max-batch-sec", type=float, default=60.0,
+                    help="每 batch 音频秒上限。执行端 16GB 卡实测:150s OOM、100s 只剩 45MiB、"
+                         "60s 稳 —— 之前是执行端本地 patch,每次 pull 担心被覆盖,现在是正式参数")
     ap.add_argument("--eval-every", type=int, default=1000,
                     help="每多少优化步跑一次 eval+存滚动 ckpt。这台卡 ~1600 步/epoch、"
                          "每步几十秒 —— 3000 步一评是两天一评,太稀;1000 步≈半天一评")
@@ -316,7 +319,8 @@ def main():
     if _dropped > 0.10 * max(lf.get("kept_pairs", 1), 1):
         print("  ⚠ 超长丢弃 >10% —— 值得扩位置表(resize position embedding)找回,贴回给规划端")
     # labels 全量传入(不只 train)—— eval hook 的参照(AMT ref/A2S NED)按 val/test utt_id 查
-    dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels, max_batch_sec=60)
+    dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels,
+                          max_batch_sec=args.max_batch_sec)
     cfg = {
         "lr_encoder": 1e-4 if not args.from_scratch else 5e-4,   # 从头训:统一 lr
         "lr_decoder": 5e-4,

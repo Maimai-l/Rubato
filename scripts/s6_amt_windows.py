@@ -28,35 +28,45 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import harden_stdout
 from rubato.data.maestro import midi_to_events
-from rubato.data.segment import segment_amt, make_amt_label
+from rubato.data.segment import amt_windows_token_budget
 from rubato.ops import auto_map
 from scripts.gen_amt_labels import load_csv_rows, resolve_zip_member
 
 _ZF: dict = {}      # 每个 worker 进程各持一个 zip 句柄(懒开,进程生命周期内复用)
 
 
+_SPM: dict = {}     # 每 worker 进程各持一个 spm(懒加载)
+
+
+def _count_tokens_factory(spm_path: str):
+    def count(text: str) -> int:
+        sp = _SPM.get(spm_path)
+        if sp is None:
+            import sentencepiece as spm
+            sp = _SPM[spm_path] = spm.SentencePieceProcessor(model_file=spm_path)
+        return len(sp.encode(text))
+    return count
+
+
 def _win_task(t):
-    """并行 worker:一场演奏 → MIDI 解析 → 12–25s 切窗 → AMT 校验标签行列表。
-    每场 ~0.5-2s 纯 CPU × 1276 场 —— 并行后分钟级。返回 (rows, n_windows, n_fail) 。"""
-    zpath, member, midi_filename, split, lo, hi, max_notes = t
+    """并行 worker:一场演奏 → MIDI 解析 → 切窗 + 逐窗真 tokenizer 实测 token 把关。
+    每场 ~0.5-2s 纯 CPU × 1276 场 —— 并行后分钟级。返回 (rows, n_windows, n_fail)。"""
+    zpath, member, midi_filename, split, lo, hi, max_notes, spm_path, budget = t
     import zipfile as _zip
     zf = _ZF.get(zpath)
     if zf is None:
         zf = _ZF[zpath] = _zip.ZipFile(zpath)
     notes, pedal = midi_to_events(zf.read(member))
     base = _slug(midi_filename)
-    rows, n_win, n_fail = [], 0, 0
-    for wi, (win_notes, win_pedal, (w0, w1)) in enumerate(
-            segment_amt(notes, pedal, target_lo=lo, target_hi=hi, max_notes=max_notes)):
-        n_win += 1
-        labels, _fails = make_amt_label(win_notes, win_pedal)
-        if not labels.get("AMT"):
-            n_fail += 1
-            continue
+    wins, n_fail = amt_windows_token_budget(
+        notes, pedal, _count_tokens_factory(spm_path), token_budget=budget,
+        target_lo=lo, target_hi=hi, max_notes=max_notes)
+    rows = []
+    for wi, (win_notes, _wp, (w0, w1), text, n_tok) in enumerate(wins):
         rows.append({"utt_id": f"maestro_{base}_{wi:03d}", "midi_file": midi_filename,
-                     "win": [round(w0, 3), round(w1, 3)], "AMT": labels["AMT"],
-                     "split": split, "n_notes": len(win_notes)})
-    return rows, n_win, n_fail
+                     "win": [round(w0, 3), round(w1, 3)], "AMT": text,
+                     "split": split, "n_notes": len(win_notes), "n_tok": n_tok})
+    return rows, len(wins) + n_fail, n_fail
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
 
@@ -73,9 +83,13 @@ def main(argv=None):
     ap.add_argument("--out", default=str(ROOT / "work" / "maestro_amt_windows.jsonl"))
     ap.add_argument("--target-lo", type=float, default=12.0)
     ap.add_argument("--target-hi", type=float, default=25.0)
-    ap.add_argument("--max-notes", type=int, default=160,
-                    help="每窗音符预算(AMT ≈4-5 tok/音符,160 → 目标序列稳进 decoder 1024 位置表;"
-                         "全量实测不预算时 78%% 的窗超限被丢)")
+    ap.add_argument("--max-notes", type=int, default=100,
+                    help="预切的音符预算(粗筛,减少二分次数);真正的门是 --token-budget 实测")
+    ap.add_argument("--spm", default=str(ROOT / "work" / "rubato_spm.model"),
+                    help="真 tokenizer —— 逐窗实测 token 数把关(估算翻车两次:不设预算 78%% 超长,"
+                         "按 4-5 tok/音符设 160 音符预算后实测 6-9,丢弃反而翻倍)")
+    ap.add_argument("--token-budget", type=int, default=950,
+                    help="每窗 token 上限(decoder 位置表 1024 − prompt/eot/采样余量)")
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 场演奏(冒烟)")
     ap.add_argument("--workers", type=int, default=0, help="0=自动(核数,≤16)")
     args = ap.parse_args(argv)
@@ -93,7 +107,8 @@ def main(argv=None):
             st["not_found"] += 1
             continue
         tasks.append((args.zip, member, row["midi_filename"], row.get("split"),
-                      args.target_lo, args.target_hi, args.max_notes))
+                      args.target_lo, args.target_hi, args.max_notes,
+                      args.spm, args.token_budget))
     zf.close()
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
