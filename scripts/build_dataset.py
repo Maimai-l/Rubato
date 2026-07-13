@@ -316,7 +316,7 @@ def main():
     if _dropped > 0.10 * max(lf.get("kept_pairs", 1), 1):
         print("  ⚠ 超长丢弃 >10% —— 值得扩位置表(resize position embedding)找回,贴回给规划端")
     # labels 全量传入(不只 train)—— eval hook 的参照(AMT ref/A2S NED)按 val/test utt_id 查
-    dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels)
+    dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels, max_batch_sec=60)
     cfg = {
         "lr_encoder": 1e-4 if not args.from_scratch else 5e-4,   # 从头训:统一 lr
         "lr_decoder": 5e-4,
