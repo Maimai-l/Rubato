@@ -481,7 +481,14 @@ def train(model, datamodule, cfg: dict, tokenizer,
 
                 # 处理止损动作
                 act = action["action"]
-                if act in ("pause_unparseable", "stop_bad_labels"):
+                grace = int(cfg.get("parseable_grace_steps", 4000))
+                if act == "pause_unparseable" and step < grace:
+                    # 宽限期:全新初始化的词表头早期产出本就不可解析,R-S11.7 的 <80% 规则
+                    # 是给成熟模型抓序列化损坏的 —— 早期触发只记录不停训(执行端 step1000 实测
+                    # 停在解码胶水+早期双因素上,修好胶水也可能再停,故有此闸)
+                    print(f"  (宽限期 step {step}<{grace}:parseable="
+                          f"{m['parseable_rate']:.2f} 仅记录,不停训)", flush=True)
+                elif act in ("pause_unparseable", "stop_bad_labels"):
                     return _finish(f"stopped:{act}:{action['reason']}")
                 if act == "converged":
                     return _finish(f"converged:{action['reason']}")

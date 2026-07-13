@@ -142,6 +142,72 @@ def validate_a2s(a2s_text: str) -> list[str]:
         return [f"parse_error:{type(e).__name__}"]
 
 
+# ---------------------------------------------------------------- 自研自回归解码(换表后唯一路径)
+
+def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
+                          max_new: int = 900) -> str:
+    """
+    贪心解码,只依赖【训练验证过的同一个 forward】。为什么不用 NeMo transcribe/generate
+    (执行端 step1000 eval 实测 parseable=0):词表已换成自有 8000 spm、forward 直喂 id,
+    而 transcribe 走 NeMo 内部 aggregate tokenizer + canary prompt 表 —— 那套词表已不存在,
+    签名也不兼容。
+    路径:preprocessor+forward 跑一次(编码器只算一次,拿返回的 enc_states/enc_mask)→
+    每步下一 token 用内部模块快路径(transf_decoder+log_softmax);快路径首次用 forward
+    的 log_probs【自校验】,不一致自动退慢路径(每步全量 forward,正确但慢,打印警告)——
+    对 NeMo 内部签名零盲猜。
+    """
+    import torch
+    from rubato.model.train import resolve_log_probs
+    device = next(model.parameters()).device
+    ids = [tokenizer.piece_to_id(p) for p in prompt_pieces]
+    n_prompt = len(ids)
+    eot = tokenizer.piece_to_id("<|eot|>")
+    audio_t = torch.as_tensor(audio, dtype=torch.float32, device=device).reshape(1, -1)
+    len_t = torch.tensor([audio_t.shape[1]], device=device)
+    processed, plen = model.preprocessor(input_signal=audio_t, length=len_t)
+
+    def fwd(cur_ids):
+        t = torch.tensor([cur_ids], dtype=torch.long, device=device)
+        tl = torch.tensor([len(cur_ids)], device=device)
+        return model.forward(processed_signal=processed, processed_signal_length=plen,
+                             transcript=t, transcript_length=tl)
+
+    with torch.no_grad():
+        out0 = fwd(ids)
+        lp = resolve_log_probs(out0)
+        enc_states = out0[2] if isinstance(out0, (tuple, list)) and len(out0) >= 4 else None
+        enc_mask = out0[3] if enc_states is not None else None
+
+        fast = None
+        if enc_states is not None and hasattr(model, "transf_decoder") \
+                and hasattr(model, "log_softmax"):
+            def fast_lp(cur_ids):
+                t = torch.tensor([cur_ids], dtype=torch.long, device=device)
+                dec = model.transf_decoder(input_ids=t, decoder_mask=torch.ones_like(t),
+                                           encoder_embeddings=enc_states,
+                                           encoder_mask=enc_mask)
+                o = model.log_softmax(hidden_states=dec)
+                return o[0] if isinstance(o, (tuple, list)) else o
+            try:
+                cand = fast_lp(ids)
+                if cand.shape == lp.shape and torch.allclose(cand, lp, atol=1e-3):
+                    fast = fast_lp          # 与训练 forward 逐位一致 → 采用
+            except Exception:
+                fast = None
+        if fast is None:
+            print("⚠ 解码快路径不可用(内部模块与 forward 不一致)→ 退全量 forward 慢路径"
+                  "(正确但慢;把本行和 NeMo 版本贴回规划端)", flush=True)
+
+        for _ in range(max_new):
+            nxt = int(lp[0, -1].argmax())
+            if nxt == eot or len(ids) >= 1023:
+                break
+            ids.append(nxt)
+            lp = fast(ids) if fast is not None else resolve_log_probs(fwd(ids))
+
+    return tokenizer.decode(ids[n_prompt:]).strip()
+
+
 # ---------------------------------------------------------------- GPU 层:单窗解码(R-S12.2)
 
 def single_window_infer(model, audio_window, sr: int, tokenizer,
@@ -165,6 +231,11 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
     prompt = build_tast_prompt()
 
     def _decode(beam):
+        # 真 NeMo 模型(有 preprocessor+forward)走自研解码 —— transcribe/generate 与换表后
+        # 的模型不兼容(内部 tokenizer 已被绕开);beam 参数在 v1 忽略(贪心,监控够用,
+        # 论文终评的 beam=4 等自研 beam 实现)。stub 分支保留给沙盒测试。
+        if hasattr(model, "preprocessor") and hasattr(model, "forward"):
+            return autoregressive_decode(model, audio_window, tokenizer, prompt)
         if hasattr(model, "generate"):
             out = model.generate(audio_window, prompt=prompt, num_beams=beam)
             return out if isinstance(out, str) else tokenizer.decode(out)
@@ -277,6 +348,8 @@ def infer_amt(model, audio, tokenizer, sr: int = 16000, beam_size: int = 4) -> s
         return ""
     prompt = build_amt_prompt()
     try:
+        if hasattr(model, "preprocessor") and hasattr(model, "forward"):
+            return autoregressive_decode(model, audio, tokenizer, prompt)
         if hasattr(model, "generate"):
             out = model.generate(audio, prompt=prompt, num_beams=beam_size)
             return out if isinstance(out, str) else tokenizer.decode(out)
