@@ -336,7 +336,7 @@ def main():
         eval_every = 10 ** 9                       # 冒烟不跑 eval(生成路径另测)
         dm.max_batch_sec = 120                     # 冒烟小批:16GB 卡上先别一口 560s 音频
     else:
-        dm.max_batch_sec = 100                     # 16GB 卡:150s 跑 649 步 OOM,再降到 100s
+        dm.max_batch_sec = 60                      # 16GB 卡:100s 仍 OOM(首 batch 145s 单样本撑爆),狠降到 60s
     if args.cpu:
         cfg.update({"device": "cpu", "max_steps": 3, "grad_accum_to_audio_sec": 30,
                     "log_every": 1, "precision": ""})
