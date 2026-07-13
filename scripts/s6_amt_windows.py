@@ -38,7 +38,7 @@ _ZF: dict = {}      # 每个 worker 进程各持一个 zip 句柄(懒开,进程�
 def _win_task(t):
     """并行 worker:一场演奏 → MIDI 解析 → 12–25s 切窗 → AMT 校验标签行列表。
     每场 ~0.5-2s 纯 CPU × 1276 场 —— 并行后分钟级。返回 (rows, n_windows, n_fail) 。"""
-    zpath, member, midi_filename, split, lo, hi = t
+    zpath, member, midi_filename, split, lo, hi, max_notes = t
     import zipfile as _zip
     zf = _ZF.get(zpath)
     if zf is None:
@@ -47,7 +47,7 @@ def _win_task(t):
     base = _slug(midi_filename)
     rows, n_win, n_fail = [], 0, 0
     for wi, (win_notes, win_pedal, (w0, w1)) in enumerate(
-            segment_amt(notes, pedal, target_lo=lo, target_hi=hi)):
+            segment_amt(notes, pedal, target_lo=lo, target_hi=hi, max_notes=max_notes)):
         n_win += 1
         labels, _fails = make_amt_label(win_notes, win_pedal)
         if not labels.get("AMT"):
@@ -73,6 +73,9 @@ def main(argv=None):
     ap.add_argument("--out", default=str(ROOT / "work" / "maestro_amt_windows.jsonl"))
     ap.add_argument("--target-lo", type=float, default=12.0)
     ap.add_argument("--target-hi", type=float, default=25.0)
+    ap.add_argument("--max-notes", type=int, default=160,
+                    help="每窗音符预算(AMT ≈4-5 tok/音符,160 → 目标序列稳进 decoder 1024 位置表;"
+                         "全量实测不预算时 78%% 的窗超限被丢)")
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 场演奏(冒烟)")
     ap.add_argument("--workers", type=int, default=0, help="0=自动(核数,≤16)")
     args = ap.parse_args(argv)
@@ -90,7 +93,7 @@ def main(argv=None):
             st["not_found"] += 1
             continue
         tasks.append((args.zip, member, row["midi_filename"], row.get("split"),
-                      args.target_lo, args.target_hi))
+                      args.target_lo, args.target_hi, args.max_notes))
     zf.close()
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

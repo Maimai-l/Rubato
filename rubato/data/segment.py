@@ -97,25 +97,46 @@ def segment_score(ir: ScoreIR, min_measures: int = 4, max_measures: int | None =
 
 def segment_amt(notes: list[dict], pedal: list[tuple[float, bool]],
                 target_lo: float = 12.0, target_hi: float = 25.0,
-                search: float = 1.0, window_max: float = 40.0):
+                search: float = 1.0, window_max: float = 40.0,
+                max_notes: int | None = None):
     """
     R-S6.3:AMT 目标窗长 U[lo,hi];切点在候选 ±search 内找"无发声音符且踏板抬起"时刻。
     找不到则硬切并丢跨界音符。返回 [(win_notes, win_pedal, (t0,t1)), ...]。
 
     修复问题#12:win_notes / win_pedal 的时间【平移为窗内相对时间】(减 t0),
     使 perf_to_amt 的 10ms bin 落在 0-window_max 有效区间,不被钳到末 bin。
+
+    max_notes(音符预算,全量装配实测逼出来的):AMT 文本逐音符 ≈4-5 token,按时长切窗
+    没管 token 预算 —— 密集炫技段 12-25s 窗 300+ 音符 = 1300+ token,超 decoder 位置表
+    1024 行,78% 的 MAESTRO 窗被超长过滤丢弃(AMT 池只剩稀疏慢段,占混比 0.30 的方言废掉)。
+    预算线:窗内音符将超 max_notes 时把候选切点收缩到预算音符处(下限 2s),密集段自动
+    出短窗 —— 窗变多、每窗必进 1024。
     """
     if not notes:
         return []
+    import bisect
     end = max(n["off"] for n in notes)
+    onsets = sorted(n["on"] for n in notes)
     wins = []
     t0 = 0.0
     target = (target_lo + target_hi) / 2.0
     while t0 < end - 1e-6:
         cand = t0 + target
-        cut = _find_cut(notes, pedal, cand, search, t0 + target_lo, t0 + target_hi)
+        lo_t, hi_t = t0 + target_lo, t0 + target_hi
+        budget_cut = None
+        if max_notes:
+            i0 = bisect.bisect_left(onsets, t0)
+            if i0 + max_notes < len(onsets):
+                t_cap = onsets[i0 + max_notes]       # 第 max_notes+1 个音的时刻
+                if t_cap < cand:
+                    budget_cut = max(t0 + 2.0, t_cap)
+                    cand = budget_cut
+                    lo_t = max(t0 + 1.0, cand - search)   # 允许在预算点附近找静音切点
+                    hi_t = cand + search
+        cut = _find_cut(notes, pedal, cand, search, lo_t, hi_t)
         if cut is None or cut <= t0:
-            cut = min(t0 + window_max, end)          # 硬切
+            # 硬切:预算收缩过就切在预算点(宁可丢跨界音,不出超长窗);否则按老规则
+            cut = min(budget_cut if budget_cut is not None else t0 + window_max, end)
         cut = min(cut, end)
         win_notes = [n for n in notes if n["on"] >= t0 - 1e-9 and n["on"] < cut - 1e-9]
         # 相对时间平移(问题#12):窗内所有事件减 t0

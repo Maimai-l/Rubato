@@ -120,6 +120,23 @@ for wn, wp, rng in wins:
     check(f"amt_label_valid_{rng[0]:.0f}", "AMT" in lab, f)
     break
 
+print("[7b] AMT 音符预算:密集段自动切短窗,每窗 ≤ 预算+少量切点余量(修 78% 超长丢弃)")
+dense = [{"pitch": 60 + i % 24, "on": i * 0.05, "off": i * 0.05 + 0.04, "vel": 80}
+         for i in range(900)]                     # 20 音/秒 × 45s,炫技密度
+wins_b = segment_amt(dense, [(0.0, False)], target_lo=12, target_hi=25, max_notes=100)
+check("budget_windows_exist", len(wins_b) >= 6, len(wins_b))
+for wn, _, (t0, t1) in wins_b:
+    check(f"budget_le_{t0:.1f}", len(wn) <= 100 + 25, len(wn))   # 切点在预算点 ±search 内找
+    break
+check("budget_all_windows", all(len(wn) <= 125 for wn, _, _ in wins_b),
+      [len(wn) for wn, _, _ in wins_b])
+covered = sum(len(wn) for wn, _, _ in wins_b)
+check("budget_coverage", covered >= 0.95 * len(dense), covered)  # 切短≠丢内容
+# 无预算(旧行为)对照:同一密集流,窗内音符远超预算
+wins_nb = segment_amt(dense, [(0.0, False)], target_lo=12, target_hi=25)
+check("no_budget_dense", max(len(wn) for wn, _, _ in wins_nb) > 200,
+      max(len(wn) for wn, _, _ in wins_nb))
+
 print("[8] 泄漏终检")
 utts = [
     {"utt_id": "u1", "split": "train", "work_key": "chopin|op10", "maestro_id": None, "dup_cluster": 1},
