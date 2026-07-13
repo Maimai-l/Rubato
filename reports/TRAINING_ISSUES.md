@@ -18,3 +18,17 @@ commit a4607ae 的 `build_dataset.py` 未限制全量训练的 batch 大小。
 
 每次 git pull 后需要确认这个 patch 是否被覆盖。
 **需要规划端把这个限制写入上游，或暴露为命令行参数。**
+
+## 3. 持久 OOM——batch 39s 仍爆显存
+
+commit d2ba970，max_batch_sec=60，单 batch 仅 39s 音频：
+
+```
+torch.OutOfMemoryError: 29.53 GiB allocated on 15.92 GiB GPU
+at transformer_decoders.py line 109: third_sub_layer (FFN)
+```
+
+模型 180M × BF16 = 360MB，AdamW = 720MB，共 ~1GB。但 PyTorch 分配了 29.5GB。
+问题不在 batch 大小——即使 39s 也 OOM。Conformer encoder + decoder 的激活内存远超预期。
+**需要 gradient checkpointing / activation recomputation，或减少 encoder 层数。**
+16GB 卡跑不了当前配置的全量训练。
