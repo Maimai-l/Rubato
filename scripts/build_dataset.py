@@ -197,6 +197,9 @@ def main():
     ap.add_argument("--max-batch-sec", type=float, default=60.0,
                     help="每 batch 音频秒上限。执行端 16GB 卡实测:150s OOM、100s 只剩 45MiB、"
                          "60s 稳 —— 之前是执行端本地 patch,每次 pull 担心被覆盖,现在是正式参数")
+    ap.add_argument("--clip-norm", type=float, default=1.0,
+                    help="梯度裁剪阈值。序列损失量纲 ≈65(非逐 token 平均),若日志 gn 长期"
+                         "远大于阈值 = 有效 lr 被裁剪吃掉几十倍 —— 证实后按 gn 中位数上调(如 10)")
     ap.add_argument("--eval-max", type=int, default=48,
                     help="每次 eval 抽的样本数/源。逐 token 生成:快路径 ~10s/样本,128 个≈半小时起;"
                          "监控用 48 足够,论文终评另跑全量")
@@ -329,6 +332,7 @@ def main():
         "lr_decoder": 5e-4,
         "precision": "bf16",                       # 5070 Ti 支持;fp32 想开就删这行
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
+        "clip_norm": args.clip_norm,
         "eval_max": args.eval_max,                 # 每次 eval 抽的 val 子集(逐 token 生成,大了小时级)
         "eval_time_budget_s": 1200,                # eval 硬时限:超时截断按已评样本出指标,不再"疑似卡死"
         # 训练步前置守卫:越界在 forward 之前拦下,报错自带肇事数字(不吃 CUDA 异步栈的亏)

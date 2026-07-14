@@ -422,6 +422,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     ckpt_ring = []      # 滚动保留 6
     best_omr = float("inf")
     recent, recent_sem, recent_ts = [], [], []      # 近 50 步窗口(日志 + final_* 判据)
+    recent_gn: list = []                            # 裁剪前梯度范数(有效 lr 是否被裁剪吃掉)
     recent_dia: dict = {}                           # {dialect: [近 200 条 seq sem]}(各自学习曲线)
     report = {"stop_events": [], "eval_history": []}
 
@@ -475,7 +476,11 @@ def train(model, datamodule, cfg: dict, tokenizer,
             if accum_sec < accum_target_sec:
                 continue
             accum_sec = 0.0
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            # 裁剪前范数必须可见:论文序列损失 ΣCE×T^{-½} 的量纲 ≈65(常规逐 token 平均 ≈3),
+            # 梯度天然大 ~20×;若范数长期 >> clip 阈值,每步被等比压回 = 有效 lr 缩几十倍 ——
+            # "前 2000 步猛降后爬行"的头号机械嫌疑,gn 数字直接定罪或排除。
+            gn = float(torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                                      float(cfg.get("clip_norm", 1.0))))
             opt.step()
             sched.step()
             opt.zero_grad()
@@ -493,9 +498,13 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 buf.extend([v] * n)              # 按条数计权,批间混比不歪
                 if len(buf) > 200:
                     del buf[: len(buf) - 200]
+            recent_gn.append(gn)
+            if len(recent_gn) > 50:
+                recent_gn.pop(0)
             if step % log_every == 0 or step == 1:
                 print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
+                      f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
                       f"lr={opt.param_groups[0]['lr']:.2e} audio={batch_sec:.0f}s"
                       f" | {_dia_line()}", flush=True)
             if step % save_every == 0:
