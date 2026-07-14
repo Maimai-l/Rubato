@@ -453,6 +453,17 @@ def train(model, datamodule, cfg: dict, tokenizer,
                                           for d, v in recent_dia.items() if v}
         return report
 
+    # 【配置回显,必须在一切训练输出之前】指令经人转发,"跑的是不是那份配置"必须能从
+    # 日志自证 —— H1 实验首份贴回就无法确认 --clip-norm 是否生效,判决差点悬空。
+    # 此行进贴回清单:没有它 = 旧代码,先 git pull。
+    print(f"训练配置回显: clip_norm={float(cfg.get('clip_norm', 1.0))} "
+          f"lr_enc={float(cfg.get('lr_encoder', 1e-4)):.1e} "
+          f"lr_dec={float(cfg.get('lr_decoder', 5e-4)):.1e} "
+          f"accum={float(cfg.get('grad_accum_to_audio_sec', 2000)):.0f}s "
+          f"batch_sec={getattr(datamodule, 'max_batch_sec', '?')} "
+          f"precision={cfg.get('precision') or 'fp32'} max_steps={max_steps} "
+          f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)}", flush=True)
+
     # 断点续训:last.pt 存在且未禁用 → 全状态恢复(所在 epoch 从头重放,至多重复
     # save_every-1 步的样本 —— 每 epoch 采样确定,重复无害,远好于从 step 0 重来)
     # (_finish 定义必须在前:曾在"续训即达 max_steps"的分支上先调后定义 → UnboundLocalError)
