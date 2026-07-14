@@ -188,15 +188,21 @@ def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
                                            encoder_mask=enc_mask)
                 o = model.log_softmax(hidden_states=dec)
                 return o[0] if isinstance(o, (tuple, list)) else o
+            reason = ""
             try:
                 cand = fast_lp(ids)
                 if cand.shape == lp.shape and torch.allclose(cand, lp, atol=1e-3):
                     fast = fast_lp          # 与训练 forward 逐位一致 → 采用
-            except Exception:
-                fast = None
-        if fast is None:
-            print("⚠ 解码快路径不可用(内部模块与 forward 不一致)→ 退全量 forward 慢路径"
-                  "(正确但慢;把本行和 NeMo 版本贴回规划端)", flush=True)
+                else:
+                    reason = f"数值不一致 shape={tuple(cand.shape)} vs {tuple(lp.shape)}"
+            except Exception as e:
+                reason = f"{type(e).__name__}: {e}"
+        else:
+            reason = "缺 transf_decoder/log_softmax 成员"
+        if fast is None and not getattr(autoregressive_decode, "_warned", False):
+            autoregressive_decode._warned = True   # 每进程一次,别刷屏
+            print(f"⚠ 解码快路径不可用({reason})→ 退全量 forward 慢路径(正确但慢十倍;"
+                  "把本行原文+NeMo 版本贴回规划端)", flush=True)
 
         for _ in range(max_new):
             nxt = int(lp[0, -1].argmax())

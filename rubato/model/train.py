@@ -241,7 +241,8 @@ def _sample_audio(sample: dict):
 
 
 def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None = None,
-                   legato_omr_fn=None, eval_max: int = 128) -> dict:
+                   legato_omr_fn=None, eval_max: int = 128,
+                   time_budget_s: float = 1200.0) -> dict:
     """
     R-S11.5:nASAP val 跑 可解析率/OMR-NED;MAESTRO val 跑 AMT F1。
     样本 = assemble 的 utt dict(audio_path/win/dur_s)或预载 {audio, ...};音频按需窗读。
@@ -267,14 +268,30 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     # 可解析率会被结构性钉在 ~1.0,R-S11.7 的 <80% 止损永远不触发。空谱按不可解析计。
     # empty_rate 单列:≈1.0 说明是解码 API 胶水没接上(NeMo generate 签名),不是模型烂 ——
     # 两者都表现为 pause_unparseable,诊断量必须能区分。
+    import time as _time
+    t_eval0 = _time.time()
     n_ok, n_total, n_empty = 0, 0, 0
+    truncated = False
     omr_scores = []
-    for sample in _eval_subset(nasap_val, eval_max):
+    sample_preds: list[str] = []
+    subset = _eval_subset(nasap_val, eval_max)
+    for si, sample in enumerate(subset):
+        # 时限 + 心跳:eval 是逐 token 生成,慢是常态 —— 没有这两样,"慢"和"卡死"
+        # 在执行端不可区分(实测 30 分钟无输出被当成 hang)。超时截断,按已评样本出指标。
+        if _time.time() - t_eval0 > time_budget_s:
+            truncated = True
+            print(f"  eval 时限 {time_budget_s:.0f}s 用尽,截断于 {si}/{len(subset)}(指标按已评样本)",
+                  flush=True)
+            break
+        if si % 8 == 0:
+            print(f"  eval nasap {si}/{len(subset)}({_time.time() - t_eval0:.0f}s)", flush=True)
         audio = _sample_audio(sample)
         if audio is None:
             continue
         pred = infer_a2s(model, audio, tokenizer)
         n_total += 1
+        if len(sample_preds) < 2:              # 模型实际吐了什么 —— 定性"胶水坏/模型早"的直接证据
+            sample_preds.append(pred[:160])
         viol = validate_units(text_to_units(pred)) if pred else ["empty"]
         if pred == _EMPTY_A2S:
             n_empty += 1
@@ -289,13 +306,21 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     metrics["parseable_rate"] = n_ok / max(n_total, 1)
     metrics["empty_rate"] = (n_empty / n_total) if n_total else None
     metrics["n_eval_nasap"] = n_total
+    metrics["eval_truncated"] = truncated
+    for k, p in enumerate(sample_preds):
+        print(f"  eval 样本预测[{k}]: {p!r}", flush=True)
     if omr_scores:
         metrics["val_omr_ned"] = sum(omr_scores) / len(omr_scores)
 
     # MAESTRO val:AMT note F1(mir_eval)。R-S11.7 的"步≥8000 且 AMT F1<70 → 停训"
     # 依赖它;参照音符从该窗的真值 AMT 文本反解。无参照样本跳过(不打 0 分)。
     f1s = []
-    for sample in _eval_subset(maestro_val, eval_max):
+    for si, sample in enumerate(_eval_subset(maestro_val, eval_max)):
+        if _time.time() - t_eval0 > 2 * time_budget_s:     # AMT 共享总时限(nasap 用掉一份)
+            print(f"  eval 总时限用尽,AMT 截断于 {si}", flush=True)
+            break
+        if si % 8 == 0:
+            print(f"  eval maestro {si}({_time.time() - t_eval0:.0f}s)", flush=True)
         ref_text = labels.get(sample.get("utt_id"), {}).get("AMT")
         if not ref_text:
             continue
@@ -459,7 +484,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                                        tokenizer,
                                        labels=getattr(datamodule, "labels", None),
                                        legato_omr_fn=legato_omr_fn,
-                                       eval_max=int(cfg.get("eval_max", 128)))
+                                       eval_max=int(cfg.get("eval_max", 128)),
+                                       time_budget_s=float(cfg.get("eval_time_budget_s", 1200)))
                 report["eval_history"].append({"step": step, **m})
 
                 action = stopper.update(
@@ -482,12 +508,16 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 # 处理止损动作
                 act = action["action"]
                 grace = int(cfg.get("parseable_grace_steps", 4000))
-                if act == "pause_unparseable" and step < grace:
-                    # 宽限期:全新初始化的词表头早期产出本就不可解析,R-S11.7 的 <80% 规则
-                    # 是给成熟模型抓序列化损坏的 —— 早期触发只记录不停训(执行端 step1000 实测
-                    # 停在解码胶水+早期双因素上,修好胶水也可能再停,故有此闸)
-                    print(f"  (宽限期 step {step}<{grace}:parseable="
-                          f"{m['parseable_rate']:.2f} 仅记录,不停训)", flush=True)
+                sem_gate = float(cfg.get("parseable_sem_gate", 2.0))
+                sem_now = (sum(recent_sem) / len(recent_sem)) if recent_sem else 99.0
+                if act == "pause_unparseable" and (step < grace or sem_now > sem_gate):
+                    # 双闸:R-S11.7 的 <80% 规则是给【成熟模型】抓序列化损坏的。
+                    # ① 步数宽限:全新词表头早期本就不可解析;② sem 门槛:sem 还在 >2.0
+                    # (远未拟合)时不可解析是"没学会",不是"坏了" —— 执行端 step4000 实测
+                    # sem=3.39 被停,按此规则应继续训,趋势才是信号。
+                    print(f"  (不停训:parseable={m['parseable_rate']:.2f} 但 "
+                          f"step<{grace}={step < grace} / sem={sem_now:.2f}>{sem_gate}=模型未熟;"
+                          "连续多个 eval 后 sem<门槛仍 0 才算真故障)", flush=True)
                 elif act in ("pause_unparseable", "stop_bad_labels"):
                     return _finish(f"stopped:{act}:{action['reason']}")
                 if act == "converged":
