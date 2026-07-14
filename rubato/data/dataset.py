@@ -215,7 +215,9 @@ def collate_batch(items: list[dict], pad_id: int = 0) -> dict:
     return {"audio": audio, "audio_lens": audio_lens,
             "input_ids": input_ids, "input_lens": input_lens,
             "labels": labels, "token_types": token_types,
-            "loss_mask": loss_mask, "ts_bins": ts_bins}
+            "loss_mask": loss_mask, "ts_bins": ts_bins,
+            # 逐条 dialect(list,非张量):训练步据此聚合出 A2S/A2S_lite/TAST/AMT 各自曲线
+            "dialects": [it.get("dialect") for it in items]}
 
 
 # ---------------------------------------------------------------- Dataset / DataModule

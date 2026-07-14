@@ -183,8 +183,15 @@ def batch_sequence_loss(log_probs: torch.Tensor, labels: torch.Tensor,
     with torch.no_grad():
         sem_mean = per_token.reshape(-1)[sem_sel].mean() if sem_sel.any() else log_probs.new_tensor(0.0)
         ts_mean = per_token.reshape(-1)[ts_sel].mean() if ts_sel.any() else log_probs.new_tensor(0.0)
+        # 逐序列均值(监控用,供上层按 dialect 聚合出各自学习曲线)
+        sem_m = (loss_mask & (token_types == 0)).float()
+        ts_m = (loss_mask & (token_types == 1)).float()
+        seq_sem = (per_token * sem_m).sum(-1) / sem_m.sum(-1).clamp(min=1.0)
+        seq_ts = (per_token * ts_m).sum(-1) / ts_m.sum(-1).clamp(min=1.0)
+        has_ts = ts_m.sum(-1) > 0
     return {"loss": loss, "sem": sem_mean, "ts": ts_mean,
-            "n_sem": int(sem_sel.sum()), "n_ts": int(ts_sel.sum())}
+            "n_sem": int(sem_sel.sum()), "n_ts": int(ts_sel.sum()),
+            "seq_sem": seq_sem, "seq_ts": seq_ts, "seq_has_ts": has_ts}
 
 
 def build_ts_token_ids(tokenizer, n_bins: int = 4000) -> torch.Tensor:

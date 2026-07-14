@@ -202,12 +202,25 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
     assert loss.requires_grad, "loss 无梯度 —— forward 图断了(检查 no_grad/detach)"
     assert torch.isfinite(loss), f"loss 非有限: {loss}"
 
+    # 按 dialect 聚合逐序列 sem/ts(用户建议:四方言各自的学习曲线,别混成一个总数)
+    dialect_sem: dict = {}
+    dialect_ts: dict = {}
+    ds = batch.get("dialects")
+    if ds and "seq_sem" in parts:
+        for i, d in enumerate(ds):
+            if not d:
+                continue
+            dialect_sem.setdefault(d, []).append(float(parts["seq_sem"][i]))
+            if bool(parts["seq_has_ts"][i]):
+                dialect_ts.setdefault(d, []).append(float(parts["seq_ts"][i]))
     return {
         "loss": loss,
         "semantic_loss": parts["sem"],
         "ordinal_loss": parts["ts"],
         "ts_loss": parts["ts"],
         "n_sem": parts["n_sem"], "n_ts": parts["n_ts"],
+        "dialect_sem": {d: (sum(v) / len(v), len(v)) for d, v in dialect_sem.items()},
+        "dialect_ts": {d: (sum(v) / len(v), len(v)) for d, v in dialect_ts.items()},
         "batch_audio_sec": float(audio_len.sum().item()) / 16000.0,
         "seq_lengths": batch.get("seq_lengths", loss_mask.sum(-1)),
     }
@@ -409,10 +422,24 @@ def train(model, datamodule, cfg: dict, tokenizer,
     ckpt_ring = []      # 滚动保留 6
     best_omr = float("inf")
     recent, recent_sem, recent_ts = [], [], []      # 近 50 步窗口(日志 + final_* 判据)
+    recent_dia: dict = {}                           # {dialect: [近 200 条 seq sem]}(各自学习曲线)
     report = {"stop_events": [], "eval_history": []}
+
+    def _dia_line() -> str:
+        return " ".join(f"{d}={sum(v) / len(v):.2f}" for d, v in sorted(recent_dia.items()) if v)
+
+    def _finish(tag: str):
+        report["final"] = tag
+        report["final_loss"] = round(sum(recent) / len(recent), 4) if recent else None
+        report["final_sem"] = round(sum(recent_sem) / len(recent_sem), 4) if recent_sem else None
+        report["final_ts"] = round(sum(recent_ts) / len(recent_ts), 4) if recent_ts else None
+        report["final_sem_by_dialect"] = {d: round(sum(v) / len(v), 4)
+                                          for d, v in recent_dia.items() if v}
+        return report
 
     # 断点续训:last.pt 存在且未禁用 → 全状态恢复(所在 epoch 从头重放,至多重复
     # save_every-1 步的样本 —— 每 epoch 采样确定,重复无害,远好于从 step 0 重来)
+    # (_finish 定义必须在前:曾在"续训即达 max_steps"的分支上先调后定义 → UnboundLocalError)
     last_pt = ckpt_dir / "last.pt"
     if cfg.get("resume", True):
         got = load_snapshot(last_pt, model, opt, sched)
@@ -421,13 +448,6 @@ def train(model, datamodule, cfg: dict, tokenizer,
             print(f"续训:恢复 step={step} epoch={start_epoch}(优化器/调度器状态一并恢复)")
             if step >= max_steps:
                 return _finish("max_steps_reached")
-
-    def _finish(tag: str):
-        report["final"] = tag
-        report["final_loss"] = round(sum(recent) / len(recent), 4) if recent else None
-        report["final_sem"] = round(sum(recent_sem) / len(recent_sem), 4) if recent_sem else None
-        report["final_ts"] = round(sum(recent_ts) / len(recent_ts), 4) if recent_ts else None
-        return report
 
     # 一次性预备:时间戳 id 映射 / 梯度累积额度 / bf16
     ts_token_ids = build_ts_token_ids(tokenizer)
@@ -468,10 +488,16 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 buf.append(v)
                 if len(buf) > 50:
                     buf.pop(0)
+            for d, (v, n) in (parts.get("dialect_sem") or {}).items():
+                buf = recent_dia.setdefault(d, [])
+                buf.extend([v] * n)              # 按条数计权,批间混比不歪
+                if len(buf) > 200:
+                    del buf[: len(buf) - 200]
             if step % log_every == 0 or step == 1:
                 print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
-                      f"lr={opt.param_groups[0]['lr']:.2e} audio={batch_sec:.0f}s", flush=True)
+                      f"lr={opt.param_groups[0]['lr']:.2e} audio={batch_sec:.0f}s"
+                      f" | {_dia_line()}", flush=True)
             if step % save_every == 0:
                 save_snapshot(last_pt, model, opt, sched, step, epoch)
 
