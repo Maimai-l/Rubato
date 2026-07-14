@@ -1,34 +1,28 @@
-# 训练监控 2026-07-13/14
+# 训练监控状态板(规划端维护;历史见 git log 本文件)
 
-## 训练最终状态 — 已暂停
+**更新:2026-07-14(继任规划端接手)**
 
-**StopController 触发：** `parseable_rate=0.00 < 0.80`
+## 当前状态 —— 训练中,悬案 = 平台期
 
-| 指标 | 值 |
-|------|-----|
-| final_step | 4000 |
-| final_loss | 69.62 |
-| final_sem | 3.39 |
-| final_ts | 2.36 |
-| parseable_rate | 0.00 |
+| 指标 | 值 | 出处 |
+|------|-----|------|
+| step | ≈7600 | 用户粘贴日志 2026-07-14(原文存 HANDOFF.md §4) |
+| loss(avg50) | ≈62 | 同上 |
+| sem | ≈2.9-3.2 | 同上 |
+| 分方言 sem | A2S 3.21 / A2S_lite 3.38 / AMT 2.53 / TAST 2.70 | 同上 |
+| gn(裁剪前) | 21.6~37.9,avg50 23.5~27.8(clip=1.0) | 同上,原文照录 HANDOFF §4 |
+| parseable | 0.00 @ step 5000/6000/7000(宽限放行) | reports/SMOKE_RESULT.md |
+| 样例预测 | 已从空谱兜底进步到合法 A2S 格式前缀 | reports/SMOKE_RESULT.md 末节 |
 
-## 关键事件时间线
+## 当前动作
 
-1. tiling 修复前：39s batch OOM（padding 记账 bug）
-2. tiling 修复后：训练正常，GPU 13-16 GB 稳定
-3. Tee-Object 卡死 → 换 `>` 重定向
-4. step 3000 eval：parseable=0.00，但放行（<4000 宽限）
-5. step 4000 eval：parseable=0.00，StopController 正式暂停
+**EXPERIMENT_H1.md** 对照实验已下发(`--clip-norm 25` × ≥500 步,预登记判据见卡/D20),
+等执行端贴回。贴回后由规划端按卡判决 H1,并用同批数据的 enc=/dec= 列分流 H2/H3。
 
-## 根因
+## 旧状态更正(2026-07-13 版说"训练最终状态—已暂停"已过时)
 
-`parseable_rate=0.00` — infer_a2s 胶水在 Windows/NeMo 上不工作。
-训练本身正常（sem 9→3, loss 252→69）。
-
-## AMT
-
-AMT 丢弃 32,930→0（重切窗 144k 后）。超长过滤仅剩 TAST/A2S/A2S_lite。
-
-## 阻塞
-
-等规划端修 `rubato/model/infer.py` 的 NeMo transcribe 适配后继续。
+- step 4000 的 `parseable_rate=0.00` 暂停:已被双闸策略取代(步数宽限 + sem>2.0 门,
+  commit b683a/HANDOFF §3),训练已续至 7600+。
+- "等规划端修 infer.py 的 NeMo transcribe 适配":已解决 —— NeMo transcribe 与换表模型
+  不兼容,走自研贪心解码 autoregressive_decode(commit af84a7f),快路径带 forward 自校验。
+- AMT 超长丢弃 32,930 → 0(重切窗 144k,commit 3a0e82f / d2ba970)。

@@ -38,8 +38,9 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段(2026-07-12)
+## 当前阶段(2026-07-14)
 
-数据管线收尾:P5c 已完成(nASAP 7,098 段/9 曲失败),接下来 `--go` 会跑
-P5c2(utt 唯一化)→ P5d(split)→ P6c(语料)→ P7(tokenizer)→ P8(装配终检,有红线)。
-P8 全绿后按规划端指令进入训练(MAESTRO 过拟合冒烟 → 全量)。
+数据管线已全绿收尾(P0-P8),冒烟已通过(final_sem=0.038,reports/SMOKE_RESULT.md),
+全量训练已至 step≈7600。**当前任务 = `EXPERIMENT_H1.md` 那一张卡**(平台期判决实验):
+备份 last.pt → `python scripts/build_dataset.py --clip-norm 25` → ≥500 步 → 按卡上清单贴回。
+不用再跑 sop_next(数据期命令);训练期日常 = `git pull --rebase --autostash` + 按当前实验卡跑。

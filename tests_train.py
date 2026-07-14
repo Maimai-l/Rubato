@@ -1,7 +1,7 @@
 """S11 train.py 装配测试(optimizer/schedule/bucketing 纯逻辑)。运行: python tests_train.py"""
 import sys, torch
 sys.path.insert(0, ".")
-from rubato.model.train import build_optimizer, bucket_batches
+from rubato.model.train import build_optimizer, bucket_batches, group_grad_norms
 
 PASS = 0
 def check(name, cond, detail=""):
@@ -68,6 +68,21 @@ big = [{"utt_id": "big", "dur_s": 45}, {"utt_id": "s1", "dur_s": 10}, {"utt_id":
 batches = bucket_batches(big, max_batch_sec=50)
 # 10+10 可同桶,45 单独(45+10>50)
 check("respects_limit", all(sum(s["dur_s"] for s in b) <= 50 for b in batches), batches)
+
+print("[6] 分组梯度范数(enc/dec 观测,与总范数勾稽)")
+model3 = FakeModel()
+opt3, _ = build_optimizer(model3, cfg)
+loss = (model3.decoder(model3.encoder(torch.randn(4, 10))) ** 2).sum()
+loss.backward()
+gns = group_grad_norms(opt3.param_groups)
+check("one_norm_per_group", len(gns) == len(opt3.param_groups), gns)
+check("norms_positive", all(g > 0 for g in gns), gns)
+total = float(torch.nn.utils.clip_grad_norm_(model3.parameters(), 1e9))  # 阈值大到不裁,只取总范数
+recon = sum(g * g for g in gns) ** 0.5
+check("groups_reconcile_total", abs(recon - total) < 1e-4 * max(total, 1), f"recon={recon} total={total}")
+# 无梯度参数组不炸、给 0
+opt_empty = torch.optim.AdamW([{"params": [torch.nn.Parameter(torch.zeros(3))]}])
+check("no_grad_gives_zero", group_grad_norms(opt_empty.param_groups) == [0.0])
 
 print(f"\n全部通过: {PASS} 项")
 print("注:training_step/eval_hook/主循环需 GPU+NeMo 模型+真实数据,带断言本地跑;")

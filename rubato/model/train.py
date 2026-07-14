@@ -66,6 +66,21 @@ def build_optimizer(model, cfg: dict):
     return opt, sched
 
 
+def group_grad_norms(param_groups):
+    """各 param_group 的【裁剪前】梯度 L2 范数,顺序同 build_optimizer(enc, dec)。
+    为什么单列:总 gn 只回答"裁剪吃掉多少",回答不了"梯度流向了谁"——H2(encoder
+    声学→钢琴域适应不足)的直接观测就是分组范数:enc 长期 << dec 说明 encoder 几乎
+    收不到信号,lr_encoder 调多大都无从谈起;enc/dec 同量级则 H2 失血。
+    勾稽:gn_total² ≈ enc² + dec²(clip 与本函数覆盖同一批带 .grad 参数),
+    日志里两者并排,分组遗漏会当场对不上账。"""
+    import torch
+    out = []
+    for g in param_groups:
+        norms = [p.grad.detach().norm() for p in g["params"] if p.grad is not None]
+        out.append(float(torch.norm(torch.stack(norms))) if norms else 0.0)
+    return out
+
+
 # ---------------------------------------------------------------- 动态 bucketing(R-S11.4)
 
 def bucket_batches(samples: list[dict], max_batch_sec: float = 560.0,
@@ -479,6 +494,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
             # 裁剪前范数必须可见:论文序列损失 ΣCE×T^{-½} 的量纲 ≈65(常规逐 token 平均 ≈3),
             # 梯度天然大 ~20×;若范数长期 >> clip 阈值,每步被等比压回 = 有效 lr 缩几十倍 ——
             # "前 2000 步猛降后爬行"的头号机械嫌疑,gn 数字直接定罪或排除。
+            # 注意先验修正:优化器是 AdamW,更新量 m̂/√v̂ 对【恒定比例】的梯度缩放近似不变
+            # (m 与 √v 同比缩放相消),纯常数裁剪对 AdamW 的有效步长影响远小于 SGD 直觉 ——
+            # 所以 H1 必须靠 --clip-norm 对照实验判决,不靠此处推理(EXPERIMENT_H1.md)。
+            gn_groups = group_grad_norms(opt.param_groups)   # 分组(enc/dec)裁剪前范数,H2 观测
             gn = float(torch.nn.utils.clip_grad_norm_(model.parameters(),
                                                       float(cfg.get("clip_norm", 1.0))))
             opt.step()
@@ -505,6 +524,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
                       f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
+                      f"enc={gn_groups[0]:.1f} dec={gn_groups[1]:.1f} "
                       f"lr={opt.param_groups[0]['lr']:.2e} audio={batch_sec:.0f}s"
                       f" | {_dia_line()}", flush=True)
             if step % save_every == 0:

@@ -194,9 +194,10 @@ def main():
                     help="过拟合冒烟:N 条 utt 小集反复过拟合,验证【代码链路】(模型/损失/"
                          "tokenizer/数据管线)没 bug —— 判据 final_sem<0.05(关标签平滑跑,"
                          "开着平滑时逐 token CE 有 ~1.2 的下界,0.05 永远达不到)")
-    ap.add_argument("--max-batch-sec", type=float, default=60.0,
-                    help="每 batch 音频秒上限。执行端 16GB 卡实测:150s OOM、100s 只剩 45MiB、"
-                         "60s 稳 —— 之前是执行端本地 patch,每次 pull 担心被覆盖,现在是正式参数")
+    ap.add_argument("--max-batch-sec", type=float, default=None,
+                    help="每 batch 音频秒上限;不传 = 全量 60 / 冒烟 120。执行端 16GB 卡实测:"
+                         "150s OOM、100s 只剩 45MiB、60s 稳 —— 之前是执行端本地 patch,"
+                         "每次 pull 担心被覆盖,现在是正式参数(此前版本会被写死的 60 覆盖,已修)")
     ap.add_argument("--clip-norm", type=float, default=1.0,
                     help="梯度裁剪阈值。序列损失量纲 ≈65(非逐 token 平均),若日志 gn 长期"
                          "远大于阈值 = 有效 lr 被裁剪吃掉几十倍 —— 证实后按 gn 中位数上调(如 10)")
@@ -214,6 +215,11 @@ def main():
                          "栈指向随机后续 kernel(实测三次崩溃三个栈);CPU 上同一越界给出"
                          "精确 Python 栈 + 肇事索引。配 --smoke 用,慢但一锤定音")
     args = ap.parse_args()
+    if args.max_batch_sec is None:
+        # 缺省按模式定:全量 60(16GB 卡 100s 仍 OOM,首 batch 145s 单样本撑爆)、
+        # 冒烟 120(小集小批)。显式传参则全程生效 —— 旧版在建 dm 后无条件改回 60/120,
+        # CLI 形同虚设,救火时(想临时降到 40s)会静默不生效。
+        args.max_batch_sec = 120.0 if args.smoke else 60.0
 
     pdmx_fn = _pdmx_row_fn()
     for src in SOURCES:
@@ -349,9 +355,6 @@ def main():
             "loss": {"sem_label_smooth": 0.0, "p_center": 0.999, "w": 1},
         })
         eval_every = 10 ** 9                       # 冒烟不跑 eval(生成路径另测)
-        dm.max_batch_sec = 120                     # 冒烟小批:16GB 卡上先别一口 560s 音频
-    else:
-        dm.max_batch_sec = 60                      # 16GB 卡:100s 仍 OOM(首 batch 145s 单样本撑爆),狠降到 60s
     if args.cpu:
         cfg.update({"device": "cpu", "max_steps": 3, "grad_accum_to_audio_sec": 30,
                     "log_every": 1, "precision": ""})
