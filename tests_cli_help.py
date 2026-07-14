@@ -18,6 +18,7 @@ SCRIPTS = [
     "scripts/rerender_tast_clamped.py",
     "scripts/rerender_presets.py",
     "scripts/preset_audition.py",
+    "scripts/eval_final.py",
 ]
 
 for s in SCRIPTS:
