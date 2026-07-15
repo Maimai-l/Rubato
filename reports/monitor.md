@@ -21,6 +21,15 @@
 处置:clip 留在 25,转 **H3 观察路线**(EXPERIMENT_H1 §7):继续跑、逐次贴 eval、
 **step 12000 复盘**;升级 H2(dec lr→3e-4)的条件已提前声明。决策记录:D21。
 
+## 探针首批数据:EOS 论死亡,前缀acc=0.38 中间带,格式/时间戳已学会(2026-07-15 深夜)
+
+`acc=0.40 前缀acc=0.38 eotP=0.0001`【出处:PROBE_RESULT.txt @ccbcc72】。判读:
+① eotP 万分之一 → "开口就想收工"排除;② 0.38 在预登记中间带(0.30-0.60),执行端
+"decoding bias confirmed" 不获采纳,需第二个 eval 数据点;③ argmax/参照对照显示格式骨架
+与时间戳量级已学会、音高调号未准 —— "学到一半"面貌;④ 报告是 eval 中途推的,缺 解码现场/汇总。
+**上报改革**:eval 证据由代码自动落盘 reports/eval_autolog.md,执行端只 commit(第三次
+改写旧文件后收权)。等下一次 eval 的 autolog。
+
 ## 重大修正:'|4/4k0' 是兜底常量,不是模型输出(2026-07-15 深夜)【出处:PROBE_RESULT.txt + infer.py:24】
 
 本轮 eval `empty=1.0`:48 样本全走了 `_EMPTY_A2S` 兜底 → 既往"模型只会输出开头"的

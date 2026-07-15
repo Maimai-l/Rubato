@@ -347,6 +347,9 @@ def main():
         "clip_norm": args.clip_norm,
         "eval_max": args.eval_max,                 # 每次 eval 抽的 val 子集(逐 token 生成,大了小时级)
         "eval_time_budget_s": 1200,                # eval 硬时限:超时截断按已评样本出指标,不再"疑似卡死"
+        # eval 证据自动落盘到 repo 内(追加式);执行端上报 = git add reports/eval_autolog.md
+        # + commit + push,不再人肉摘录(三次摘录事故后收权)
+        "eval_autolog": str(Path(__file__).resolve().parent.parent / "reports" / "eval_autolog.md"),
         # 训练步前置守卫:越界在 forward 之前拦下,报错自带肇事数字(不吃 CUDA 异步栈的亏)
         "guards": {"vocab": pf["vocab"], "max_pos": max_tgt},
     }

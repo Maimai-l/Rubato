@@ -106,4 +106,19 @@ check("fallback_on_error", r == inf._EMPTY_A2S, r)
 check("error_recorded", bool(inf.LAST_INFER_ERROR) and "TypeError" in inf.LAST_INFER_ERROR,
       inf.LAST_INFER_ERROR)
 
+print("[9] eval 证据自动落盘:代码写报告,追加不覆盖")
+import tempfile
+from pathlib import Path
+from rubato.model.train import run_eval_hooks
+
+log = Path(tempfile.mkdtemp()) / "eval_autolog.md"
+run_eval_hooks(None, [], [], None, autolog=str(log), step=123)
+check("autolog_written", log.exists(), log)
+txt = log.read_text(encoding="utf-8")
+check("has_step_header", "## eval @ step 123" in txt, txt[:120])
+check("has_summary_line", "eval 汇总:" in txt, txt[:200])
+run_eval_hooks(None, [], [], None, autolog=str(log), step=124)
+txt2 = log.read_text(encoding="utf-8")
+check("append_not_overwrite", "step 123" in txt2 and "step 124" in txt2, txt2[:200])
+
 print(f"\n全部通过: {PASS} 项")

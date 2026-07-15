@@ -285,7 +285,8 @@ def _sample_audio(sample: dict):
 
 def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None = None,
                    legato_omr_fn=None, eval_max: int = 128,
-                   time_budget_s: float = 1200.0) -> dict:
+                   time_budget_s: float = 1200.0,
+                   autolog: str | None = None, step: int | None = None) -> dict:
     """
     R-S11.5:nASAP val 跑 可解析率/OMR-NED;MAESTRO val 跑 AMT F1。
     样本 = assemble 的 utt dict(audio_path/win/dur_s)或预载 {audio, ...};音频按需窗读。
@@ -305,6 +306,14 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     metrics = {"parseable_rate": 0.0, "val_omr_ned": None,
                "a2s_note_f1": None, "maestro_amt_f1": None,
                "empty_rate": None, "n_eval_nasap": 0, "n_eval_maestro": 0}
+
+    # 证据行:打印 + 缓存,eval 末尾原样追加进 autolog 文件(git 里的报告由代码写,
+    # 执行端只 commit 不编辑 —— 人肉摘录三次丢失/删改证据后,把这一步从人手里拿走)。
+    _lines: list[str] = []
+
+    def _p(s: str):
+        print(s, flush=True)
+        _lines.append(s)
 
     # nASAP val:生成 + 可解析率。
     # 注意:infer_a2s 失败时兜底返回 _EMPTY_A2S(合法空谱)—— 若把它算"可解析",
@@ -327,8 +336,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         # 在执行端不可区分(实测 30 分钟无输出被当成 hang)。超时截断,按已评样本出指标。
         if _time.time() - t_eval0 > time_budget_s:
             truncated = True
-            print(f"  eval 时限 {time_budget_s:.0f}s 用尽,截断于 {si}/{len(subset)}(指标按已评样本)",
-                  flush=True)
+            _p(f"  eval 时限 {time_budget_s:.0f}s 用尽,截断于 {si}/{len(subset)}(指标按已评样本)")
             break
         if si % 8 == 0:
             print(f"  eval nasap {si}/{len(subset)}({_time.time() - t_eval0:.0f}s)", flush=True)
@@ -349,14 +357,14 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
                     from rubato.model.infer import teacher_forced_probe
                     probe = teacher_forced_probe(model, audio, _lab[_dia], _dia,
                                                  tokenizer, domain=sample.get("domain"))
-                    print(f"  eval 探针[{sample.get('utt_id', '?')}/{_dia}]: "
+                    _p(f"  eval 探针[{sample.get('utt_id', '?')}/{_dia}]: "
                           f"acc={probe['acc']:.2f} 前缀acc={probe['acc_prefix']:.2f} "
-                          f"eotP@首位={probe['eot_p_first']:.4f} n={probe['n_scored']}", flush=True)
-                    print(f"  eval 探针argmax: {probe.get('argmax_prefix', '')!r}", flush=True)
-                    print(f"  eval 探针参照:   {probe.get('ref_prefix', '')!r}", flush=True)
+                          f"eotP@首位={probe['eot_p_first']:.4f} n={probe['n_scored']}")
+                    _p(f"  eval 探针argmax: {probe.get('argmax_prefix', '')!r}")
+                    _p(f"  eval 探针参照:   {probe.get('ref_prefix', '')!r}")
                 except Exception as e:
                     probe = {"error": f"{type(e).__name__}: {e}"}
-                    print(f"  eval 探针失败({probe['error']})—— 贴回本行", flush=True)
+                    _p(f"  eval 探针失败({probe['error']})—— 贴回本行")
         viol = validate_units(text_to_units(pred)) if pred else ["empty"]
         if pred == _EMPTY_A2S:
             n_empty += 1
@@ -373,16 +381,16 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     metrics["n_eval_nasap"] = n_total
     metrics["eval_truncated"] = truncated
     for k, p in enumerate(sample_preds):
-        print(f"  eval 样本预测[{k}]: {p!r}", flush=True)
+        _p(f"  eval 样本预测[{k}]: {p!r}")
     # 兜底 ≠ 模型输出:'|4/4k0' 是异常/拒绝的兜底常量(执行端 6 轮 eval 被它蒙蔽)。
     # 只要出现兜底,把吞错现场打出来 —— 模型真实输出/违规项/异常栈,三选一必有。
     if n_empty:
         if _inf.LAST_DECODE_DEBUG:
-            print(f"  eval 解码现场: {_inf.LAST_DECODE_DEBUG}", flush=True)
+            _p(f"  eval 解码现场: {_inf.LAST_DECODE_DEBUG}")
         if _inf.LAST_INFER_ERROR:
-            print(f"  eval 兜底异常: {_inf.LAST_INFER_ERROR[:600]}", flush=True)
+            _p(f"  eval 兜底异常: {_inf.LAST_INFER_ERROR[:600]}")
         if not (_inf.LAST_DECODE_DEBUG or _inf.LAST_INFER_ERROR):
-            print("  eval 兜底但无现场记录 —— 空谱来自非异常路径,贴回本行", flush=True)
+            _p("  eval 兜底但无现场记录 —— 空谱来自非异常路径,贴回本行")
     if omr_scores:
         metrics["val_omr_ned"] = sum(omr_scores) / len(omr_scores)
     # 一行汇总:把判读必需的全部证据压进单行 —— 执行端按行摘录日志时,丢哪行都不致盲
@@ -390,15 +398,15 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     _pr = (f"探针acc={probe['acc']:.2f}/前缀{probe['acc_prefix']:.2f}"
            f" eotP0={probe['eot_p_first']:.4f}") if probe.get("n_scored") else \
           (f"探针err={probe.get('error', '无参照')}" if probe else "探针=未跑")
-    print(f"  eval 汇总: parseable={metrics['parseable_rate']:.2f} "
-          f"empty={metrics['empty_rate']} n={n_total} 样本0={_p0!r} {_pr}", flush=True)
+    _p(f"  eval 汇总: parseable={metrics['parseable_rate']:.2f} "
+          f"empty={metrics['empty_rate']} n={n_total} 样本0={_p0!r} {_pr}")
 
     # MAESTRO val:AMT note F1(mir_eval)。R-S11.7 的"步≥8000 且 AMT F1<70 → 停训"
     # 依赖它;参照音符从该窗的真值 AMT 文本反解。无参照样本跳过(不打 0 分)。
     f1s = []
     for si, sample in enumerate(_eval_subset(maestro_val, eval_max)):
         if _time.time() - t_eval0 > 2 * time_budget_s:     # AMT 共享总时限(nasap 用掉一份)
-            print(f"  eval 总时限用尽,AMT 截断于 {si}", flush=True)
+            _p(f"  eval 总时限用尽,AMT 截断于 {si}")
             break
         if si % 8 == 0:
             print(f"  eval maestro {si}({_time.time() - t_eval0:.0f}s)", flush=True)
@@ -423,6 +431,24 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     metrics["n_eval_maestro"] = len(f1s)
     if f1s:
         metrics["maestro_amt_f1"] = 100.0 * sum(f1s) / len(f1s)
+    _p(f"  eval 指标: parseable={metrics['parseable_rate']:.2f} "
+       f"amt_f1={metrics['maestro_amt_f1']} omr_ned={metrics['val_omr_ned']} "
+       f"n_nasap={metrics['n_eval_nasap']} n_maestro={metrics['n_eval_maestro']}")
+
+    # 证据自动落盘(追加,不覆盖):报告由代码写,执行端只 commit —— 摘录/删改这一步收走
+    if autolog and _lines:
+        try:
+            from pathlib import Path as _P
+            fp = _P(autolog)
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            with open(fp, "a", encoding="utf-8") as fh:
+                fh.write(f"\n## eval @ step {step if step is not None else '?'} "
+                         f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n")
+                fh.write("\n".join(_lines) + "\n")
+            print(f"  eval 证据已落盘 {fp}(git add + commit + push 即完成上报,勿编辑)",
+                  flush=True)
+        except Exception as e:
+            print(f"  ⚠ eval 证据落盘失败({type(e).__name__}: {e})—— 贴回本行", flush=True)
 
     return metrics
 
@@ -607,7 +633,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                                        labels=getattr(datamodule, "labels", None),
                                        legato_omr_fn=legato_omr_fn,
                                        eval_max=int(cfg.get("eval_max", 128)),
-                                       time_budget_s=float(cfg.get("eval_time_budget_s", 1200)))
+                                       time_budget_s=float(cfg.get("eval_time_budget_s", 1200)),
+                                       autolog=cfg.get("eval_autolog"), step=step)
                 report["eval_history"].append({"step": step, **m})
 
                 action = stopper.update(
