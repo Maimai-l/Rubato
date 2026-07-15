@@ -1,0 +1,2 @@
+  eval 探针失败(RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!)—— 贴回本行
+  eval 汇总: parseable=0.00 empty=1.0 n=48 样本0='|4/4k0' 探针err=RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
