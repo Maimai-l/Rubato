@@ -1,8 +1,10 @@
-=== H2 实验日志 (--clip-norm 25 --lr-dec 3e-4) ===
+=== H2 实验完整日志 (--clip-norm 25 --lr-dec 3e-4) ===
 
+【配置】
 训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48
 续训:恢复 step=12800 epoch=1(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=9.71e-05 dec=2.91e-04)
 
+【训练步】(共 43 行)
 训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48
 续训:恢复 step=12800 epoch=1(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=9.71e-05 dec=2.91e-04)
 step 12850 loss=35.8202 avg50=56.3101 sem=2.5192 ts=2.4050 gn=19.7/avg18.9 enc=13.8 dec=14.1 lrE=9.71e-05 lrD=2.91e-04 audio=50s | A2S=2.98 A2S_lite=3.11 AMT=2.46 TAST=2.39
@@ -20,5 +22,57 @@ step 13400 loss=54.8454 avg50=62.1287 sem=2.2714 ts=2.3740 gn=18.8/avg22.1 enc=1
 step 13450 loss=35.1246 avg50=59.5882 sem=2.3469 ts=0.0000 gn=16.5/avg22.0 enc=11.7 dec=11.6 lrE=9.68e-05 lrD=2.90e-04 audio=38s | A2S=3.00 A2S_lite=3.09 AMT=2.45 TAST=2.48
 step 13500 loss=55.6784 avg50=59.1735 sem=2.6680 ts=2.5603 gn=28.1/avg23.8 enc=15.9 dec=23.2 lrE=9.67e-05 lrD=2.90e-04 audio=36s | A2S=2.98 A2S_lite=3.09 AMT=2.46 TAST=2.49
 step 13550 loss=37.9416 avg50=57.7719 sem=2.5490 ts=1.9619 gn=18.0/avg21.6 enc=12.1 dec=13.3 lrE=9.67e-05 lrD=2.90e-04 audio=52s | A2S=2.99 A2S_lite=3.10 AMT=2.44 TAST=2.49
+step 13600 loss=42.2030 avg50=56.0681 sem=2.6413 ts=1.7142 gn=18.3/avg19.6 enc=12.6 dec=13.2 lrE=9.67e-05 lrD=2.90e-04 audio=54s | A2S=3.00 A2S_lite=3.10 AMT=2.45 TAST=2.50
+step 13650 loss=51.8053 avg50=58.4766 sem=2.4283 ts=3.0592 gn=21.8/avg20.4 enc=15.4 dec=15.5 lrE=9.67e-05 lrD=2.90e-04 audio=58s | A2S=3.01 A2S_lite=3.11 AMT=2.45 TAST=2.49
+step 13700 loss=31.8031 avg50=58.0882 sem=2.5052 ts=2.5468 gn=15.5/avg21.4 enc=12.0 dec=9.9 lrE=9.66e-05 lrD=2.90e-04 audio=30s | A2S=3.01 A2S_lite=3.10 AMT=2.44 TAST=2.48
+step 13750 loss=62.8197 avg50=60.2223 sem=2.3594 ts=2.0812 gn=22.2/avg22.1 enc=14.7 dec=16.6 lrE=9.66e-05 lrD=2.90e-04 audio=35s | A2S=3.00 A2S_lite=3.11 AMT=2.44 TAST=2.47
+step 13800 loss=59.3228 avg50=55.0764 sem=2.4812 ts=2.3555 gn=25.7/avg19.2 enc=16.1 dec=20.0 lrE=9.66e-05 lrD=2.90e-04 audio=59s | A2S=3.00 A2S_lite=3.11 AMT=2.43 TAST=2.47
+step 13850 loss=35.4928 avg50=60.8276 sem=2.6454 ts=0.0000 gn=19.6/avg20.5 enc=13.4 dec=14.3 lrE=9.66e-05 lrD=2.90e-04 audio=44s | A2S=3.00 A2S_lite=3.12 AMT=2.42 TAST=2.47
+step 13900 loss=38.3616 avg50=58.2209 sem=3.1734 ts=0.0000 gn=18.8/avg21.3 enc=12.6 dec=13.9 lrE=9.65e-05 lrD=2.90e-04 audio=56s | A2S=3.02 A2S_lite=3.12 AMT=2.43 TAST=2.49
+step 13950 loss=58.6867 avg50=60.9940 sem=2.3341 ts=1.6333 gn=15.6/avg21.5 enc=11.3 dec=10.8 lrE=9.65e-05 lrD=2.89e-04 audio=53s | A2S=3.01 A2S_lite=3.12 AMT=2.43 TAST=2.49
+step 14000 loss=54.7728 avg50=57.6938 sem=2.3727 ts=1.7879 gn=20.7/avg20.9 enc=13.2 dec=16.0 lrE=9.65e-05 lrD=2.89e-04 audio=51s | A2S=3.01 A2S_lite=3.14 AMT=2.42 TAST=2.49
+step 14050 loss=51.4001 avg50=62.6287 sem=2.5306 ts=2.4671 gn=22.9/avg23.4 enc=13.5 dec=18.4 lrE=9.64e-05 lrD=2.89e-04 audio=32s | A2S=3.03 A2S_lite=3.13 AMT=2.43 TAST=2.50
+step 14100 loss=61.4059 avg50=58.5406 sem=2.4217 ts=1.8104 gn=17.2/avg21.4 enc=12.8 dec=11.5 lrE=9.64e-05 lrD=2.89e-04 audio=32s | A2S=3.02 A2S_lite=3.13 AMT=2.42 TAST=2.49
+step 14150 loss=73.0215 avg50=59.1301 sem=2.4186 ts=2.6118 gn=16.2/avg21.3 enc=13.0 dec=9.7 lrE=9.64e-05 lrD=2.89e-04 audio=30s | A2S=3.03 A2S_lite=3.11 AMT=2.42 TAST=2.50
+step 14200 loss=77.2961 avg50=59.8656 sem=2.8271 ts=2.7203 gn=30.9/avg21.6 enc=16.1 dec=26.4 lrE=9.64e-05 lrD=2.89e-04 audio=34s | A2S=3.01 A2S_lite=3.12 AMT=2.41 TAST=2.50
+step 14250 loss=70.5004 avg50=60.3569 sem=3.5837 ts=0.0000 gn=16.2/avg22.4 enc=12.3 dec=10.5 lrE=9.63e-05 lrD=2.89e-04 audio=38s | A2S=3.01 A2S_lite=3.11 AMT=2.40 TAST=2.51
+step 14300 loss=29.9358 avg50=57.6578 sem=2.7328 ts=0.0000 gn=22.6/avg21.2 enc=12.8 dec=18.6 lrE=9.63e-05 lrD=2.89e-04 audio=40s | A2S=2.99 A2S_lite=3.10 AMT=2.41 TAST=2.51
+step 14350 loss=76.8860 avg50=59.7530 sem=2.9401 ts=3.2848 gn=22.2/avg21.0 enc=16.4 dec=14.9 lrE=9.63e-05 lrD=2.89e-04 audio=39s | A2S=2.97 A2S_lite=3.10 AMT=2.42 TAST=2.53
+step 14400 loss=38.8406 avg50=60.9077 sem=2.9112 ts=0.0000 gn=18.7/avg20.8 enc=12.1 dec=14.3 lrE=9.62e-05 lrD=2.89e-04 audio=36s | A2S=2.96 A2S_lite=3.10 AMT=2.44 TAST=2.53
+step 14450 loss=66.1611 avg50=60.0830 sem=3.0654 ts=3.1560 gn=30.1/avg20.1 enc=16.0 dec=25.5 lrE=9.62e-05 lrD=2.89e-04 audio=55s | A2S=2.96 A2S_lite=3.08 AMT=2.45 TAST=2.53
+step 14500 loss=69.0202 avg50=58.2293 sem=3.0623 ts=0.0000 gn=20.6/avg21.4 enc=15.8 dec=13.2 lrE=9.62e-05 lrD=2.89e-04 audio=40s | A2S=2.95 A2S_lite=3.08 AMT=2.46 TAST=2.53
+step 14550 loss=54.2220 avg50=62.2141 sem=2.6861 ts=2.3301 gn=21.0/avg21.2 enc=13.3 dec=16.3 lrE=9.62e-05 lrD=2.88e-04 audio=40s | A2S=2.96 A2S_lite=3.07 AMT=2.48 TAST=2.52
+step 14600 loss=80.2998 avg50=55.4234 sem=3.1717 ts=0.0000 gn=29.4/avg20.2 enc=16.7 dec=24.3 lrE=9.61e-05 lrD=2.88e-04 audio=39s | A2S=2.97 A2S_lite=3.07 AMT=2.48 TAST=2.52
+step 14650 loss=71.5207 avg50=57.2297 sem=3.6853 ts=0.0000 gn=18.3/avg19.8 enc=12.8 dec=13.1 lrE=9.61e-05 lrD=2.88e-04 audio=47s | A2S=2.97 A2S_lite=3.08 AMT=2.47 TAST=2.50
+step 14700 loss=62.2915 avg50=57.6862 sem=3.2785 ts=0.0000 gn=17.9/avg19.8 enc=13.9 dec=11.3 lrE=9.61e-05 lrD=2.88e-04 audio=39s | A2S=2.98 A2S_lite=3.09 AMT=2.45 TAST=2.50
+step 14750 loss=71.7935 avg50=63.3855 sem=3.1575 ts=0.0000 gn=19.5/avg21.5 enc=13.8 dec=13.8 lrE=9.60e-05 lrD=2.88e-04 audio=40s | A2S=3.01 A2S_lite=3.10 AMT=2.46 TAST=2.48
+step 14800 loss=77.8555 avg50=59.6631 sem=3.9025 ts=0.0000 gn=20.8/avg20.4 enc=12.3 dec=16.8 lrE=9.60e-05 lrD=2.88e-04 audio=39s | A2S=3.01 A2S_lite=3.10 AMT=2.44 TAST=2.48
+step 14850 loss=69.4979 avg50=58.0331 sem=3.1754 ts=0.0000 gn=13.5/avg22.1 enc=9.6 dec=9.5 lrE=9.60e-05 lrD=2.88e-04 audio=39s | A2S=3.01 A2S_lite=3.08 AMT=2.41 TAST=2.48
 
+【eval】
+  eval nasap 0/48(0s)
+  eval nasap 8/48(154s)
+  eval nasap 16/48(309s)
+  eval nasap 24/48(464s)
+  eval nasap 32/48(601s)
+  eval nasap 40/48(760s)
+  eval maestro 0(927s)
+  eval maestro 8(971s)
+  eval maestro 16(1014s)
+  eval maestro 24(1059s)
+  eval maestro 32(1104s)
+  eval maestro 40(1148s)
   (不停训:parseable=0.04 但 step<4000=False / sem=2.79>2.0=模型未熟;连续多个 eval 后 sem<门槛仍 0 才算真故障)
+  eval nasap 0/48(0s)
+  eval nasap 8/48(152s)
+  eval nasap 16/48(305s)
+  eval nasap 24/48(480s)
+  eval nasap 32/48(638s)
+  eval nasap 40/48(801s)
+  eval maestro 0(985s)
+  eval maestro 8(1033s)
+  eval maestro 16(1082s)
+  eval maestro 24(1132s)
+  eval maestro 32(1177s)
+  eval maestro 40(1228s)
+  (不停训:parseable=0.02 但 step<4000=False / sem=2.76>2.0=模型未熟;连续多个 eval 后 sem<门槛仍 0 才算真故障)
