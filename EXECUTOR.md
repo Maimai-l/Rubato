@@ -38,9 +38,10 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段(2026-07-14)
+## 当前阶段(2026-07-15)
 
-数据管线已全绿收尾(P0-P8),冒烟已通过(final_sem=0.038,reports/SMOKE_RESULT.md),
-全量训练已至 step≈7600。**当前任务 = `EXPERIMENT_H1.md` 那一张卡**(平台期判决实验):
-备份 last.pt → `python scripts/build_dataset.py --clip-norm 25` → ≥500 步 → 按卡上清单贴回。
+训练期。H1(梯度裁剪)已判决不成立并关案;step 12000 复盘发现训练减速 6 倍,
+**当前任务 = `EXPERIMENT_H2.md` 那一张卡**(decoder lr 5e-4→3e-4):
+备份 last.pt → `python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4` → ≥2000 步 →
+按卡上清单贴回(第一行的配置回显和续训行必须在)。
 不用再跑 sop_next(数据期命令);训练期日常 = `git pull --rebase --autostash` + 按当前实验卡跑。

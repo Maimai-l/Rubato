@@ -66,6 +66,21 @@ def build_optimizer(model, cfg: dict):
     return opt, sched
 
 
+def apply_cfg_lrs(opt, sched, cfg: dict):
+    """快照恢复【之后】把 cfg 的 lr 重新落到 optimizer/scheduler 上,返回各组当前 lr。
+    为什么必须有:opt.load_state_dict 会把 param_groups 的 lr/initial_lr 一起还原,
+    sched.load_state_dict 会还原 base_lrs —— 用 CLI 改了 lr 再续训,不重刷就被旧快照
+    静默吃掉:实验以为在 3e-4 跑,实际还是 5e-4,判决整个作废。组序同 build_optimizer
+    ([enc, 其余]);cfg 没改时本函数在数值上是无操作,默认续训行为不变。"""
+    bases = [float(cfg.get("lr_encoder", 1e-4)), float(cfg.get("lr_decoder", 5e-4))]
+    lams = getattr(sched, "lr_lambdas", None)
+    for i, (g, base) in enumerate(zip(opt.param_groups, bases)):
+        g["initial_lr"] = base
+        g["lr"] = base * (lams[i](sched.last_epoch) if lams else 1.0)
+    sched.base_lrs = [g["initial_lr"] for g in opt.param_groups]
+    return [g["lr"] for g in opt.param_groups]
+
+
 def group_grad_norms(param_groups):
     """各 param_group 的【裁剪前】梯度 L2 范数,顺序同 build_optimizer(enc, dec)。
     为什么单列:总 gn 只回答"裁剪吃掉多少",回答不了"梯度流向了谁"——H2(encoder
@@ -472,7 +487,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
         got = load_snapshot(last_pt, model, opt, sched)
         if got:
             step, start_epoch = got
-            print(f"续训:恢复 step={step} epoch={start_epoch}(优化器/调度器状态一并恢复)")
+            applied = apply_cfg_lrs(opt, sched, cfg)   # CLI 改 lr 必须能穿透快照,见函数注释
+            print(f"续训:恢复 step={step} epoch={start_epoch}(优化器/调度器状态一并恢复;"
+                  f"lr 按当前配置重刷 enc={applied[0]:.2e} dec={applied[1]:.2e})")
             if step >= max_steps:
                 return _finish("max_steps_reached")
 
@@ -536,7 +553,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
                       f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
                       f"enc={gn_groups[0]:.1f} dec={gn_groups[1]:.1f} "
-                      f"lr={opt.param_groups[0]['lr']:.2e} audio={batch_sec:.0f}s"
+                      f"lrE={opt.param_groups[0]['lr']:.2e} lrD={opt.param_groups[-1]['lr']:.2e} "
+                      f"audio={batch_sec:.0f}s"
                       f" | {_dia_line()}", flush=True)
             if step % save_every == 0:
                 save_snapshot(last_pt, model, opt, sched, step, epoch)

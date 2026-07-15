@@ -198,6 +198,11 @@ def main():
                     help="每 batch 音频秒上限;不传 = 全量 60 / 冒烟 120。执行端 16GB 卡实测:"
                          "150s OOM、100s 只剩 45MiB、60s 稳 —— 之前是执行端本地 patch,"
                          "每次 pull 担心被覆盖,现在是正式参数(此前版本会被写死的 60 覆盖,已修)")
+    ap.add_argument("--lr-dec", type=float, default=None,
+                    help="decoder(及非 encoder)组峰值 lr,默认 5e-4。断点续训时会在快照恢复后"
+                         "重刷生效(不加这层,快照会把 CLI 值静默还原成旧 lr)。H2 实验:3e-4")
+    ap.add_argument("--lr-enc", type=float, default=None,
+                    help="encoder 组峰值 lr,默认热启动 1e-4 / --from-scratch 5e-4")
     ap.add_argument("--clip-norm", type=float, default=1.0,
                     help="梯度裁剪阈值。序列损失量纲 ≈65(非逐 token 平均),若日志 gn 长期"
                          "远大于阈值 = 有效 lr 被裁剪吃掉几十倍 —— 证实后按 gn 中位数上调(如 10)")
@@ -334,8 +339,9 @@ def main():
     dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels,
                           max_batch_sec=args.max_batch_sec)
     cfg = {
-        "lr_encoder": 1e-4 if not args.from_scratch else 5e-4,   # 从头训:统一 lr
-        "lr_decoder": 5e-4,
+        "lr_encoder": args.lr_enc if args.lr_enc is not None
+                      else (1e-4 if not args.from_scratch else 5e-4),   # 从头训:统一 lr
+        "lr_decoder": args.lr_dec if args.lr_dec is not None else 5e-4,
         "precision": "bf16",                       # 5070 Ti 支持;fp32 想开就删这行
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
         "clip_norm": args.clip_norm,

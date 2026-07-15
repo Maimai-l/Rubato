@@ -8,7 +8,7 @@ sys.path.insert(0, ".")
 import torch
 import torch.nn as nn
 
-from rubato.model.train import build_optimizer, save_snapshot, load_snapshot
+from rubato.model.train import build_optimizer, save_snapshot, load_snapshot, apply_cfg_lrs
 
 PASS = 0
 
@@ -84,5 +84,34 @@ check("missing_none", load_snapshot(tmp / "nope.pt", *mk()) is None)
 bad = tmp / "bad.pt"
 bad.write_bytes(b"garbage")
 check("corrupt_none", load_snapshot(bad, *mk()) is None)
+
+print("[4] CLI 改 lr 必须穿透快照:恢复后 apply_cfg_lrs 重刷,否则被旧快照静默还原")
+m4 = M()
+opt4, sched4 = build_optimizer(m4, {"lr_encoder": 1e-4, "lr_decoder": 3e-4,
+                                    "warmup_steps": 10, "max_steps": 100})
+load_snapshot(snap, m4, opt4, sched4)   # 快照里是默认 lr(enc 1e-4 / dec 5e-4)
+restored_dec = opt4.param_groups[1]["initial_lr"]
+check("snapshot_clobbers_cli_lr", abs(restored_dec - 5e-4) < 1e-12, restored_dec)  # 证明必须重刷
+applied = apply_cfg_lrs(opt4, sched4, {"lr_encoder": 1e-4, "lr_decoder": 3e-4})
+factor = sched4.lr_lambdas[1](sched4.last_epoch)
+check("dec_lr_reapplied", abs(applied[1] - 3e-4 * factor) < 1e-12, (applied[1], factor))
+check("base_lrs_reapplied", abs(sched4.base_lrs[1] - 3e-4) < 1e-12, sched4.base_lrs)
+check("enc_lr_untouched", abs(sched4.base_lrs[0] - 1e-4) < 1e-12, sched4.base_lrs)
+# cfg 与快照相同 → 数值无操作(默认续训行为不变)
+m5, opt5, sched5 = mk()
+load_snapshot(snap, m5, opt5, sched5)
+before = [g["lr"] for g in opt5.param_groups]
+apply_cfg_lrs(opt5, sched5, {})   # 默认 cfg = 快照里的值
+check("noop_when_cfg_unchanged",
+      all(abs(a - b) < 1e-12 for a, b in zip(before, (g["lr"] for g in opt5.param_groups))),
+      (before, [g["lr"] for g in opt5.param_groups]))
+# 快照+无操作重刷+3 步(seed 42)必须和测试[2]的 m3(快照+3 步,seed 42,无重刷)逐位一致:
+# 重刷相同 lr 不得以任何方式扰动训练轨迹
+torch.manual_seed(42)
+for _ in range(3):
+    (m5.encoder(torch.randn(2, 4)).sum() + m5.decoder(torch.randn(2, 4)).sum()).backward()
+    opt5.step(); sched5.step(); opt5.zero_grad()
+check("timeline_identical_after_noop_reapply",
+      all(torch.equal(a, b) for a, b in zip(m3.state_dict().values(), m5.state_dict().values())))
 
 print(f"\n全部通过: {PASS} 项")
