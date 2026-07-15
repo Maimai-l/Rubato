@@ -1,0 +1,24 @@
+=== H2 实验日志 (--clip-norm 25 --lr-dec 3e-4) ===
+
+训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48
+续训:恢复 step=12800 epoch=1(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=9.71e-05 dec=2.91e-04)
+
+训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48
+续训:恢复 step=12800 epoch=1(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=9.71e-05 dec=2.91e-04)
+step 12850 loss=35.8202 avg50=56.3101 sem=2.5192 ts=2.4050 gn=19.7/avg18.9 enc=13.8 dec=14.1 lrE=9.71e-05 lrD=2.91e-04 audio=50s | A2S=2.98 A2S_lite=3.11 AMT=2.46 TAST=2.39
+step 12900 loss=56.8551 avg50=54.6162 sem=2.3861 ts=2.5682 gn=15.9/avg20.0 enc=12.8 dec=9.4 lrE=9.71e-05 lrD=2.91e-04 audio=40s | A2S=2.98 A2S_lite=3.19 AMT=2.47 TAST=2.45
+step 12950 loss=87.6289 avg50=62.3713 sem=3.6480 ts=0.0000 gn=22.2/avg19.8 enc=14.2 dec=17.0 lrE=9.70e-05 lrD=2.91e-04 audio=39s | A2S=3.04 A2S_lite=3.13 AMT=2.47 TAST=2.44
+step 13000 loss=73.2318 avg50=56.1138 sem=2.5867 ts=2.6668 gn=16.3/avg21.4 enc=11.1 dec=11.9 lrE=9.70e-05 lrD=2.91e-04 audio=37s | A2S=3.02 A2S_lite=3.09 AMT=2.47 TAST=2.48
+step 13050 loss=56.7725 avg50=55.2605 sem=2.3346 ts=2.0464 gn=19.9/avg20.0 enc=13.6 dec=14.5 lrE=9.70e-05 lrD=2.91e-04 audio=54s | A2S=3.01 A2S_lite=3.08 AMT=2.46 TAST=2.49
+step 13100 loss=34.5823 avg50=59.0897 sem=2.9438 ts=0.0000 gn=16.9/avg20.5 enc=11.1 dec=12.7 lrE=9.70e-05 lrD=2.91e-04 audio=32s | A2S=3.03 A2S_lite=3.06 AMT=2.47 TAST=2.48
+step 13150 loss=67.4597 avg50=59.0072 sem=2.1700 ts=2.2923 gn=21.6/avg21.9 enc=13.0 dec=17.3 lrE=9.69e-05 lrD=2.91e-04 audio=34s | A2S=3.02 A2S_lite=3.07 AMT=2.48 TAST=2.47
+step 13200 loss=60.4003 avg50=59.9803 sem=2.4108 ts=3.8266 gn=26.0/avg23.2 enc=14.2 dec=21.8 lrE=9.69e-05 lrD=2.91e-04 audio=36s | A2S=3.01 A2S_lite=3.03 AMT=2.47 TAST=2.47
+step 13250 loss=69.1441 avg50=62.6236 sem=2.4225 ts=2.4220 gn=22.4/avg19.5 enc=13.0 dec=18.2 lrE=9.69e-05 lrD=2.91e-04 audio=57s | A2S=2.99 A2S_lite=3.05 AMT=2.47 TAST=2.47
+step 13300 loss=58.3112 avg50=59.3991 sem=3.4420 ts=0.0000 gn=18.0/avg21.0 enc=13.2 dec=12.2 lrE=9.69e-05 lrD=2.91e-04 audio=40s | A2S=2.99 A2S_lite=3.06 AMT=2.46 TAST=2.48
+step 13350 loss=87.7682 avg50=58.6089 sem=3.0725 ts=0.0000 gn=20.0/avg20.3 enc=14.3 dec=14.0 lrE=9.68e-05 lrD=2.90e-04 audio=38s | A2S=2.99 A2S_lite=3.07 AMT=2.46 TAST=2.48
+step 13400 loss=54.8454 avg50=62.1287 sem=2.2714 ts=2.3740 gn=18.8/avg22.1 enc=12.8 dec=13.7 lrE=9.68e-05 lrD=2.90e-04 audio=56s | A2S=2.98 A2S_lite=3.09 AMT=2.46 TAST=2.48
+step 13450 loss=35.1246 avg50=59.5882 sem=2.3469 ts=0.0000 gn=16.5/avg22.0 enc=11.7 dec=11.6 lrE=9.68e-05 lrD=2.90e-04 audio=38s | A2S=3.00 A2S_lite=3.09 AMT=2.45 TAST=2.48
+step 13500 loss=55.6784 avg50=59.1735 sem=2.6680 ts=2.5603 gn=28.1/avg23.8 enc=15.9 dec=23.2 lrE=9.67e-05 lrD=2.90e-04 audio=36s | A2S=2.98 A2S_lite=3.09 AMT=2.46 TAST=2.49
+step 13550 loss=37.9416 avg50=57.7719 sem=2.5490 ts=1.9619 gn=18.0/avg21.6 enc=12.1 dec=13.3 lrE=9.67e-05 lrD=2.90e-04 audio=52s | A2S=2.99 A2S_lite=3.10 AMT=2.44 TAST=2.49
+
+  (不停训:parseable=0.04 但 step<4000=False / sem=2.79>2.0=模型未熟;连续多个 eval 后 sem<门槛仍 0 才算真故障)
