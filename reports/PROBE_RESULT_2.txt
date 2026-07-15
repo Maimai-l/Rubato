@@ -1,0 +1,21 @@
+训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48
+续训:恢复 step=16600 epoch=1(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=9.49e-05 dec=2.85e-04)
+  eval nasap 0/48(0s)
+  eval 探针[nasap_Bult-ItoS02M_171360e0_004/TAST]: acc=0.40 前缀acc=0.38 eotP@首位=0.0001 n=389
+  eval 探针argmax: '|4/4k0PL:F3C5 <|0.00|> 1/8a-4 <|0.38|> 1/16A-4 <|0.48|> 1/16 <|0.68|> 1/16c3c4PR'
+  eval 探针参照:   '|4/4k-4PL:C3C4PR:A-4 <|0.00|> 1/16C5 <|0.28|> 1/16c5F5 <|0.56|> 1/16f5E5 <|0.83|'
+  eval nasap 8/48(143s)
+  eval nasap 16/48(303s)
+  eval nasap 24/48(470s)
+  eval nasap 32/48(606s)
+  eval nasap 40/48(774s)
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_ORPHAN_OFFSET:('PL', SPitch(step='F', alter=0, octave=3))@83/8", "DYCK_UNCLOSED:[('PL', SPitch(step='F', alter=0, octave=3))]", 'TERMINAL_BAR_MISSING'], 'raw': '|4/4k0PL:A2 <|0.13|> 1/8a2F3 <|0.32|> 1/8f3A3 <|0.50|> 1/8a3F3 <|0.72|> 1/8f3A3 <|0.82|> 1/8a3F3 <|1.00|> 1/8f3 <|1.21|> |4/4k0A2 <|1.21|> 1/8a2F3 <|1.39|> 1/8f', 'truncated': '|4/4k0PL:A2 <|0.13|> 1/8a2F3 <|0.32|> 1/8f3A3 <|0.50|> 1/8a3F3 <|0.72|> 1/8f3A3 <|0.82|> 1/8a3F3 <|1'}
+  eval 汇总: parseable=0.02 empty=0.9791666666666666 n=48 样本0='|4/4k0' 探针acc=0.40/前缀0.38 eotP0=0.0001
+  eval maestro 0(939s)
+  eval maestro 8(989s)
+  eval maestro 16(1038s)
+  eval maestro 24(1087s)
+  eval maestro 32(1131s)
+  eval maestro 40(1181s)
