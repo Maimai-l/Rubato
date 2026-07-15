@@ -380,3 +380,61 @@ def infer_file(audio_path: str, model, tokenizer):
         audio = soxr.resample(audio, sr, 16000)
         sr = 16000
     return infer_a2s(model, audio, tokenizer, sr)
+
+
+# ---------------------------------------------------------------- 教师强制探针(诊断,2026-07-15)
+
+def _probe_from_logprobs(lp, labels, loss_mask, eot_id, tokenizer=None, prefix_n: int = 32) -> dict:
+    """探针的纯计算部分(沙盒可测)。lp: [T,V] log-prob 张量;labels/loss_mask: list(与
+    encode_target 输出同构,右移后逐位对齐)。返回:
+      acc          全序列计分位的 argmax 命中率
+      acc_prefix   前 prefix_n 个计分位的命中率(自由生成塌缩发生在开头,前缀命中率才是主证)
+      eot_p_first  第一个计分位上 <|eot|> 的概率 ——"一开口就想收工"的直接证据
+      n_scored     计分位数量;argmax_prefix/ref_prefix:前缀的 argmax 解码 vs 参照解码(可读对照)
+    """
+    import torch
+    lab = torch.as_tensor(labels)
+    mask = torch.as_tensor(loss_mask, dtype=torch.bool)
+    T = min(int(lp.shape[0]), int(lab.shape[0]), int(mask.shape[0]))
+    lp, lab, mask = lp[:T], lab[:T], mask[:T]
+    pred = lp.argmax(-1)
+    idx = mask.nonzero(as_tuple=True)[0]
+    n = int(idx.numel())
+    out = {"acc": 0.0, "acc_prefix": 0.0, "eot_p_first": None, "n_scored": n}
+    if not n:
+        return out
+    out["acc"] = float((pred[idx] == lab[idx]).float().mean())
+    head = idx[:prefix_n]
+    out["acc_prefix"] = float((pred[head] == lab[head]).float().mean())
+    out["eot_p_first"] = float(lp[idx[0], eot_id].exp())
+    if tokenizer is not None:
+        out["argmax_prefix"] = tokenizer.decode([int(i) for i in pred[head]])[:80]
+        out["ref_prefix"] = tokenizer.decode([int(i) for i in lab[head]])[:80]
+    return out
+
+
+def teacher_forced_probe(model, audio, ref_text: str, dialect: str, tokenizer,
+                         domain: str | None = None, prefix_n: int = 32) -> dict:
+    """教师强制探针:给足参照上文,量模型逐位预测下一 token 的命中率。
+    为什么需要它:自由生成塌缩在开头(eval 恒吐 '|4/4k0' 即停)有两种病因,损失曲线分不开——
+      前缀命中率高 + 自由生成塌 → 暴露偏置/解码侧问题(往 scheduled sampling / 解码约束修);
+      前缀命中率也低            → 模型确实没学会,继续训,命中率成为比 parseable 灵敏得多的进度表。
+    与训练严格同构:encode_target(sample=False,同 prompt/domain 布局)+ 同一个 forward
+    (走 autoregressive_decode 已验证的 preprocessor→forward→resolve_log_probs 路径)。
+    """
+    import torch
+    from rubato.data.dataset import encode_target
+    from rubato.model.train import resolve_log_probs
+    enc = encode_target(tokenizer, dialect, ref_text, sample=False, domain=domain)
+    device = next(model.parameters()).device
+    audio_t = torch.as_tensor(audio, dtype=torch.float32, device=device).reshape(1, -1)
+    len_t = torch.tensor([audio_t.shape[1]], device=device)
+    with torch.no_grad():
+        processed, plen = model.preprocessor(input_signal=audio_t, length=len_t)
+        t = torch.tensor([enc["input_ids"]], dtype=torch.long, device=device)
+        tl = torch.tensor([len(enc["input_ids"])], device=device)
+        out = model.forward(processed_signal=processed, processed_signal_length=plen,
+                            transcript=t, transcript_length=tl)
+        lp = resolve_log_probs(out)[0]
+    return _probe_from_logprobs(lp, enc["labels"], enc["loss_mask"],
+                                tokenizer.piece_to_id("<|eot|>"), tokenizer, prefix_n)

@@ -38,10 +38,14 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段(2026-07-15)
+## 当前阶段(2026-07-15 晚)
 
-训练期。H1(梯度裁剪)已判决不成立并关案;step 12000 复盘发现训练减速 6 倍,
-**当前任务 = `EXPERIMENT_H2.md` 那一张卡**(decoder lr 5e-4→3e-4):
-备份 last.pt → `python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4` → ≥2000 步 →
-按卡上清单贴回(第一行的配置回显和续训行必须在)。
+训练期。H1(裁剪)、H2(decoder lr)均已判决无效并关案。
+**当前任务 = `EXPERIMENT_PROBE.md` 那一张卡**(不改参数,拉新代码重启,贴回 eval 里的探针行)。
 不用再跑 sop_next(数据期命令);训练期日常 = `git pull --rebase --autostash` + 按当前实验卡跑。
+
+## 报告规矩补充(2026-07-15,对应 cd996eb 事故)
+
+- **reports/ 下的日志文件只增不删**:"final" 也不许删除或覆盖之前的内容,只能追加。
+  (cd996eb 把 H2_steps.txt 的 eval 段删了,证据靠 git 历史才找回来。)
+- 摘录训练日志时,所有以 `  eval` 开头的行必须保留(探针/样本预测/汇总都在里面)。

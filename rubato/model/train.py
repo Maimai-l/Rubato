@@ -317,6 +317,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     truncated = False
     omr_scores = []
     sample_preds: list[str] = []
+    probe: dict = {}
     subset = _eval_subset(nasap_val, eval_max)
     for si, sample in enumerate(subset):
         # 时限 + 心跳:eval 是逐 token 生成,慢是常态 —— 没有这两样,"慢"和"卡死"
@@ -335,6 +336,24 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         n_total += 1
         if len(sample_preds) < 2:              # 模型实际吐了什么 —— 定性"胶水坏/模型早"的直接证据
             sample_preds.append(pred[:160])
+        if not probe:
+            # 教师强制探针(每次 eval 跑一个样本,~秒级):自由生成塌缩的病因分诊,
+            # 前缀命中率还是比 parseable 灵敏得多的进度表。失败不许影响 eval 主流程。
+            _lab = labels.get(sample.get("utt_id"), {}) or {}
+            _dia = "TAST" if _lab.get("TAST") else ("A2S" if _lab.get("A2S") else None)
+            if _dia:
+                try:
+                    from rubato.model.infer import teacher_forced_probe
+                    probe = teacher_forced_probe(model, audio, _lab[_dia], _dia,
+                                                 tokenizer, domain=sample.get("domain"))
+                    print(f"  eval 探针[{sample.get('utt_id', '?')}/{_dia}]: "
+                          f"acc={probe['acc']:.2f} 前缀acc={probe['acc_prefix']:.2f} "
+                          f"eotP@首位={probe['eot_p_first']:.4f} n={probe['n_scored']}", flush=True)
+                    print(f"  eval 探针argmax: {probe.get('argmax_prefix', '')!r}", flush=True)
+                    print(f"  eval 探针参照:   {probe.get('ref_prefix', '')!r}", flush=True)
+                except Exception as e:
+                    probe = {"error": f"{type(e).__name__}: {e}"}
+                    print(f"  eval 探针失败({probe['error']})—— 贴回本行", flush=True)
         viol = validate_units(text_to_units(pred)) if pred else ["empty"]
         if pred == _EMPTY_A2S:
             n_empty += 1
@@ -354,6 +373,13 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         print(f"  eval 样本预测[{k}]: {p!r}", flush=True)
     if omr_scores:
         metrics["val_omr_ned"] = sum(omr_scores) / len(omr_scores)
+    # 一行汇总:把判读必需的全部证据压进单行 —— 执行端按行摘录日志时,丢哪行都不致盲
+    _p0 = sample_preds[0][:60] if sample_preds else ""
+    _pr = (f"探针acc={probe['acc']:.2f}/前缀{probe['acc_prefix']:.2f}"
+           f" eotP0={probe['eot_p_first']:.4f}") if probe.get("n_scored") else \
+          (f"探针err={probe.get('error', '无参照')}" if probe else "探针=未跑")
+    print(f"  eval 汇总: parseable={metrics['parseable_rate']:.2f} "
+          f"empty={metrics['empty_rate']} n={n_total} 样本0={_p0!r} {_pr}", flush=True)
 
     # MAESTRO val:AMT note F1(mir_eval)。R-S11.7 的"步≥8000 且 AMT F1<70 → 停训"
     # 依赖它;参照音符从该窗的真值 AMT 文本反解。无参照样本跳过(不打 0 分)。

@@ -30,6 +30,8 @@
 
 | D22 | step 12000 复盘:训练减速 6 倍(A2S -0.017/500 步 vs 判决期 -0.11/500),AMT 4200 步零进展,触发 H1 §7 预声明的升级条件 → 开 H2 实验:`--lr-dec 3e-4`(decoder 5e-4→3e-4,encoder/clip 不动),判定窗 2000 步,判据写死在 EXPERIMENT_H2.md。配套代码:--lr-enc/--lr-dec CLI + apply_cfg_lrs(CLI 的 lr 必须穿透快照恢复,否则被旧快照静默还原——tests_resume [4] 专门回归这一点) + 日志 lrE/lrD 双列 | 2026-07-15 | 贴回日志 8500-12700(出处:用户粘贴);升级条件是 D21 时预先声明的,非临时起意;lr=3e-4 的选择依据 REF_EXTERNAL_RECIPES(三个参照项目一致值)+ 小 batch 高噪声 | EXPERIMENT_H2.md;train.py apply_cfg_lrs;build_dataset.py --lr-dec/--lr-enc |
 
+| D23 | **H2 判决:无效**(锚点 13000 A2S=3.02 → 14900 仍 3.02;14500 的 2.95 是波动;parseable 0.04→0.02 噪声)。优化器侧三嫌疑(H1 裁剪/H2a encoder 信号/H2 decoder lr)全部实验排除。lr 留 3e-4;转探针路线:eval 内置教师强制探针(infer.teacher_forced_probe,判读阈值预声明:前缀acc≥0.6→解码侧病/≤0.3→模型未熟)+ 单行 eval 汇总防摘录丢证据。并立报告规矩:reports/ 只增不删(cd996eb 删 eval 段事故,已从 git 历史恢复) | 2026-07-15 | reports/H2_steps.txt 满窗数据 + 按 EXPERIMENT_H2 预声明判据;探针是 H2 卡预告的下一步,判读阈值在数据到来前写死 | EXPERIMENT_PROBE.md;rubato/model/infer.py 探针;train.py eval 接线;tests_probe.py |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

@@ -42,3 +42,8 @@ step 14750 loss=71.7935 avg50=63.3855 sem=3.1575 ts=0.0000 gn=19.5/avg21.5 enc=1
 step 14800 loss=77.8555 avg50=59.6631 sem=3.9025 ts=0.0000 gn=20.8/avg20.4 enc=12.3 dec=16.8 lrE=9.60e-05 lrD=2.88e-04 audio=39s | A2S=3.01 A2S_lite=3.10 AMT=2.44 TAST=2.48
 step 14850 loss=69.4979 avg50=58.0331 sem=3.1754 ts=0.0000 gn=13.5/avg22.1 enc=9.6 dec=9.5 lrE=9.60e-05 lrD=2.88e-04 audio=39s | A2S=3.01 A2S_lite=3.08 AMT=2.41 TAST=2.48
 step 14900 loss=65.4784 avg50=62.0749 sem=2.6652 ts=2.3002 gn=15.3/avg21.0 enc=11.7 dec=9.8 lrE=9.60e-05 lrD=2.88e-04 audio=54s | A2S=3.02 A2S_lite=3.08 AMT=2.41 TAST=2.47
+
+【eval 段——规划端从 commit c2bb5a7 恢复(cd996eb 曾整段删除;报告文件只增不删)】
+  step 13000 eval: parseable=0.04, sem=2.79(样本预测行未随文件提交,缺)
+  step 14000 eval: parseable=0.02, sem=2.76(样本预测行未随文件提交,缺)
+  原始进度行见 git show c2bb5a7:reports/H2_steps.txt
