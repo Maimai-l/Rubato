@@ -70,4 +70,40 @@ check("empty_mask_zero", r["acc"] == 0.0 and r["n_scored"] == 0 and r["eot_p_fir
 r = _probe_from_logprobs(logprobs_for([3, 4, 5]), [3, 4], [True, True], EOT)  # lp 比 labels 长
 check("length_mismatch_ok", r["n_scored"] == 2, r)
 
+print("[7] 吞错现场:validate 拒绝时留存模型原始输出;解码异常留 traceback")
+import rubato.model.infer as inf
+
+
+class StubGen:
+    def generate(self, audio, prompt=None, num_beams=1):
+        return "garbage((("
+
+
+inf.LAST_DECODE_DEBUG = None
+out = inf.single_window_tast(StubGen(), [0.0] * 16000, 16000, tokenizer=None, truncate=False)
+check("reject_returns_empty", out == "")
+check("reject_captured", bool(inf.LAST_DECODE_DEBUG)
+      and inf.LAST_DECODE_DEBUG["stage"] == "validate_reject"
+      and inf.LAST_DECODE_DEBUG["raw"].startswith("garbage"), inf.LAST_DECODE_DEBUG)
+
+
+class StubBoom:
+    def generate(self, audio, prompt=None, num_beams=1):
+        raise ValueError("boom")
+
+
+inf.LAST_DECODE_DEBUG = None
+out = inf.single_window_tast(StubBoom(), [0.0] * 16000, 16000, tokenizer=None, truncate=False)
+check("exception_returns_empty", out == "")
+check("exception_captured", bool(inf.LAST_DECODE_DEBUG)
+      and inf.LAST_DECODE_DEBUG["stage"] == "decode_exception"
+      and "boom" in inf.LAST_DECODE_DEBUG["err"], inf.LAST_DECODE_DEBUG)
+
+print("[8] infer_a2s 顶层异常留案发现场并兜底(audio=None → _infer_impl 入口即炸)")
+inf.LAST_INFER_ERROR = None
+r = inf.infer_a2s(StubGen(), None, tokenizer=None)
+check("fallback_on_error", r == inf._EMPTY_A2S, r)
+check("error_recorded", bool(inf.LAST_INFER_ERROR) and "TypeError" in inf.LAST_INFER_ERROR,
+      inf.LAST_INFER_ERROR)
+
 print(f"\n全部通过: {PASS} 项")

@@ -312,6 +312,9 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     # empty_rate 单列:≈1.0 说明是解码 API 胶水没接上(NeMo generate 签名),不是模型烂 ——
     # 两者都表现为 pause_unparseable,诊断量必须能区分。
     import time as _time
+    from rubato.model import infer as _inf
+    _inf.LAST_INFER_ERROR = None          # 吞错现场:本轮 eval 只看本轮的
+    _inf.LAST_DECODE_DEBUG = None
     t_eval0 = _time.time()
     n_ok, n_total, n_empty = 0, 0, 0
     truncated = False
@@ -371,6 +374,15 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     metrics["eval_truncated"] = truncated
     for k, p in enumerate(sample_preds):
         print(f"  eval 样本预测[{k}]: {p!r}", flush=True)
+    # 兜底 ≠ 模型输出:'|4/4k0' 是异常/拒绝的兜底常量(执行端 6 轮 eval 被它蒙蔽)。
+    # 只要出现兜底,把吞错现场打出来 —— 模型真实输出/违规项/异常栈,三选一必有。
+    if n_empty:
+        if _inf.LAST_DECODE_DEBUG:
+            print(f"  eval 解码现场: {_inf.LAST_DECODE_DEBUG}", flush=True)
+        if _inf.LAST_INFER_ERROR:
+            print(f"  eval 兜底异常: {_inf.LAST_INFER_ERROR[:600]}", flush=True)
+        if not (_inf.LAST_DECODE_DEBUG or _inf.LAST_INFER_ERROR):
+            print("  eval 兜底但无现场记录 —— 空谱来自非异常路径,贴回本行", flush=True)
     if omr_scores:
         metrics["val_omr_ned"] = sum(omr_scores) / len(omr_scores)
     # 一行汇总:把判读必需的全部证据压进单行 —— 执行端按行摘录日志时,丢哪行都不致盲

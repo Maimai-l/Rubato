@@ -23,6 +23,12 @@ from rubato.model.merge_ref import merge_windows_ref
 
 _EMPTY_A2S = "|4/4k0"           # 合法空谱(过 validate),stub 与兜底用
 
+# 吞错现场记录(2026-07-15 立):eval 连续多轮 样本0='|4/4k0' 被误读成"模型只会输出开头",
+# 实为兜底常量 —— 三层静默吞错(解码异常/validate 拒绝/顶层异常)必须留案发现场,
+# run_eval_hooks 在出现兜底时打印。只存最后一次,eval 开始时清零。
+LAST_INFER_ERROR: str | None = None     # infer_a2s 顶层异常(traceback 头)
+LAST_DECODE_DEBUG: dict | None = None   # 单窗解码:validate 拒绝的原始输出 / 解码异常
+
 
 # ---------------------------------------------------------------- 纯逻辑:分窗(R-S12.1.1)
 
@@ -249,14 +255,23 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
             return model.transcribe([audio_window], num_beams=beam)[0]
         return str(model(audio_window, prompt=prompt))
 
+    global LAST_DECODE_DEBUG
     for beam in (beam_size, 1):          # beam=4,失败退 greedy
         try:
             raw = _decode(beam)
-        except Exception:
+        except Exception as e:
+            import traceback
+            LAST_DECODE_DEBUG = {"stage": "decode_exception",
+                                 "err": f"{type(e).__name__}: {e}",
+                                 "tb": traceback.format_exc(limit=4)}
             continue
         tast = truncate_after_20s(raw) if truncate else raw   # >20s = EOS(末窗除外)
-        if not validate_a2s(strip_timestamps(tast)):          # 剥戳后合法即采用
+        viol = validate_a2s(strip_timestamps(tast))           # 剥戳后合法即采用
+        if not viol:
             return tast
+        # 模型真实输出在此被丢弃 —— 这正是"样本0永远=兜底"时最需要看到的现场
+        LAST_DECODE_DEBUG = {"stage": "validate_reject", "viol": viol[:4],
+                             "raw": raw[:160], "truncated": tast[:100]}
     return ""                            # 两次都不合法 → 空(计入 n_fail)
 
 
@@ -283,7 +298,10 @@ def infer_a2s(model, audio, tokenizer, sr: int = 16000) -> str:
         return _EMPTY_A2S
     try:
         return _infer_impl(model, audio, tokenizer, sr)
-    except Exception:
+    except Exception as e:
+        import traceback
+        global LAST_INFER_ERROR
+        LAST_INFER_ERROR = f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=4)}"
         return _EMPTY_A2S
 
 
@@ -393,6 +411,9 @@ def _probe_from_logprobs(lp, labels, loss_mask, eot_id, tokenizer=None, prefix_n
       n_scored     计分位数量;argmax_prefix/ref_prefix:前缀的 argmax 解码 vs 参照解码(可读对照)
     """
     import torch
+    # 全部落 CPU 再比较:lp 来自 GPU forward,labels/mask 是 python list ——
+    # 混设备比较是 RuntimeError(执行端 step15000 eval 实测),数据量 T×V≈4M float 无压力。
+    lp = torch.as_tensor(lp).detach().float().cpu()
     lab = torch.as_tensor(labels)
     mask = torch.as_tensor(loss_mask, dtype=torch.bool)
     T = min(int(lp.shape[0]), int(lab.shape[0]), int(mask.shape[0]))

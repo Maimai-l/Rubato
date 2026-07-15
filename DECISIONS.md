@@ -32,6 +32,8 @@
 
 | D23 | **H2 判决:无效**(锚点 13000 A2S=3.02 → 14900 仍 3.02;14500 的 2.95 是波动;parseable 0.04→0.02 噪声)。优化器侧三嫌疑(H1 裁剪/H2a encoder 信号/H2 decoder lr)全部实验排除。lr 留 3e-4;转探针路线:eval 内置教师强制探针(infer.teacher_forced_probe,判读阈值预声明:前缀acc≥0.6→解码侧病/≤0.3→模型未熟)+ 单行 eval 汇总防摘录丢证据。并立报告规矩:reports/ 只增不删(cd996eb 删 eval 段事故,已从 git 历史恢复) | 2026-07-15 | reports/H2_steps.txt 满窗数据 + 按 EXPERIMENT_H2 预声明判据;探针是 H2 卡预告的下一步,判读阈值在数据到来前写死 | EXPERIMENT_PROBE.md;rubato/model/infer.py 探针;train.py eval 接线;tests_probe.py |
 
+| D24 | **重大事实修正:eval 的 `'|4/4k0'` 是兜底常量 `_EMPTY_A2S`,不是模型输出**(本轮 eval empty=1.0 坐实)。既往所有"模型只会输出开头"的解读作废;推理管线三处静默吞错(解码异常/validate 拒绝/顶层异常)全部装上现场记录,eval 出现兜底即打印模型真实原始输出与违规项/异常栈;探针 device bug 修复(lp 落 CPU 再比较)。执行端"model generates EOS immediately"说法无数据支撑,不采信。报告规矩升级:reports/ 只写新编号文件,不编辑旧文件(cd996eb/5c48581 两次删证据后) | 2026-07-15 | reports/PROBE_RESULT.txt(empty=1.0 + 探针 device 崩溃)+ infer.py:24 `_EMPTY_A2S="|4/4k0"` 代码事实;empty_rate 诊断量一直存在但从未被打印,盲区因此存活数轮 eval | infer.py 吞错现场三处 + 探针修复;train.py eval 打印现场;tests_probe [7][8];EXPERIMENT_PROBE.md 第二版 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

@@ -48,3 +48,37 @@ python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
 - **报告文件只增不删**。cd996eb 把 H2_steps.txt 的 eval 段整段删掉了(已由规划端从
   git 历史恢复)。日志是证据,"final"也不许覆盖或删除之前的内容,追加即可。
 - 摘录日志时,所有以 `  eval` 开头的行都要保留(包括 探针/样本预测/汇总)。
+
+---
+
+## 第二版(2026-07-15 深夜):探针 device bug 已修 + 真相修正 + 吞错现场
+
+**重要修正**:`样本0='|4/4k0'` 不是模型输出 —— 它是 `_EMPTY_A2S` 兜底常量(infer.py:24)。
+本轮 eval `empty=1.0` 说明 48 个样本全部走了兜底:推理管线在(a)解码异常、(b)输出过不了
+validate、(c)顶层异常三处**静默吞错**,我们之前把兜底常量误读成"模型只会输出开头"。
+"model generates EOS immediately"(ff7b331 提交信息)目前没有任何数据支撑,不作数。
+
+已修/已加(git pull 后生效):
+1. 探针 device bug(GPU/CPU 混比较)已修 —— 上轮探针没跑成,这轮会出数。
+2. 三层吞错全部装了现场记录,eval 出现兜底时自动打印:
+   - `eval 解码现场: {stage: validate_reject, viol: [...], raw: '模型真实输出前160字'}`
+     ——**模型到底吐了什么、为什么被拒**,第一次可见;
+   - `eval 兜底异常: ...traceback...`(顶层异常时)。
+
+### 操作(同前,重跑一次)
+
+```bat
+git pull --rebase --autostash
+(停训练,Ctrl+C)
+python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
+```
+
+### 贴回(跑过 1-2 次 eval 即可)
+
+配置回显行、续训行,以及 eval 的全部 `  eval` 开头行 —— 这次重点是三样:
+`探针acc/前缀acc/eotP`、`解码现场`(模型真实输出)、`兜底异常`(若有)。
+
+### 报告文件规矩升级(第二次违反后,改成更简单的规则)
+
+**不要再编辑任何已存在的报告文件。每次新报告写新文件**,编号递增:
+`reports/PROBE_RESULT_2.txt`、`reports/PROBE_RESULT_3.txt`……旧文件一个字都不动。
