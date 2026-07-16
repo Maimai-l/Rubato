@@ -36,6 +36,8 @@
 
 | D25 | 20k 复盘:探针 4 点持平(前缀 0.31-0.38,总 0.40-0.41)、解码现场=复读机(Dyck 断裂被拒,胶水无病)、amt_f1=0.0(全方言生成未熟)、A2S 训练损失 4200 步净零 → 病 A/B 判据均未命中,焦点升级为"decoder 是否在从音频读内容"。探针加【静音对照】+ sem/ts 分型命中率,判据预登记:两次 eval Δsem 均值 ≤0.02 → 病 C(没读音频,转查 encoder/cross-attention)/ ≥0.06 → 病 A(在读,继续训)。执行端"lrD 衰减致 A2S 反弹"说法不采纳(衰减仅 8%,反弹在窗噪声内) | 2026-07-16 | eval_autolog.md(代码自动落盘,4 次 eval)+ PROBE_RESULT_2-5;判据在数据到来前写死 | infer.py 探针分型+静音对照;train.py eval 双样本探针;tests_probe [10];EXPERIMENT_PROBE.md 20k 复盘节 |
 
+| D26 | 22000 静音对照:Δsem=0.00(连 ts 都不随音频变)→ **病 C 升为头号假设但不判**:①三指标逐位相同需自证对照生效;②规划端探针缺长度护栏,第二样本超 1024 → CUDA assert 上下文中毒,本轮 eval 后续数字全作废;执行端"病C confirmed"不采纳。修复+升级:长度截断护栏(_truncate_enc)、探针行带 rms/enc帧/enc_std 自证、新增错配音频第三对照;判定矩阵预登记(enc帧=0→C-结构 / enc_std 分化+Δsem≈0+错配同 acc→C-忽略 / Δsem≥0.06→回病 A)。若 C 坐实,冒烟证书重新解读:32 样本过拟合纯文本记忆即可达标,从未证明音频通路 | 2026-07-16 | eval_autolog @ddf0f20(代码落盘);判定矩阵在数据前写死 | infer.py 护栏+enc 体征;train.py 三对照探针;tests_probe [11];EXPERIMENT_PROBE.md 22000 节 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

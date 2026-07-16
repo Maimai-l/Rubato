@@ -331,6 +331,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     sample_preds: list[str] = []
     probe: dict = {}
     n_probed = 0
+    _probe0 = None                       # 样本0 的 (参照, 方言, domain),供错配对照
     subset = _eval_subset(nasap_val, eval_max)
     for si, sample in enumerate(subset):
         # 时限 + 心跳:eval 是逐 token 生成,慢是常态 —— 没有这两样,"慢"和"卡死"
@@ -351,25 +352,33 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         if n_probed < 2:
             # 教师强制探针(每次 eval 前两个有参照的样本,~秒级):自由生成塌缩的病因分诊,
             # 命中率还是比 parseable 灵敏得多的进度表。失败不许影响 eval 主流程。
-            # 首样本额外跑【静音对照】:同序列换全零音频再测一遍 —— Δ语义命中率回答
-            # "decoder 有没有在从音频读内容"(时间戳撑起来的总 acc 会骗人)。
+            # 三组对照回答"decoder 有没有在从音频读内容":
+            #   样本0 真音频 vs 静音(Δsem);样本1 到位后再加【错配】= 样本0 的谱 × 样本1 的
+            #   音频(比静音更严:静音可能只是超纲输入,错配是分布内的真钢琴声)。
+            # 每行带 rms=音频能量 —— 对照输入确实不同,由日志自证(22000 步三指标全同引发过怀疑)。
             _lab = labels.get(sample.get("utt_id"), {}) or {}
             _dia = "TAST" if _lab.get("TAST") else ("A2S" if _lab.get("A2S") else None)
             if _dia:
                 try:
+                    import numpy as _np
                     from rubato.model.infer import teacher_forced_probe
+                    _fmt = lambda v: "-" if v is None else f"{v:.2f}"
+                    _rms = lambda a: float(_np.sqrt(_np.mean(_np.square(
+                        _np.asarray(a, dtype=_np.float32)))))
                     pr = teacher_forced_probe(model, audio, _lab[_dia], _dia,
                                               tokenizer, domain=sample.get("domain"))
-                    _fmt = lambda v: "-" if v is None else f"{v:.2f}"
                     _p(f"  eval 探针[{sample.get('utt_id', '?')}/{_dia}]: "
                           f"acc={pr['acc']:.2f} 前缀acc={pr['acc_prefix']:.2f} "
                           f"sem={_fmt(pr.get('acc_sem'))} ts={_fmt(pr.get('acc_ts'))} "
-                          f"eotP@首位={pr['eot_p_first']:.4f} n={pr['n_scored']}")
+                          f"eotP@首位={pr['eot_p_first']:.4f} n={pr['n_scored']} "
+                          f"rms={_rms(audio):.4f} enc帧={pr.get('enc_frames', '-')} "
+                          f"enc_std={_fmt(pr.get('enc_std'))}"
+                          + (f" 截断至{pr['truncated_to']}" if pr.get('truncated_to') else ""))
                     if n_probed == 0:
                         probe = pr
+                        _probe0 = (_lab[_dia], _dia, sample.get("domain"))
                         _p(f"  eval 探针argmax: {pr.get('argmax_prefix', '')!r}")
                         _p(f"  eval 探针参照:   {pr.get('ref_prefix', '')!r}")
-                        import numpy as _np
                         muted = _np.zeros_like(_np.asarray(audio, dtype=_np.float32))
                         mu = teacher_forced_probe(model, muted, _lab[_dia], _dia,
                                                   tokenizer, domain=sample.get("domain"))
@@ -377,8 +386,18 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
                             if (pr.get("acc_sem") is not None and mu.get("acc_sem") is not None) else None
                         _p(f"  eval 探针(静音对照): acc={mu['acc']:.2f} "
                               f"sem={_fmt(mu.get('acc_sem'))} ts={_fmt(mu.get('acc_ts'))} "
+                              f"rms={_rms(muted):.4f} enc_std={_fmt(mu.get('enc_std'))} "
                               f"Δsem={_fmt(d_sem) if d_sem is None else f'{d_sem:+.2f}'}"
                               f"(真音频语义命中 − 静音;≈0 = decoder 没在读音频内容)")
+                    elif _probe0 is not None:
+                        # 错配对照:样本0 的参照谱 × 本样本(样本1)的音频。
+                        # 与样本0 真音频行同参照可直接比:一致 → 音频换成谁都一样 = 没在读。
+                        r0, d0, dom0 = _probe0
+                        wp = teacher_forced_probe(model, audio, r0, d0, tokenizer, domain=dom0)
+                        _p(f"  eval 探针(错配音频): acc={wp['acc']:.2f} "
+                              f"sem={_fmt(wp.get('acc_sem'))} ts={_fmt(wp.get('acc_ts'))} "
+                              f"rms={_rms(audio):.4f}"
+                              f"(样本0 的谱 × 本样本音频;与样本0行一致 = 没在读音频)")
                     n_probed += 1
                 except Exception as e:
                     if not probe:

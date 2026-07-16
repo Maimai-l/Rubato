@@ -442,8 +442,24 @@ def _probe_from_logprobs(lp, labels, loss_mask, eot_id, tokenizer=None, prefix_n
     return out
 
 
+def _truncate_enc(enc: dict, max_len: int) -> dict:
+    """探针输入长度护栏(纯逻辑,沙盒可测):参照序列超 decoder 位置表上限时截断。
+    为什么必须有:val 参照没过训练侧的超长过滤,22000 步 eval 实测第二个样本超 1024
+    → CUDA device-side assert → 上下文中毒,本轮 eval 后续全部解码报废。
+    截断后仍是合法的 teacher-forcing 前缀测量(命中率语义不变)。"""
+    if len(enc.get("input_ids", [])) <= max_len:
+        return enc
+    out = dict(enc)
+    for k in ("input_ids", "labels", "loss_mask", "token_types", "ts_bins"):
+        if k in out and isinstance(out[k], list):
+            out[k] = out[k][:max_len]
+    out["truncated_to"] = max_len
+    return out
+
+
 def teacher_forced_probe(model, audio, ref_text: str, dialect: str, tokenizer,
-                         domain: str | None = None, prefix_n: int = 32) -> dict:
+                         domain: str | None = None, prefix_n: int = 32,
+                         max_len: int = 1000) -> dict:
     """教师强制探针:给足参照上文,量模型逐位预测下一 token 的命中率。
     为什么需要它:自由生成塌缩在开头(eval 恒吐 '|4/4k0' 即停)有两种病因,损失曲线分不开——
       前缀命中率高 + 自由生成塌 → 暴露偏置/解码侧问题(往 scheduled sampling / 解码约束修);
@@ -454,7 +470,8 @@ def teacher_forced_probe(model, audio, ref_text: str, dialect: str, tokenizer,
     import torch
     from rubato.data.dataset import encode_target
     from rubato.model.train import resolve_log_probs
-    enc = encode_target(tokenizer, dialect, ref_text, sample=False, domain=domain)
+    enc = _truncate_enc(encode_target(tokenizer, dialect, ref_text, sample=False,
+                                      domain=domain), max_len)
     device = next(model.parameters()).device
     audio_t = torch.as_tensor(audio, dtype=torch.float32, device=device).reshape(1, -1)
     len_t = torch.tensor([audio_t.shape[1]], device=device)
@@ -465,6 +482,21 @@ def teacher_forced_probe(model, audio, ref_text: str, dialect: str, tokenizer,
         out = model.forward(processed_signal=processed, processed_signal_length=plen,
                             transcript=t, transcript_length=tl)
         lp = resolve_log_probs(out)[0]
-    return _probe_from_logprobs(lp, enc["labels"], enc["loss_mask"],
-                                tokenizer.piece_to_id("<|eot|>"), tokenizer, prefix_n,
-                                token_types=enc.get("token_types"))
+        # encoder 侧体征:enc_frames=0 → 编码器 mask 全空(decoder 从结构上就看不到音频);
+        # enc_std ≈ 0 → 特征坍缩。静音 vs 真音频的 enc_std 应明显不同 —— 不同证明
+        # 声学前端在工作,相同则病灶在 encoder/preprocessor,一行定位。
+        enc_diag = {}
+        if isinstance(out, (tuple, list)) and len(out) >= 4:
+            try:
+                es, em = out[2], out[3]
+                enc_diag = {"enc_frames": float(em.float().sum()),
+                            "enc_std": float(es.float().std())}
+            except Exception:
+                pass
+    res = _probe_from_logprobs(lp, enc["labels"], enc["loss_mask"],
+                               tokenizer.piece_to_id("<|eot|>"), tokenizer, prefix_n,
+                               token_types=enc.get("token_types"))
+    res.update(enc_diag)
+    if enc.get("truncated_to"):
+        res["truncated_to"] = enc["truncated_to"]
+    return res

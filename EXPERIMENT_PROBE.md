@@ -149,3 +149,40 @@ git pull --rebase --autostash
 python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
 ```
 跑过 1-2 次 eval,push 一次 `reports/eval_autolog.md` 即可。
+
+---
+
+## 22000 读数与升级(2026-07-16)【出处:eval_autolog.md @ddf0f20】
+
+**Δsem = 0.00,静音前后 acc/sem/ts 三指标逐位相同 —— 病 C(decoder 没在读音频)升为头号假设。**
+注意连 ts 命中率(0.08)都不随音频变:之前"时间戳跟着音频走"的印象很可能是"单调递增先验"
+的错觉。若坐实,连冒烟测试都要重新解读:32 样本过拟合纯靠文本记忆也能达标,它从未证明过音频通路。
+
+**但本轮不判**,两个原因:
+1. 三指标精确相同也可能意味着对照实验本身没生效 —— 证据须自证输入不同(本次升级已加);
+2. 探针没有长度护栏(规划端的 bug):第二个样本参照超 1024 位置上限 → CUDA device-side
+   assert → **上下文中毒,本轮 eval 之后的全部解码报废**(empty=1.0/amt_f1=0.0 是崩溃产物,
+   不是读数)。执行端"病C confirmed"暂不采纳 —— 按预登记要两次 eval,且要下述自证。
+
+已修/已加(git pull 生效):
+- 长度护栏:参照超 1000 tok 自动截断(根治 CUDA assert);
+- 探针行带 `rms=`(波形能量,证明静音/真音频输入确实不同);
+- 探针行带 `enc帧=`/`enc_std=`(encoder 侧体征);
+- 新增第三对照【错配音频】:样本0 的谱 × 样本1 的音频(分布内真钢琴声,比静音更严)。
+
+### 判定矩阵(预登记,下一次干净的 eval 出来按此定案)
+
+| 观测 | 判决 |
+|---|---|
+| `enc帧=0` 或 `enc_std≈0` | **病 C-结构**:encoder mask/特征管线坏,decoder 从结构上看不到音频。当场定案 |
+| enc_std(真)≠enc_std(静) 且 Δsem≈0 且 错配 acc ≈ 原 acc | **病 C-忽略**:声学前端活着,decoder 学会了无视它(纯文本 LM)。定案 |
+| Δsem ≥0.06 或 错配 acc 明显低于原 acc | 22000 的 0.00 是假象 → 回病 A(在读音频),继续长跑 |
+| rms 或 enc_std 静音/真音频相同 | 对照实验实现仍有诈,停判,贴回全部行等规划端 |
+
+### 操作(再来一次)
+```bat
+git pull --rebase --autostash
+(停训练重启,参数不变)
+python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
+```
+跑过 **1 次 eval** push autolog 即可(这轮信息密度够,不用等两次)。

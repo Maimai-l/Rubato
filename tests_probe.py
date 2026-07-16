@@ -118,6 +118,19 @@ r = _probe_from_logprobs(logprobs_for(pref10), labels10, mask10, EOT,
                          token_types=[0, 0, 0, 0])
 check("no_ts_gives_none", r["acc_ts"] is None, r)
 
+print("[11] 长度护栏:参照超位置表上限时截断(22000 步 CUDA assert 的根治)")
+from rubato.model.infer import _truncate_enc
+
+enc_long = {"input_ids": list(range(1500)), "labels": list(range(1, 1501)),
+            "loss_mask": [True] * 1500, "token_types": [0] * 1500, "ts_bins": [0] * 1500}
+t = _truncate_enc(enc_long, 1000)
+check("truncated_len", all(len(t[k]) == 1000 for k in
+                           ("input_ids", "labels", "loss_mask", "token_types", "ts_bins")), )
+check("truncation_marked", t.get("truncated_to") == 1000, t.get("truncated_to"))
+check("original_untouched", len(enc_long["input_ids"]) == 1500)
+enc_short = {"input_ids": [1, 2, 3], "labels": [2, 3, 4], "loss_mask": [True] * 3}
+check("short_passthrough", _truncate_enc(enc_short, 1000) is enc_short)
+
 print("[9] eval 证据自动落盘:代码写报告,追加不覆盖")
 import tempfile
 from pathlib import Path
