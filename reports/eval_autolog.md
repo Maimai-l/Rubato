@@ -67,3 +67,34 @@ probe-only 三源探针 @ step 22000
   探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_001]: 真 sem=0.65 ts=0.34 acc=0.58 | 静音 sem=0.67 | Δsem=-0.02 rms=0.0970 n=530 domain=real
   探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: 真 sem=0.57 ts=0.14 acc=0.49 | 静音 sem=0.54 | Δsem=+0.03 rms=0.0923 n=479 domain=synth
   探针 pdmx/TAST[pdmxperf_Qmbb4MXzbgmP9cQzUaXFK9Mp5pMK4UCwrM9YKuS2pF3mt6_000]: 真 sem=0.72 ts=0.34 acc=0.61 | 静音 sem=0.62 | Δsem=+0.10 rms=0.1184 n=413 domain=synth
+
+## probe-only 三源探针 @ step 22000 (2026-07-16 14:46:29)
+probe-only 联合仪器(对齐×Δsem)@ step 22000,每源 8 条
+  联合 nasap/TAST[nasap_Shi05M_63322b36_000]: 对齐=SHIFTED(peak=0.334 lag=-230ms) Δsem=+0.16 真sem=0.63 静sem=0.47 ts真=0.20/静0.06 n=704
+  联合 nasap/TAST[nasap_Shi05M_63322b36_001]: 对齐=SHIFTED(peak=0.304 lag=-230ms) Δsem=+0.12 真sem=0.64 静sem=0.52 ts真=0.15/静0.05 n=704
+  联合 nasap/TAST[nasap_Shi05M_63322b36_002]: 对齐=UNCORRELATED(peak=0.213 lag=-240ms) Δsem=+0.08 真sem=0.65 静sem=0.57 ts真=0.16/静0.08 n=714
+  联合 nasap/TAST[nasap_Shi05M_63322b36_003]: 对齐=UNCORRELATED(peak=0.185 lag=240ms) Δsem=+0.06 真sem=0.71 静sem=0.65 ts真=0.14/静0.08 n=734
+  联合 nasap/TAST[nasap_Shi05M_63322b36_004]: 对齐=UNCORRELATED(peak=0.147 lag=-490ms) Δsem=+0.02 真sem=0.68 静sem=0.67 ts真=0.13/静0.06 n=736
+  联合 nasap/TAST[nasap_Shi05M_63322b36_005]: 对齐=UNCORRELATED(peak=0.123 lag=10ms) Δsem=+0.08 真sem=0.65 静sem=0.57 ts真=0.14/静0.07 n=649
+  联合 nasap/TAST[nasap_Shi05M_63322b36_006]: 对齐=UNCORRELATED(peak=0.167 lag=520ms) Δsem=+0.00 真sem=0.58 静sem=0.58 ts真=0.11/静0.11 n=297
+  联合 nasap/TAST[nasap_Denisova06M_41baa5ba_000]: 对齐=SHIFTED(peak=0.366 lag=100ms) Δsem=+0.08 真sem=0.73 静sem=0.66 ts真=0.23/静0.10 n=995
+  联合 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: 对齐=OK(peak=0.277 lag=-10ms) Δsem=+0.00 真sem=0.72 静sem=0.72 ts真=0.28/静0.27 n=660
+  联合 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_001]: 对齐=OK(peak=0.3 lag=-10ms) Δsem=-0.02 真sem=0.65 静sem=0.67 ts真=0.34/静0.30 n=530
+  联合 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_002]: 对齐=OK(peak=0.316 lag=-10ms) Δsem=-0.00 真sem=0.68 静sem=0.68 ts真=0.31/静0.26 n=591
+  联合 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_003]: 对齐=OK(peak=0.481 lag=-10ms) Δsem=-0.01 真sem=0.65 静sem=0.66 ts真=0.24/静0.25 n=516
+  联合 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_004]: 对齐=OK(peak=0.406 lag=-10ms) Δsem=-0.01 真sem=0.66 静sem=0.67 ts真=0.26/静0.22 n=546
+  联合 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_005]: 对齐=OK(peak=0.308 lag=-10ms) Δsem=-0.01 真sem=0.64 静sem=0.65 ts真=0.13/静0.13 n=495
+  联合 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_006]: 对齐=UNCORRELATED(peak=0.036 lag=-10ms) Δsem=+0.04 真sem=0.68 静sem=0.64 ts真=0.37/静0.23 n=139
+  联合 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_007]: 对齐=OK(peak=0.433 lag=-10ms) Δsem=+0.01 真sem=0.67 静sem=0.65 ts真=0.31/静0.23 n=917
+  联合 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: 对齐=UNCORRELATED(peak=0.226 lag=0ms) Δsem=+0.03 真sem=0.57 静sem=0.54 ts真=0.14/静0.10 n=479
+  联合 pdmx/TAST[pdmxperf_Qmbb4MXzbgmP9cQzUaXFK9Mp5pMK4UCwrM9YKuS2pF3mt6_000]: 对齐=OK(peak=0.315 lag=-10ms) Δsem=+0.10 真sem=0.72 静sem=0.62 ts真=0.34/静0.20 n=413
+  联合 pdmx/TAST[pdmxperf_QmbbCoyosnMgyAsivgrBzw2TQVhvx6QvJP2zcwKJk6PMjZ_000]: 对齐=UNCORRELATED(peak=0.055 lag=0ms) Δsem=+0.15 真sem=0.59 静sem=0.44 ts真=0.21/静0.13 n=775
+  联合 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: 对齐=OK(peak=0.646 lag=10ms) Δsem=+0.17 真sem=0.65 静sem=0.49 ts真=0.29/静0.12 n=724
+  联合 pdmx/TAST[pdmxperf_QmbbC9divwbeJnZKTkAsavfFXgo7qbLbq82kKepH1fDBCA_000]: 对齐=UNCORRELATED(peak=0.22 lag=10ms) Δsem=+0.12 真sem=0.47 静sem=0.35 ts真=0.22/静0.10 n=995
+  联合 pdmx/A2S[pdmxperf_QmbbC9divwbeJnZKTkAsavfFXgo7qbLbq82kKepH1fDBCA_001]: 对齐=TOO_SHORT(peak=0.0 lag=0ms) Δsem=+0.03 真sem=0.34 静sem=0.31 ts真=-/静- n=74
+  联合 pdmx/TAST[pdmxperf_QmbbYRhJ3Kdpty8yYNCDSbbMJDY3RZQPko9QztHWyt7BWN_000]: 对齐=UNCORRELATED(peak=0.222 lag=50ms) Δsem=+0.13 真sem=0.77 静sem=0.64 ts真=0.28/静0.25 n=204
+  联合 pdmx/TAST[pdmxperf_QmbbcLC4vffHsAno2UgaJhwPduTRdgZUyhTRHuumakUe9j_000]: 对齐=OK(peak=0.698 lag=10ms) Δsem=+0.10 真sem=0.62 静sem=0.53 ts真=0.27/静0.11 n=761
+  联合汇总: 对齐OK 平均Δsem=0.03(n=10) | 错位 平均Δsem=0.08(n=14)
+  分源 nasap: OK Δsem=-(n=0) 错位 Δsem=0.07(n=8)
+  分源 maestro: OK Δsem=-0.00(n=7) 错位 Δsem=0.04(n=1)
+  分源 pdmx: OK Δsem=0.12(n=3) 错位 Δsem=0.09(n=5)
