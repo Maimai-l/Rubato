@@ -21,6 +21,14 @@
 处置:clip 留在 25,转 **H3 观察路线**(EXPERIMENT_H1 §7):继续跑、逐次贴 eval、
 **step 12000 复盘**;升级 H2(dec lr→3e-4)的条件已提前声明。决策记录:D21。
 
+## 三源探针:模型在【选择性读音频】,D27 收窄(2026-07-16,@b84b4b5,D28)
+
+nasap 对齐样本 Δsem=+0.16/+0.12(**在读!**)、pdmx +0.03/+0.10、maestro AMT ≈0;
+D27 的"全局忽略"判决样本恰是错位样本,以偏概全已记录修正。新图景:对齐处读音频、
+错位处闸掉退回文本 LM → 22k 步资产大概率存活,**大概率不必重跑**。
+当前仪器 = 联合测量(对齐等级×Δsem,`--probe-only --probe-n 8`,判读矩阵预登记于
+EXPERIMENT_C_ROOTCAUSE 末节);遗留疑点 = maestro/AMT 为何 Δsem=0。训练仍暂停。
+
 ## 对齐审计:nASAP 对齐故障(5/8 不相关),pdmx/maestro 基本干净(2026-07-16,@e7cc374)
 
 pdmx 8/8 OK、maestro 6/8 OK、nasap 5/8 UNCORRELATED → **病灶候选=nASAP 窗口/时间轴**。

@@ -199,9 +199,11 @@ def main():
                          "150s OOM、100s 只剩 45MiB、60s 稳 —— 之前是执行端本地 patch,"
                          "每次 pull 担心被覆盖,现在是正式参数(此前版本会被写死的 60 覆盖,已修)")
     ap.add_argument("--probe-only", action="store_true",
-                    help="诊断模式,不训练:恢复 last.pt 后立刻跑一次 eval(探针真音频/静音/"
-                         "错配三对照 + 解码现场),证据落盘 autolog 后退出。配 --eval-max 8 "
-                         "约十分钟出'decoder 是否在读音频'的判定矩阵全部证据")
+                    help="诊断模式,不训练:恢复 last.pt,对三源各取 N 条训练对做"
+                         "【对齐等级 × Δsem】联合测量(模型是否只在数据对齐处读音频),"
+                         "证据落盘 autolog 后退出")
+    ap.add_argument("--probe-n", type=int, default=8,
+                    help="probe-only 每源样本数(默认 8;每条约 2 次 forward,总耗时分钟级)")
     ap.add_argument("--lr-dec", type=float, default=None,
                     help="decoder(及非 encoder)组峰值 lr,默认 5e-4。断点续训时会在快照恢复后"
                          "重刷生效(不加这层,快照会把 CLI 值静默还原成旧 lr)。H2 实验:3e-4")
@@ -318,7 +320,13 @@ def main():
             lines.append(s)
 
         _fmt = lambda v: "-" if v is None else f"{v:.2f}"
-        _pp(f"probe-only 三源探针 @ step {step0}")
+        # v3(联合仪器):同一批样本上 对齐等级 × Δsem 二维联判 —— 三源探针发现模型
+        # "选择性读音频"(对齐样本 Δsem=+0.12~0.16,错位样本 0.00),单点探针以偏概全,
+        # 必须看"Δsem 是否只在对齐样本上为正"这个人群级相关。
+        from scripts.audit_alignment import (onset_envelope, label_onset_train,
+                                             best_lag, classify, label_onsets)
+        _pp(f"probe-only 联合仪器(对齐×Δsem)@ step {step0},每源 {args.probe_n} 条")
+        rows = []
         groups = (("nasap", nasap_val, ("TAST", "A2S")),
                   ("maestro", maestro_val, ("AMT",)),
                   ("pdmx", train_utts, ("TAST", "A2S")))
@@ -326,7 +334,7 @@ def main():
             for kind, pool, dias in groups:
                 done = 0
                 for u in pool:
-                    if done >= 2:
+                    if done >= args.probe_n:
                         break
                     if u.get("kind") != kind:
                         continue
@@ -338,6 +346,11 @@ def main():
                     if audio is None:
                         continue
                     try:
+                        ons = label_onsets(lab[d], d)
+                        env = onset_envelope(audio)
+                        al = best_lag(env, label_onset_train(ons, len(env))) if ons \
+                            else {"peak": 0.0, "lag_ms": 0, "n_frames": 0, "corr0": 0.0}
+                        cls = classify(al)
                         pr = teacher_forced_probe(model, audio, lab[d], d, tok,
                                                   domain=u.get("domain"))
                         mu = teacher_forced_probe(
@@ -346,20 +359,32 @@ def main():
                         ds = (pr["acc_sem"] - mu["acc_sem"]) \
                             if (pr.get("acc_sem") is not None
                                 and mu.get("acc_sem") is not None) else None
-                        rms = float(np.sqrt(np.mean(np.square(
-                            np.asarray(audio, dtype=np.float32)))))
-                        _pp(f"  探针 {kind}/{d}[{u['utt_id']}]: "
-                            f"真 sem={_fmt(pr.get('acc_sem'))} ts={_fmt(pr.get('acc_ts'))} "
-                            f"acc={pr['acc']:.2f} | 静音 sem={_fmt(mu.get('acc_sem'))} | "
+                        rows.append({"kind": kind, "cls": cls, "ds": ds})
+                        _pp(f"  联合 {kind}/{d}[{u['utt_id']}]: 对齐={cls}"
+                            f"(peak={al['peak']} lag={al['lag_ms']}ms) "
                             f"Δsem={_fmt(ds) if ds is None else f'{ds:+.2f}'} "
-                            f"rms={rms:.4f} n={pr['n_scored']} domain={u.get('domain')}")
+                            f"真sem={_fmt(pr.get('acc_sem'))} 静sem={_fmt(mu.get('acc_sem'))} "
+                            f"ts真={_fmt(pr.get('acc_ts'))}/静{_fmt(mu.get('acc_ts'))} "
+                            f"n={pr['n_scored']}")
                         done += 1
                     except Exception as e:
-                        _pp(f"  探针 {kind}[{u.get('utt_id', '?')}] 失败: "
+                        _pp(f"  联合 {kind}[{u.get('utt_id', '?')}] 失败: "
                             f"{type(e).__name__}: {e}")
                         done += 1
                 if not done:
                     _pp(f"  {kind}: 无可用样本(缺标签或音频)")
+        # 人群级汇总:Δsem 按对齐等级分桶(判定矩阵的直接输入)
+        def _mean(v):
+            v = [x for x in v if x is not None]
+            return (sum(v) / len(v), len(v)) if v else (None, 0)
+        ok_m, ok_n = _mean([r["ds"] for r in rows if r["cls"] == "OK"])
+        bad_m, bad_n = _mean([r["ds"] for r in rows if r["cls"] != "OK"])
+        _pp(f"  联合汇总: 对齐OK 平均Δsem={_fmt(ok_m)}(n={ok_n}) | "
+            f"错位 平均Δsem={_fmt(bad_m)}(n={bad_n})")
+        for kind in ("nasap", "maestro", "pdmx"):
+            km, kn = _mean([r["ds"] for r in rows if r["kind"] == kind and r["cls"] == "OK"])
+            bm, bn = _mean([r["ds"] for r in rows if r["kind"] == kind and r["cls"] != "OK"])
+            _pp(f"  分源 {kind}: OK Δsem={_fmt(km)}(n={kn}) 错位 Δsem={_fmt(bm)}(n={bn})")
         autolog = Path(__file__).resolve().parent.parent / "reports" / "eval_autolog.md"
         autolog.parent.mkdir(parents=True, exist_ok=True)
         with open(autolog, "a", encoding="utf-8") as fh:

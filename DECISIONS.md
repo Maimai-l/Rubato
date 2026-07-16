@@ -40,6 +40,8 @@
 
 | D27 | **病 C-忽略判决成立**(probe-only 干净测量,判定矩阵三条件全中:rms 证输入不同、enc_std 证前端活着、静音 Δsem=0.00 + 错配音频命中率一字不差 + 换参照立变):encoder 正常,decoder 完全忽略音频,模型=纯文本 LM。冒烟证书正式重读:32 样本文本记忆即可达标,从未证明音频通路。**训练暂停**,转根因排查:第一步对齐审计(scripts/audit_alignment.py,判读预登记),处置矩阵见 EXPERIMENT_C_ROOTCAUSE.md | 2026-07-16 | eval_autolog @f84ad23;22k 步"平台期"的统一解释:loss 2.9=语料文本熵、复读机、音高全错、amt_f1=0 | EXPERIMENT_C_ROOTCAUSE 卡;scripts/audit_alignment.py + tests_alignment_audit.py(合成音频回归:对齐/平移/配错三态) |
 
+| D28 | **D27 修正**:三源探针实测 nasap 对齐样本 Δsem=+0.16/+0.12(在读音频)、pdmx +0.03/+0.10、maestro AMT ≈0 —— "全局忽略"收窄为"**选择性读音频**"(对齐处读、错位处闸掉);D27 的判决样本恰是审计判 SHIFTED 的错位样本,单点探针以偏概全属规划端方法失误。对齐审计定位 nASAP 为错位重灾区(5/8 不相关)。升级联合仪器:同批样本 对齐等级×Δsem 二维联判(--probe-only --probe-n),判读矩阵预登记;遗留疑点=maestro/AMT 的 Δsem=0 是窗账还是分支特性。训练继续暂停 | 2026-07-16 | eval_autolog @b84b4b5 + alignment_audit @e7cc374;22k 步的资产评估随判决翻转:模型读谱能力存活,大概率不必重跑 | build_dataset --probe-only v3(联合仪器)+ --probe-n;EXPERIMENT_C_ROOTCAUSE 判读矩阵 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
