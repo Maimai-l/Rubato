@@ -179,10 +179,13 @@ python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
 | Δsem ≥0.06 或 错配 acc 明显低于原 acc | 22000 的 0.00 是假象 → 回病 A(在读音频),继续长跑 |
 | rms 或 enc_std 静音/真音频相同 | 对照实验实现仍有诈,停判,贴回全部行等规划端 |
 
-### 操作(再来一次)
+### 操作(再来一次 —— 这次不训练,十分钟出判决)
 ```bat
 git pull --rebase --autostash
-(停训练重启,参数不变)
-python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
+(停掉训练,Ctrl+C)
+python scripts/build_dataset.py --probe-only --eval-max 8
+git add reports/eval_autolog.md && git commit -m "probe-only verdict" && git push
 ```
-跑过 **1 次 eval** push autolog 即可(这轮信息密度够,不用等两次)。
+`--probe-only` 不训练:恢复 last.pt 直接跑诊断 eval(真音频/静音/错配三对照 + 解码现场),
+证据自动落盘。**判决出来之前训练不要重启**——如果病 C 为真,多训的每一步都是白烧;
+判决只要十来分钟,别拿训练陪跑。

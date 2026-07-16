@@ -198,6 +198,10 @@ def main():
                     help="每 batch 音频秒上限;不传 = 全量 60 / 冒烟 120。执行端 16GB 卡实测:"
                          "150s OOM、100s 只剩 45MiB、60s 稳 —— 之前是执行端本地 patch,"
                          "每次 pull 担心被覆盖,现在是正式参数(此前版本会被写死的 60 覆盖,已修)")
+    ap.add_argument("--probe-only", action="store_true",
+                    help="诊断模式,不训练:恢复 last.pt 后立刻跑一次 eval(探针真音频/静音/"
+                         "错配三对照 + 解码现场),证据落盘 autolog 后退出。配 --eval-max 8 "
+                         "约十分钟出'decoder 是否在读音频'的判定矩阵全部证据")
     ap.add_argument("--lr-dec", type=float, default=None,
                     help="decoder(及非 encoder)组峰值 lr,默认 5e-4。断点续训时会在快照恢复后"
                          "重刷生效(不加这层,快照会把 CLI 值静默还原成旧 lr)。H2 实验:3e-4")
@@ -283,6 +287,34 @@ def main():
         for p in pf["problems"]:
             print(f"  ✗ {p}")
         print("体检不过,禁止开训 —— 把上面整块贴回给规划端。")
+        return
+
+    if args.probe_only:
+        # 诊断模式:不训练。恢复 last.pt → 跑一次 eval(探针三对照 + 解码现场)→ 落盘退出。
+        # 为什么要它:诊断"decoder 是否在读音频"不需要新步数 —— 病 C 若为真,
+        # 多训的每一步都是白烧;先停训、半小时拿判决,比拿训练陪跑省得多。
+        import torch
+        last = ROOT / "outputs" / "ckpt" / "last.pt"
+        step0 = 0
+        if last.exists():
+            snap = torch.load(str(last), map_location="cpu")
+            model.load_state_dict(snap["model"])
+            step0 = int(snap.get("step", 0))
+            print(f"--probe-only:已加载 {last}(step={step0}),只跑一次 eval,不训练")
+        else:
+            print(f"--probe-only:⚠ {last} 不存在,用热启动初始权重跑(仅验证探针管线)")
+        if torch.cuda.is_available():
+            model = model.cuda()
+        model.eval()
+        from rubato.model.train import run_eval_hooks
+        with torch.no_grad():
+            run_eval_hooks(model, nasap_val, [], tok, labels=labels,
+                           eval_max=args.eval_max, time_budget_s=1200,
+                           autolog=str(Path(__file__).resolve().parent.parent
+                                       / "reports" / "eval_autolog.md"),
+                           step=step0)
+        print("--probe-only 完成:判定矩阵所需证据都在上方与 reports/eval_autolog.md,"
+              "git add reports/eval_autolog.md && commit && push 即可;训练先不要重启,等判决。")
         return
 
     if args.smoke:
