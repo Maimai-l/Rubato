@@ -43,3 +43,39 @@ git add reports/alignment_audit.md && git commit -m "alignment audit" && git pus
 | 全 OK | 数据无罪 → 查训练侧:①执行端贴 model.cfg 的 spec_augment 段;②规划端出 cross-attention 权重统计探针 |
 
 **训练在根因修复并小实验验证之前保持暂停** —— 病 C 下多训的每一步都是白烧。
+
+---
+
+## 审计结果(2026-07-16,@e7cc374)与下一步
+
+**pdmx 8/8 OK,maestro 6/8 OK,nasap 5/8 UNCORRELATED + 1 SHIFTED → nASAP 对齐故障。**
+
+但注意一个关键疑点:nASAP 只占训练对 ~3%,若 pdmx/maestro(90%+)对齐,
+单靠它教不出"全局忽略音频"。而此前**所有探针与评测样本恰好全来自 nASAP**
+—— 判决可能要收窄为:"nASAP 分支被污染 + 全部评测建在污染源上",
+模型在对齐的源上也许一直在读音频(那 22k 步大部分没白训,是好消息)。
+
+### 立即验证:三源探针(git pull 后,一分钟)
+
+```bat
+git pull --rebase --autostash
+python scripts/build_dataset.py --probe-only
+git add reports/eval_autolog.md && git commit -m "3-source probe" && git push
+```
+
+对 nasap / maestro / pdmx 各取 2 个训练对,测 真音频 vs 静音 的 Δsem。判读(预登记):
+
+| 结果 | 结论 | 处置 |
+|---|---|---|
+| pdmx、maestro 的 Δsem ≥0.06 且 nasap ≈0 | 模型在读对齐的音频;病灶=nASAP 数据 + 评测选源 | 修 nASAP 窗口账;eval 参照改用干净源;**从当前 ckpt 续训**,不重启 |
+| 三源全 ≈0 | 全局忽略,nASAP 只是帮凶 | 查训练侧:SpecAugment 配置、cross-attention 权重统计(规划端出卡) |
+| 介于/混杂 | 逐源细查 | 规划端按数据定 |
+
+### nASAP 病灶假设(修复时先查这里)
+
+症状形态(部分曲 OK、多数不相关、个别大偏移)最像**窗口时间轴混用**:
+win=[t0,t1] 的切窗秒轴与 tmap 时间戳秒轴不一致(谱面时间 vs 演奏时间),
+恒速曲侥幸对上、rubato 重的曲全乱 —— 查 s7 切窗与 D16 修复的交界处。
+
+另:审计工具顺带发现 maestro 也有 2/8 可疑(-1080ms 偏移 / 不相关),
+修完 nASAP 后建议 `--per-source 32` 复扫三源。

@@ -290,9 +290,12 @@ def main():
         return
 
     if args.probe_only:
-        # 诊断模式:不训练。恢复 last.pt → 跑一次 eval(探针三对照 + 解码现场)→ 落盘退出。
-        # 为什么要它:诊断"decoder 是否在读音频"不需要新步数 —— 病 C 若为真,
-        # 多训的每一步都是白烧;先停训、半小时拿判决,比拿训练陪跑省得多。
+        # 诊断模式,不训练。v2(D27 后):三源探针 —— 对齐审计发现只有 nASAP 对齐故障,
+        # 而此前所有探针/评测样本恰好全来自 nASAP。"decoder 全局忽略音频"可能要收窄为
+        # "nASAP 分支被污染 + 评测建在污染源上"。本模式对 nasap/maestro/pdmx 各取 2 个
+        # 训练对,分别测 真音频 vs 静音 的语义命中率差(Δsem),一分钟分辨全局病与局部病。
+        import numpy as np
+        import time as _time
         import torch
         last = ROOT / "outputs" / "ckpt" / "last.pt"
         step0 = 0
@@ -300,21 +303,69 @@ def main():
             snap = torch.load(str(last), map_location="cpu")
             model.load_state_dict(snap["model"])
             step0 = int(snap.get("step", 0))
-            print(f"--probe-only:已加载 {last}(step={step0}),只跑一次 eval,不训练")
+            print(f"--probe-only:已加载 {last}(step={step0}),三源探针,不训练")
         else:
             print(f"--probe-only:⚠ {last} 不存在,用热启动初始权重跑(仅验证探针管线)")
         if torch.cuda.is_available():
             model = model.cuda()
         model.eval()
-        from rubato.model.train import run_eval_hooks
+        from rubato.model.infer import teacher_forced_probe
+        from rubato.model.train import _sample_audio
+        lines: list[str] = []
+
+        def _pp(s: str):
+            print(s, flush=True)
+            lines.append(s)
+
+        _fmt = lambda v: "-" if v is None else f"{v:.2f}"
+        _pp(f"probe-only 三源探针 @ step {step0}")
+        groups = (("nasap", nasap_val, ("TAST", "A2S")),
+                  ("maestro", maestro_val, ("AMT",)),
+                  ("pdmx", train_utts, ("TAST", "A2S")))
         with torch.no_grad():
-            run_eval_hooks(model, nasap_val, [], tok, labels=labels,
-                           eval_max=args.eval_max, time_budget_s=1200,
-                           autolog=str(Path(__file__).resolve().parent.parent
-                                       / "reports" / "eval_autolog.md"),
-                           step=step0)
-        print("--probe-only 完成:判定矩阵所需证据都在上方与 reports/eval_autolog.md,"
-              "git add reports/eval_autolog.md && commit && push 即可;训练先不要重启,等判决。")
+            for kind, pool, dias in groups:
+                done = 0
+                for u in pool:
+                    if done >= 2:
+                        break
+                    if u.get("kind") != kind:
+                        continue
+                    lab = labels.get(u["utt_id"], {}) or {}
+                    d = next((x for x in dias if lab.get(x)), None)
+                    if not d:
+                        continue
+                    audio = _sample_audio(u)
+                    if audio is None:
+                        continue
+                    try:
+                        pr = teacher_forced_probe(model, audio, lab[d], d, tok,
+                                                  domain=u.get("domain"))
+                        mu = teacher_forced_probe(
+                            model, np.zeros_like(np.asarray(audio, dtype=np.float32)),
+                            lab[d], d, tok, domain=u.get("domain"))
+                        ds = (pr["acc_sem"] - mu["acc_sem"]) \
+                            if (pr.get("acc_sem") is not None
+                                and mu.get("acc_sem") is not None) else None
+                        rms = float(np.sqrt(np.mean(np.square(
+                            np.asarray(audio, dtype=np.float32)))))
+                        _pp(f"  探针 {kind}/{d}[{u['utt_id']}]: "
+                            f"真 sem={_fmt(pr.get('acc_sem'))} ts={_fmt(pr.get('acc_ts'))} "
+                            f"acc={pr['acc']:.2f} | 静音 sem={_fmt(mu.get('acc_sem'))} | "
+                            f"Δsem={_fmt(ds) if ds is None else f'{ds:+.2f}'} "
+                            f"rms={rms:.4f} n={pr['n_scored']} domain={u.get('domain')}")
+                        done += 1
+                    except Exception as e:
+                        _pp(f"  探针 {kind}[{u.get('utt_id', '?')}] 失败: "
+                            f"{type(e).__name__}: {e}")
+                        done += 1
+                if not done:
+                    _pp(f"  {kind}: 无可用样本(缺标签或音频)")
+        autolog = Path(__file__).resolve().parent.parent / "reports" / "eval_autolog.md"
+        autolog.parent.mkdir(parents=True, exist_ok=True)
+        with open(autolog, "a", encoding="utf-8") as fh:
+            fh.write(f"\n## probe-only 三源探针 @ step {step0} "
+                     f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n" + "\n".join(lines) + "\n")
+        print(f"完成,证据已落盘 {autolog} —— git add + commit + push;训练继续保持暂停。")
         return
 
     if args.smoke:

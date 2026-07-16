@@ -21,6 +21,14 @@
 处置:clip 留在 25,转 **H3 观察路线**(EXPERIMENT_H1 §7):继续跑、逐次贴 eval、
 **step 12000 复盘**;升级 H2(dec lr→3e-4)的条件已提前声明。决策记录:D21。
 
+## 对齐审计:nASAP 对齐故障(5/8 不相关),pdmx/maestro 基本干净(2026-07-16,@e7cc374)
+
+pdmx 8/8 OK、maestro 6/8 OK、nasap 5/8 UNCORRELATED → **病灶候选=nASAP 窗口/时间轴**。
+关键疑点:nASAP 仅占 ~3%,教不出全局忽略;而此前所有探针/评测样本恰好全在 nASAP 上
+→ 判决可能收窄为"nASAP 分支污染 + 评测建在污染源上"(若模型在干净源上会读音频,
+22k 步大部分没白训)。验证 = **三源探针**(probe-only v2,一分钟),判读矩阵预登记于
+EXPERIMENT_C_ROOTCAUSE.md 末节。训练仍暂停。
+
 ## 【判决】病 C-忽略成立:decoder 完全忽略音频,模型=纯文本 LM(2026-07-16,D27)
 
 probe-only 干净测量,判定矩阵三条件全中(rms 证输入不同 / enc_std 证 encoder 活着 /
