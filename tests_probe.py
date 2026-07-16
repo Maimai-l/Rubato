@@ -106,6 +106,18 @@ check("fallback_on_error", r == inf._EMPTY_A2S, r)
 check("error_recorded", bool(inf.LAST_INFER_ERROR) and "TypeError" in inf.LAST_INFER_ERROR,
       inf.LAST_INFER_ERROR)
 
+print("[10] 分型命中率:语义/时间戳分开统计(总 acc 会被时间戳撑虚)")
+labels10 = [3, 4, 5, 6]
+mask10 = [False, True, True, True]
+types10 = [0, 0, 1, 1]                          # 计分位:sem@1, ts@2,3
+pref10 = [3, 4, 9, 6]                           # sem 对 1/1;ts 对 1/2
+r = _probe_from_logprobs(logprobs_for(pref10), labels10, mask10, EOT, token_types=types10)
+check("acc_sem_split", abs(r["acc_sem"] - 1.0) < 1e-6, r)
+check("acc_ts_split", abs(r["acc_ts"] - 0.5) < 1e-6, r)
+r = _probe_from_logprobs(logprobs_for(pref10), labels10, mask10, EOT,
+                         token_types=[0, 0, 0, 0])
+check("no_ts_gives_none", r["acc_ts"] is None, r)
+
 print("[9] eval 证据自动落盘:代码写报告,追加不覆盖")
 import tempfile
 from pathlib import Path

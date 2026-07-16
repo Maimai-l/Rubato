@@ -330,6 +330,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     omr_scores = []
     sample_preds: list[str] = []
     probe: dict = {}
+    n_probed = 0
     subset = _eval_subset(nasap_val, eval_max)
     for si, sample in enumerate(subset):
         # 时限 + 心跳:eval 是逐 token 生成,慢是常态 —— 没有这两样,"慢"和"卡死"
@@ -347,24 +348,43 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         n_total += 1
         if len(sample_preds) < 2:              # 模型实际吐了什么 —— 定性"胶水坏/模型早"的直接证据
             sample_preds.append(pred[:160])
-        if not probe:
-            # 教师强制探针(每次 eval 跑一个样本,~秒级):自由生成塌缩的病因分诊,
-            # 前缀命中率还是比 parseable 灵敏得多的进度表。失败不许影响 eval 主流程。
+        if n_probed < 2:
+            # 教师强制探针(每次 eval 前两个有参照的样本,~秒级):自由生成塌缩的病因分诊,
+            # 命中率还是比 parseable 灵敏得多的进度表。失败不许影响 eval 主流程。
+            # 首样本额外跑【静音对照】:同序列换全零音频再测一遍 —— Δ语义命中率回答
+            # "decoder 有没有在从音频读内容"(时间戳撑起来的总 acc 会骗人)。
             _lab = labels.get(sample.get("utt_id"), {}) or {}
             _dia = "TAST" if _lab.get("TAST") else ("A2S" if _lab.get("A2S") else None)
             if _dia:
                 try:
                     from rubato.model.infer import teacher_forced_probe
-                    probe = teacher_forced_probe(model, audio, _lab[_dia], _dia,
-                                                 tokenizer, domain=sample.get("domain"))
+                    pr = teacher_forced_probe(model, audio, _lab[_dia], _dia,
+                                              tokenizer, domain=sample.get("domain"))
+                    _fmt = lambda v: "-" if v is None else f"{v:.2f}"
                     _p(f"  eval 探针[{sample.get('utt_id', '?')}/{_dia}]: "
-                          f"acc={probe['acc']:.2f} 前缀acc={probe['acc_prefix']:.2f} "
-                          f"eotP@首位={probe['eot_p_first']:.4f} n={probe['n_scored']}")
-                    _p(f"  eval 探针argmax: {probe.get('argmax_prefix', '')!r}")
-                    _p(f"  eval 探针参照:   {probe.get('ref_prefix', '')!r}")
+                          f"acc={pr['acc']:.2f} 前缀acc={pr['acc_prefix']:.2f} "
+                          f"sem={_fmt(pr.get('acc_sem'))} ts={_fmt(pr.get('acc_ts'))} "
+                          f"eotP@首位={pr['eot_p_first']:.4f} n={pr['n_scored']}")
+                    if n_probed == 0:
+                        probe = pr
+                        _p(f"  eval 探针argmax: {pr.get('argmax_prefix', '')!r}")
+                        _p(f"  eval 探针参照:   {pr.get('ref_prefix', '')!r}")
+                        import numpy as _np
+                        muted = _np.zeros_like(_np.asarray(audio, dtype=_np.float32))
+                        mu = teacher_forced_probe(model, muted, _lab[_dia], _dia,
+                                                  tokenizer, domain=sample.get("domain"))
+                        d_sem = (pr["acc_sem"] - mu["acc_sem"]) \
+                            if (pr.get("acc_sem") is not None and mu.get("acc_sem") is not None) else None
+                        _p(f"  eval 探针(静音对照): acc={mu['acc']:.2f} "
+                              f"sem={_fmt(mu.get('acc_sem'))} ts={_fmt(mu.get('acc_ts'))} "
+                              f"Δsem={_fmt(d_sem) if d_sem is None else f'{d_sem:+.2f}'}"
+                              f"(真音频语义命中 − 静音;≈0 = decoder 没在读音频内容)")
+                    n_probed += 1
                 except Exception as e:
-                    probe = {"error": f"{type(e).__name__}: {e}"}
-                    _p(f"  eval 探针失败({probe['error']})—— 贴回本行")
+                    if not probe:
+                        probe = {"error": f"{type(e).__name__}: {e}"}
+                    n_probed += 1
+                    _p(f"  eval 探针失败({type(e).__name__}: {e})—— 贴回本行")
         viol = validate_units(text_to_units(pred)) if pred else ["empty"]
         if pred == _EMPTY_A2S:
             n_empty += 1

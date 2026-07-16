@@ -402,7 +402,8 @@ def infer_file(audio_path: str, model, tokenizer):
 
 # ---------------------------------------------------------------- 教师强制探针(诊断,2026-07-15)
 
-def _probe_from_logprobs(lp, labels, loss_mask, eot_id, tokenizer=None, prefix_n: int = 32) -> dict:
+def _probe_from_logprobs(lp, labels, loss_mask, eot_id, tokenizer=None, prefix_n: int = 32,
+                         token_types=None) -> dict:
     """探针的纯计算部分(沙盒可测)。lp: [T,V] log-prob 张量;labels/loss_mask: list(与
     encode_target 输出同构,右移后逐位对齐)。返回:
       acc          全序列计分位的 argmax 命中率
@@ -428,6 +429,13 @@ def _probe_from_logprobs(lp, labels, loss_mask, eot_id, tokenizer=None, prefix_n
     head = idx[:prefix_n]
     out["acc_prefix"] = float((pred[head] == lab[head]).float().mean())
     out["eot_p_first"] = float(lp[idx[0], eot_id].exp())
+    if token_types is not None:
+        # 分型命中率:0=语义(音高/时值/结构) 1=时间戳。"模型在不在读音频"要看语义:
+        # 时间戳靠谱、音高全错的模型,总 acc 会被时间戳撑得虚高。
+        tt = torch.as_tensor(token_types)[:T]
+        for name, want in (("acc_sem", 0), ("acc_ts", 1)):
+            sel = idx[tt[idx] == want]
+            out[name] = float((pred[sel] == lab[sel]).float().mean()) if sel.numel() else None
     if tokenizer is not None:
         out["argmax_prefix"] = tokenizer.decode([int(i) for i in pred[head]])[:80]
         out["ref_prefix"] = tokenizer.decode([int(i) for i in lab[head]])[:80]
@@ -458,4 +466,5 @@ def teacher_forced_probe(model, audio, ref_text: str, dialect: str, tokenizer,
                             transcript=t, transcript_length=tl)
         lp = resolve_log_probs(out)[0]
     return _probe_from_logprobs(lp, enc["labels"], enc["loss_mask"],
-                                tokenizer.piece_to_id("<|eot|>"), tokenizer, prefix_n)
+                                tokenizer.piece_to_id("<|eot|>"), tokenizer, prefix_n,
+                                token_types=enc.get("token_types"))

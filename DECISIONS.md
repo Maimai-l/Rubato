@@ -34,6 +34,8 @@
 
 | D24 | **重大事实修正:eval 的 `'|4/4k0'` 是兜底常量 `_EMPTY_A2S`,不是模型输出**(本轮 eval empty=1.0 坐实)。既往所有"模型只会输出开头"的解读作废;推理管线三处静默吞错(解码异常/validate 拒绝/顶层异常)全部装上现场记录,eval 出现兜底即打印模型真实原始输出与违规项/异常栈;探针 device bug 修复(lp 落 CPU 再比较)。执行端"model generates EOS immediately"说法无数据支撑,不采信。报告规矩升级:reports/ 只写新编号文件,不编辑旧文件(cd996eb/5c48581 两次删证据后) | 2026-07-15 | reports/PROBE_RESULT.txt(empty=1.0 + 探针 device 崩溃)+ infer.py:24 `_EMPTY_A2S="|4/4k0"` 代码事实;empty_rate 诊断量一直存在但从未被打印,盲区因此存活数轮 eval | infer.py 吞错现场三处 + 探针修复;train.py eval 打印现场;tests_probe [7][8];EXPERIMENT_PROBE.md 第二版 |
 
+| D25 | 20k 复盘:探针 4 点持平(前缀 0.31-0.38,总 0.40-0.41)、解码现场=复读机(Dyck 断裂被拒,胶水无病)、amt_f1=0.0(全方言生成未熟)、A2S 训练损失 4200 步净零 → 病 A/B 判据均未命中,焦点升级为"decoder 是否在从音频读内容"。探针加【静音对照】+ sem/ts 分型命中率,判据预登记:两次 eval Δsem 均值 ≤0.02 → 病 C(没读音频,转查 encoder/cross-attention)/ ≥0.06 → 病 A(在读,继续训)。执行端"lrD 衰减致 A2S 反弹"说法不采纳(衰减仅 8%,反弹在窗噪声内) | 2026-07-16 | eval_autolog.md(代码自动落盘,4 次 eval)+ PROBE_RESULT_2-5;判据在数据到来前写死 | infer.py 探针分型+静音对照;train.py eval 双样本探针;tests_probe [10];EXPERIMENT_PROBE.md 20k 复盘节 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
