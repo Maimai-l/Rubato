@@ -1,0 +1,21 @@
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_UNCLOSED:[('PL', SPitch(step='C', alter=0, octave=4))]", 'TERMINAL_BAR_MISSING'], 'raw': '|4/4k0PL:C4 <|0.02|> 1/16c4C4 <|0.26|> 1/16c4C4 <|0.39|> 1/16c4 <|0.52|> 1/16C4 <|0.52|> 1/16c4 <|0.52|> 1/16C4 <|0.74|> 1/16c4 <|0.84|> 1/16C4 <|0.88|> 1/16c4 ', 'truncated': '|4/4k0PL:C4 <|0.02|> 1/16c4C4 <|0.26|> 1/16c4C4 <|0.39|> 1/16c4 <|0.52|> 1/16C4 <|0.52|> 1/16c4 <|0.'}
+  eval 汇总: parseable=0.00 empty=1.0 n=48 样本0='|4/4k0' 探针acc=0.41/前缀0.34 eotP0=0.0000
+  eval maestro 0(1003s)
+  eval maestro 8(1051s)
+  eval maestro 16(1099s)
+  eval maestro 24(1149s)
+  eval maestro 32(1191s)
+  eval maestro 40(1241s)
+  eval 指标: parseable=0.00 amt_f1=0.0 omr_ned=None n_nasap=48 n_maestro=48
+  eval 证据已落盘 D:\vscode_projects\ee_download\Rubato\reports\eval_autolog.md(git add + commit + push 即完成上报,勿编辑)
+step 20400 loss=59.2802 avg50=55.6893 sem=2.4389 ts=1.7696 gn=38.4/avg22.2 enc=18.4 dec=33.7 lrE=9.21e-05 lrD=2.76e-04 audio=46s | A2S=2.87 A2S_lite=3.00 AMT=2.40 TAST=2.40
+step 20450 loss=44.5984 avg50=53.2293 sem=2.2445 ts=3.0214 gn=25.8/avg22.1 enc=15.5 dec=20.6 lrE=9.20e-05 lrD=2.76e-04 audio=46s | A2S=2.88 A2S_lite=3.01 AMT=2.42 TAST=2.39
+step 20500 loss=94.3560 avg50=57.2450 sem=3.0374 ts=2.6762 gn=19.5/avg21.7 enc=14.1 dec=13.5 lrE=9.20e-05 lrD=2.76e-04 audio=40s | A2S=2.87 A2S_lite=3.01 AMT=2.42 TAST=2.41
+step 20550 loss=38.3094 avg50=61.0430 sem=2.6668 ts=0.0000 gn=33.9/avg23.0 enc=16.2 dec=29.7 lrE=9.19e-05 lrD=2.76e-04 audio=50s | A2S=2.89 A2S_lite=3.02 AMT=2.41 TAST=2.41
+step 20600 loss=41.1532 avg50=52.2796 sem=2.2705 ts=3.0912 gn=25.7/avg22.4 enc=13.7 dec=21.7 lrE=9.19e-05 lrD=2.76e-04 audio=30s | A2S=2.89 A2S_lite=3.03 AMT=2.40 TAST=2.41
+step 20650 loss=56.0722 avg50=58.7912 sem=2.3569 ts=0.0000 gn=22.2/avg22.1 enc=16.8 dec=14.6 lrE=9.19e-05 lrD=2.76e-04 audio=37s | A2S=2.91 A2S_lite=3.03 AMT=2.38 TAST=2.41
+step 20700 loss=57.5970 avg50=58.4767 sem=2.6180 ts=0.0000 gn=32.0/avg21.7 enc=16.9 dec=27.2 lrE=9.18e-05 lrD=2.75e-04 audio=40s | A2S=2.90 A2S_lite=3.03 AMT=2.39 TAST=2.42
+step 20750 loss=44.9108 avg50=54.8893 sem=2.7746 ts=0.0000 gn=19.1/avg22.7 enc=12.4 dec=14.6 lrE=9.18e-05 lrD=2.75e-04 audio=43s | A2S=2.91 A2S_lite=3.03 AMT=2.39 TAST=2.42
+step 20800 loss=57.2026 avg50=57.5486 sem=2.4777 ts=0.0000 gn=21.3/avg21.5 enc=14.2 dec=15.8 lrE=9.17e-05 lrD=2.75e-04 audio=39s | A2S=2.92 A2S_lite=3.03 AMT=2.40 TAST=2.41
+step 20850 loss=50.3827 avg50=51.4438 sem=3.0005 ts=0.0000 gn=18.1/avg21.9 enc=14.3 dec=11.2 lrE=9.17e-05 lrD=2.75e-04 audio=59s | A2S=2.92 A2S_lite=3.02 AMT=2.38 TAST=2.40
+A2S trend: 2.87->2.92 (rising, lrD decayed to 2.78e-04)
