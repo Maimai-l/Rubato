@@ -58,3 +58,12 @@ Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
   eval 解码现场: {'stage': 'validate_reject', 'viol': ['MEASURE_SUM:3 got 9/8 want 1', 'MEASURE_SUM:4 got 7/8 want 1', 'MEASURE_SUM:5 got 9/8 want 1', 'MEASURE_SUM:9 got 9/8 want 1'], 'raw': '|4/4k0PR:C4 <|0.05|> 1/8c4C4 <|0.28|> 1/8c4C4 <|0.50|> 1/8c4C4 <|0.71|> 1/8c4C4 <|0.93|> 1/8c4C4 <|1.13|> 1/8c4 <|1.33|> |4/4k0C4 <|1.33|> 1/8c4C4 <|1.55|> 1/8c', 'truncated': '|4/4k0PR:C4 <|0.05|> 1/8c4C4 <|0.28|> 1/8c4C4 <|0.50|> 1/8c4C4 <|0.71|> 1/8c4C4 <|0.93|> 1/8c4C4 <|1'}
   eval 汇总: parseable=0.12 empty=0.875 n=8 样本0='|4/4k0' 探针acc=0.39/前缀0.38 eotP0=0.0001
   eval 指标: parseable=0.12 amt_f1=None omr_ned=0.941944847605225 n_nasap=8 n_maestro=0
+
+## probe-only 三源探针 @ step 22000 (2026-07-16 14:23:55)
+probe-only 三源探针 @ step 22000
+  探针 nasap/TAST[nasap_Shi05M_63322b36_000]: 真 sem=0.63 ts=0.20 acc=0.52 | 静音 sem=0.47 | Δsem=+0.16 rms=0.0541 n=704 domain=real
+  探针 nasap/TAST[nasap_Shi05M_63322b36_001]: 真 sem=0.64 ts=0.15 acc=0.52 | 静音 sem=0.52 | Δsem=+0.12 rms=0.0652 n=704 domain=real
+  探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: 真 sem=0.72 ts=0.28 acc=0.62 | 静音 sem=0.72 | Δsem=+0.00 rms=0.0667 n=660 domain=real
+  探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_001]: 真 sem=0.65 ts=0.34 acc=0.58 | 静音 sem=0.67 | Δsem=-0.02 rms=0.0970 n=530 domain=real
+  探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: 真 sem=0.57 ts=0.14 acc=0.49 | 静音 sem=0.54 | Δsem=+0.03 rms=0.0923 n=479 domain=synth
+  探针 pdmx/TAST[pdmxperf_Qmbb4MXzbgmP9cQzUaXFK9Mp5pMK4UCwrM9YKuS2pF3mt6_000]: 真 sem=0.72 ts=0.34 acc=0.61 | 静音 sem=0.62 | Δsem=+0.10 rms=0.1184 n=413 domain=synth
