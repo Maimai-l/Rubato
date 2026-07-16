@@ -333,11 +333,16 @@ def main():
         with torch.no_grad():
             for kind, pool, dias in groups:
                 done = 0
+                seen_pieces: set = set()          # 每曲最多 1 窗:8 窗同曲的教训
                 for u in pool:
                     if done >= args.probe_n:
                         break
                     if u.get("kind") != kind:
                         continue
+                    piece = str(u.get("utt_id", "")).rsplit("_", 1)[0]
+                    if piece in seen_pieces:
+                        continue
+                    seen_pieces.add(piece)
                     lab = labels.get(u["utt_id"], {}) or {}
                     d = next((x for x in dias if lab.get(x)), None)
                     if not d:
@@ -446,6 +451,17 @@ def main():
     # labels 全量传入(不只 train)—— eval hook 的参照(AMT ref/A2S NED)按 val/test utt_id 查
     dm = RubatoDataModule(train_ds, nasap_val=nasap_val, maestro_val=maestro_val, labels=labels,
                           max_batch_sec=args.max_batch_sec)
+
+    # 多源 Δsem 探针池(每次 eval 固定测这三条):单源探针曾两次把全局判决带偏(D27/D28)。
+    # 逐 eval 追踪各源"真音频-静音"的语义命中率差 = 音频阅读能力的进度表。
+    def _first_labeled(pool, kind):
+        for u in pool:
+            if u.get("kind") == kind and (labels.get(u["utt_id"], {}) or {}):
+                return u
+        return None
+    dm.probe_utts = [u for u in (_first_labeled(nasap_val, "nasap"),
+                                 _first_labeled(maestro_val, "maestro"),
+                                 _first_labeled(train_utts, "pdmx")) if u]
     cfg = {
         "lr_encoder": args.lr_enc if args.lr_enc is not None
                       else (1e-4 if not args.from_scratch else 5e-4),   # 从头训:统一 lr

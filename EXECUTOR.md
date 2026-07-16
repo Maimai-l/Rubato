@@ -40,10 +40,14 @@ python scripts/sop_next.py --go
 
 ## 当前阶段(2026-07-15 晚)
 
-**病 C 已判决成立**(D27):decoder 完全忽略音频,模型=纯文本 LM。**训练保持暂停**。
-当前任务 = `EXPERIMENT_C_ROOTCAUSE.md`:
-`python scripts/audit_alignment.py`(分钟级,不用 GPU)→ push reports/alignment_audit.md。
-它审计训练对的音频↔标签对齐 —— 头号嫌疑。结果出来前不要重启训练。
+诊断收官(D27→D28→D29):模型读音频能力存活,病灶=按源分层的数据问题
+(maestro/AMT 音高监督空转是唯一真异常,监控中)。**复训已批准(D29),不重跑**:
+```bat
+git pull --rebase --autostash
+python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
+```
+每次 eval 会自动跑多源 Δsem 探针并落盘 autolog —— 逢 eval push 一次 autolog 即可。
+下次复盘 step 30000。
 不用再跑 sop_next(数据期命令);日常 = `git pull --rebase --autostash` + 按当前实验卡跑。
 
 ## 报告规矩补充(2026-07-15,对应 cd996eb / 5c48581 两次事故)

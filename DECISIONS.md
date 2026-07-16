@@ -42,6 +42,8 @@
 
 | D28 | **D27 修正**:三源探针实测 nasap 对齐样本 Δsem=+0.16/+0.12(在读音频)、pdmx +0.03/+0.10、maestro AMT ≈0 —— "全局忽略"收窄为"**选择性读音频**"(对齐处读、错位处闸掉);D27 的判决样本恰是审计判 SHIFTED 的错位样本,单点探针以偏概全属规划端方法失误。对齐审计定位 nASAP 为错位重灾区(5/8 不相关)。升级联合仪器:同批样本 对齐等级×Δsem 二维联判(--probe-only --probe-n),判读矩阵预登记;遗留疑点=maestro/AMT 的 Δsem=0 是窗账还是分支特性。训练继续暂停 | 2026-07-16 | eval_autolog @b84b4b5 + alignment_audit @e7cc374;22k 步的资产评估随判决翻转:模型读谱能力存活,大概率不必重跑 | build_dataset --probe-only v3(联合仪器)+ --probe-n;EXPERIMENT_C_ROOTCAUSE 判读矩阵 |
 
+| D29 | **复训决定:不重跑,从 ckpt 22000 续训(参数不变)**。联合仪器 24 条定局:数据按源分层——pdmx 读音频(Δsem 至 +0.17)、nasap 有真实信号(Δsem +0.07、Δts 强正;能量审计在柔和钢琴上系统性误报,"nASAP 对齐故障"降级)、**唯一真异常=maestro/AMT 音高 Δsem≈0**(7 窗完美对齐仍不读,55% 训练对的音高监督空转)。测量层根治:常规 eval 内置多源 Δsem 探针(固定池,逐 eval 可比)+ probe-only 曲目去重。下次复盘 step 30000,仪表预登记(maestro Δsem 仍 0 → 开 AMT 专项) | 2026-07-16 | eval_autolog @64b9cd8(联合 24 条);重启无益:同样数据会学出同样行为,病灶不在初始化 | train.py probe_utts 多源探针;build_dataset 探针池+去重;EXPERIMENT_C_ROOTCAUSE 终局节 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

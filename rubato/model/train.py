@@ -286,7 +286,8 @@ def _sample_audio(sample: dict):
 def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None = None,
                    legato_omr_fn=None, eval_max: int = 128,
                    time_budget_s: float = 1200.0,
-                   autolog: str | None = None, step: int | None = None) -> dict:
+                   autolog: str | None = None, step: int | None = None,
+                   probe_utts: list | None = None) -> dict:
     """
     R-S11.5:nASAP val 跑 可解析率/OMR-NED;MAESTRO val 跑 AMT F1。
     样本 = assemble 的 utt dict(audio_path/win/dur_s)或预载 {audio, ...};音频按需窗读。
@@ -332,6 +333,38 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     probe: dict = {}
     n_probed = 0
     _probe0 = None                       # 样本0 的 (参照, 方言, domain),供错配对照
+    if probe_utts:
+        # 多源 Δsem 探针(固定池,逐 eval 可比):每源一条,真音频 vs 静音的语义命中率差
+        # = "模型的音频阅读能力"进度表 —— 单源探针曾两次把全局判决带偏(D27/D28)。
+        n_probed = 99                    # 停用循环内单源探针,以本池为准
+        from rubato.model.infer import teacher_forced_probe as _tfp
+        import numpy as _np
+        _fmt2 = lambda v: "-" if v is None else f"{v:.2f}"
+        for u in probe_utts:
+            _lab = labels.get(u.get("utt_id"), {}) or {}
+            _dia = next((x for x in ("TAST", "A2S", "AMT") if _lab.get(x)), None)
+            aud = _sample_audio(u)
+            if not _dia or aud is None:
+                _p(f"  eval 多源探针 {u.get('kind')}[{u.get('utt_id')}]: 缺标签/音频,跳过")
+                continue
+            try:
+                pr = _tfp(model, aud, _lab[_dia], _dia, tokenizer, domain=u.get("domain"))
+                mu = _tfp(model, _np.zeros_like(_np.asarray(aud, dtype=_np.float32)),
+                          _lab[_dia], _dia, tokenizer, domain=u.get("domain"))
+                ds = (pr["acc_sem"] - mu["acc_sem"]) \
+                    if (pr.get("acc_sem") is not None and mu.get("acc_sem") is not None) else None
+                dt = (pr["acc_ts"] - mu["acc_ts"]) \
+                    if (pr.get("acc_ts") is not None and mu.get("acc_ts") is not None) else None
+                _p(f"  eval 多源探针 {u.get('kind')}/{_dia}[{u.get('utt_id')}]: "
+                   f"Δsem={_fmt2(ds) if ds is None else f'{ds:+.2f}'} "
+                   f"Δts={_fmt2(dt) if dt is None else f'{dt:+.2f}'} "
+                   f"真sem={_fmt2(pr.get('acc_sem'))} 静sem={_fmt2(mu.get('acc_sem'))} "
+                   f"acc={pr['acc']:.2f} n={pr['n_scored']}")
+                if not probe:
+                    probe = pr
+            except Exception as e:
+                _p(f"  eval 多源探针 {u.get('kind')}[{u.get('utt_id')}] 失败: "
+                   f"{type(e).__name__}: {e}")
     subset = _eval_subset(nasap_val, eval_max)
     for si, sample in enumerate(subset):
         # 时限 + 心跳:eval 是逐 token 生成,慢是常态 —— 没有这两样,"慢"和"卡死"
@@ -673,7 +706,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                                        legato_omr_fn=legato_omr_fn,
                                        eval_max=int(cfg.get("eval_max", 128)),
                                        time_budget_s=float(cfg.get("eval_time_budget_s", 1200)),
-                                       autolog=cfg.get("eval_autolog"), step=step)
+                                       autolog=cfg.get("eval_autolog"), step=step,
+                                       probe_utts=getattr(datamodule, "probe_utts", None))
                 report["eval_history"].append({"step": step, **m})
 
                 action = stopper.update(
