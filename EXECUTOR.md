@@ -40,10 +40,10 @@ python scripts/sop_next.py --go
 
 ## 当前阶段(2026-07-15 晚)
 
-训练期已暂停诊断。H1(裁剪)、H2(decoder lr)均已判决无效;当前头号假设 = 病 C
-(decoder 没在读音频)。**当前任务 = `EXPERIMENT_PROBE.md` 末节**:
-`python scripts/build_dataset.py --probe-only --eval-max 8`(不训练,十分钟出判决证据)
-→ push autolog。**判决前不要重启训练**。
+**病 C 已判决成立**(D27):decoder 完全忽略音频,模型=纯文本 LM。**训练保持暂停**。
+当前任务 = `EXPERIMENT_C_ROOTCAUSE.md`:
+`python scripts/audit_alignment.py`(分钟级,不用 GPU)→ push reports/alignment_audit.md。
+它审计训练对的音频↔标签对齐 —— 头号嫌疑。结果出来前不要重启训练。
 不用再跑 sop_next(数据期命令);日常 = `git pull --rebase --autostash` + 按当前实验卡跑。
 
 ## 报告规矩补充(2026-07-15,对应 cd996eb / 5c48581 两次事故)

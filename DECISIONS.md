@@ -38,6 +38,8 @@
 
 | D26 | 22000 静音对照:Δsem=0.00(连 ts 都不随音频变)→ **病 C 升为头号假设但不判**:①三指标逐位相同需自证对照生效;②规划端探针缺长度护栏,第二样本超 1024 → CUDA assert 上下文中毒,本轮 eval 后续数字全作废;执行端"病C confirmed"不采纳。修复+升级:长度截断护栏(_truncate_enc)、探针行带 rms/enc帧/enc_std 自证、新增错配音频第三对照;判定矩阵预登记(enc帧=0→C-结构 / enc_std 分化+Δsem≈0+错配同 acc→C-忽略 / Δsem≥0.06→回病 A)。若 C 坐实,冒烟证书重新解读:32 样本过拟合纯文本记忆即可达标,从未证明音频通路 | 2026-07-16 | eval_autolog @ddf0f20(代码落盘);判定矩阵在数据前写死 | infer.py 护栏+enc 体征;train.py 三对照探针;tests_probe [11];EXPERIMENT_PROBE.md 22000 节 |
 
+| D27 | **病 C-忽略判决成立**(probe-only 干净测量,判定矩阵三条件全中:rms 证输入不同、enc_std 证前端活着、静音 Δsem=0.00 + 错配音频命中率一字不差 + 换参照立变):encoder 正常,decoder 完全忽略音频,模型=纯文本 LM。冒烟证书正式重读:32 样本文本记忆即可达标,从未证明音频通路。**训练暂停**,转根因排查:第一步对齐审计(scripts/audit_alignment.py,判读预登记),处置矩阵见 EXPERIMENT_C_ROOTCAUSE.md | 2026-07-16 | eval_autolog @f84ad23;22k 步"平台期"的统一解释:loss 2.9=语料文本熵、复读机、音高全错、amt_f1=0 | EXPERIMENT_C_ROOTCAUSE 卡;scripts/audit_alignment.py + tests_alignment_audit.py(合成音频回归:对齐/平移/配错三态) |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
