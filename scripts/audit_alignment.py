@@ -167,6 +167,7 @@ def main():
     verdicts: dict[str, dict] = {}
     for kind, pool in sorted(pick.items()):
         counts: dict[str, int] = {}
+        pcounts: dict[str, int] = {}     # 音高判定单独记账,不许混进对齐类别的 1/3 规则
         for u, dia, text in pool:
             try:
                 audio = load_audio(u["audio_path"], win=u.get("win"))
@@ -187,7 +188,7 @@ def main():
                 if args.pitch and dia == "AMT":
                     from rubato.model.evaluate import amt_text_to_notes
                     pv = pitch_verdict(audio, amt_text_to_notes(text))
-                    counts[pv["verdict"]] = counts.get(pv["verdict"], 0) + 1
+                    pcounts[pv["verdict"]] = pcounts.get(pv["verdict"], 0) + 1
                     row += (f" | 音高: {pv['verdict']} sim={pv['sim']} "
                             f"base={pv['base']} Δ={pv['delta']}")
             except Exception as e:
@@ -198,8 +199,16 @@ def main():
         n_bad = sum(c for v, c in counts.items() if v not in ("OK",))
         n_all = sum(counts.values())
         verdict = "对齐故障" if (n_all and n_bad * 3 >= n_all) else "OK"
-        verdicts[kind] = {"counts": counts, "verdict": verdict}
-        row = f"  == {kind}: {counts} → {verdict}"
+        if counts.get("ERROR"):
+            verdict += "(含 ERROR,先修错再判)"
+        verdicts[kind] = {"counts": counts, "pitch": pcounts, "verdict": verdict}
+        row = f"  == {kind}: {counts}"
+        if pcounts:
+            n_pbad = sum(c for v, c in pcounts.items() if v != "PITCH_OK")
+            n_pall = sum(pcounts.values())
+            pverd = "音高故障" if (n_pall and n_pbad * 3 >= n_pall) else "音高OK"
+            row += f" | 音高: {pcounts} → {pverd}"
+        row += f" → {verdict}"
         lines.append(row)
         print(row, flush=True)
 
@@ -214,8 +223,6 @@ def main():
     print(f"报告已落盘 {out}(git add + commit + push 即上报,勿编辑)", flush=True)
 
 
-if __name__ == "__main__":
-    main()
 
 
 # ---------------------------------------------------------------- 音高(chroma)审计,AMT 专项
@@ -285,3 +292,7 @@ def pitch_verdict(audio, notes, hop_ms: int = 100) -> dict:
     d = sim - base
     v = "PITCH_OK" if d >= 0.10 else ("PITCH_MISMATCH" if d < 0.05 else "PITCH_AMBIG")
     return {"sim": round(sim, 3), "base": round(base, 3), "delta": round(d, 3), "verdict": v}
+
+
+if __name__ == "__main__":
+    main()
