@@ -46,6 +46,8 @@
 
 | D30 | **step 30000 复盘**:复训健康——nasap 探针 acc 0.52→0.58、Δts 升至 +0.20,A2S 2.92→2.83(速率与前段一致),parseable 0→0.06、empty 1.0→0.94、omr_ned 首次可算(0.91);**maestro/AMT Δsem 八次 eval 全 ≈0 → 预登记条件命中,开 AMT 专项卡**(chroma 音高审计,起音审计的音高盲区补上,合成移调回归已验证);**前缀acc=0.69 过 0.60 线 → 贪心循环成 parseable 主瓶颈,自由解码加重复惩罚 1.1**(LEGATO 同款,仅监控解码);探针池加第 4 条(已知读音频最强的 pdmx 样本,原 pdmx 条是弱相关样本代表性差) | 2026-07-17 | eval_autolog 23000-30000 八点趋势 + STEP_30000.txt;所有触发条件皆 D29 时预声明 | EXPERIMENT_AMT.md;audit_alignment --pitch(chroma);infer._apply_rep_penalty;build_dataset 探针池 v2 |
 
+| D31 | **AMT 专项关案:数据无罪**。音高审计 14/16 PITCH_OK(唯一 MISMATCH 即时间偏移 -1080ms 样本,自洽),起音 13/16 OK → maestro 时间+音高双干净。AMT 不读音频定性为模型侧现象(文本自预测性 0.72 挤压音频边际梯度,最后才学),不动数据不动训练;38000 复盘 AMT Δsem 仍零再议结构性修正。**三源数据调查全线关闭**:pdmx 干净、maestro 干净、nasap 偏噪有真信号 | 2026-07-17 | alignment_audit @94c9881(判读为 EXPERIMENT_AMT 预登记) | EXPERIMENT_AMT 判决节;正常训练继续,下次复盘 38000 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

@@ -40,13 +40,9 @@ python scripts/sop_next.py --go
 
 ## 当前阶段(2026-07-15 晚)
 
-训练继续跑(参数不变),日常 = 逢 eval push 一次 autolog。两件新事(2026-07-17,D30):
-1. `git pull` 后**重启一次训练进程**(拉到重复惩罚解码 + 探针池第 4 条),命令不变:
-   `python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4`
-2. **另开一个终端**跑 AMT 音高审计(训练不用停,分钟级):
-   `python scripts/audit_alignment.py --per-source 16 --pitch`
-   → push reports/alignment_audit.md。详见 EXPERIMENT_AMT.md。
-下次复盘 step 38000。不用再跑 sop_next;日常 = `git pull --rebase --autostash` + 按当前实验卡跑。
+**全部调查已关案(D31),回到正常训练节奏**:训练继续跑(clip 25 / lr-dec 3e-4 不变),
+日常 = 逢 eval push 一次 autolog,没有其它任务。下次复盘 step 38000。
+不用再跑 sop_next;日常 = `git pull --rebase --autostash` + 按当前实验卡跑。
 
 ## 报告规矩补充(2026-07-15,对应 cd996eb / 5c48581 两次事故)
 
