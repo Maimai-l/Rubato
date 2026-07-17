@@ -1,0 +1,22 @@
+  eval nasap 24/48(459s)
+  eval nasap 32/48(590s)
+  eval nasap 40/48(759s)
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_UNCLOSED:[('PL', SPitch(step='C', alter=0, octave=4))]", 'TERMINAL_BAR_MISSING'], 'raw': '|4/4k0PL:C4PR:C5 <|0.01|> 1/16c5E5 <|0.23|> 1/16e5C5 <|0.24|> 1/16c5E5 <|0.32|> 1/16e5C5 <|0.43|> 1/16c5E5 <|0.53|> 1/16e5C5 <|0.62|> 1/16c5E5 <|0.72|> 1/16e5C5', 'truncated': '|4/4k0PL:C4PR:C5 <|0.01|> 1/16c5E5 <|0.23|> 1/16e5C5 <|0.24|> 1/16c5E5 <|0.32|> 1/16e5C5 <|0.43|> 1/'}
+  eval 汇总: parseable=0.06 empty=0.9375 n=48 样本0='|4/4k0' 探针acc=0.58/前缀0.69 eotP0=0.0000
+  eval maestro 0(925s)
+  eval maestro 8(974s)
+  eval maestro 16(1023s)
+  eval maestro 24(1075s)
+  eval maestro 32(1124s)
+  eval maestro 40(1168s)
+  eval 指标: parseable=0.06 amt_f1=0.0 omr_ned=0.9102351654709496 n_nasap=48 n_maestro=48
+  eval 证据已落盘 D:\vscode_projects\ee_download\Rubato\reports\eval_autolog.md(git add + commit + push 即完成上报,勿编辑)
+---
+A2S trend 22000->30000:
+A2S=2.82
+A2S=2.83
+A2S=2.83
+A2S=2.83
+A2S=2.82
