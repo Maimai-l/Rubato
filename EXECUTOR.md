@@ -40,15 +40,13 @@ python scripts/sop_next.py --go
 
 ## 当前阶段(2026-07-15 晚)
 
-诊断收官(D27→D28→D29):模型读音频能力存活,病灶=按源分层的数据问题
-(maestro/AMT 音高监督空转是唯一真异常,监控中)。**复训已批准(D29),不重跑**:
-```bat
-git pull --rebase --autostash
-python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
-```
-每次 eval 会自动跑多源 Δsem 探针并落盘 autolog —— 逢 eval push 一次 autolog 即可。
-下次复盘 step 30000。
-不用再跑 sop_next(数据期命令);日常 = `git pull --rebase --autostash` + 按当前实验卡跑。
+训练继续跑(参数不变),日常 = 逢 eval push 一次 autolog。两件新事(2026-07-17,D30):
+1. `git pull` 后**重启一次训练进程**(拉到重复惩罚解码 + 探针池第 4 条),命令不变:
+   `python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4`
+2. **另开一个终端**跑 AMT 音高审计(训练不用停,分钟级):
+   `python scripts/audit_alignment.py --per-source 16 --pitch`
+   → push reports/alignment_audit.md。详见 EXPERIMENT_AMT.md。
+下次复盘 step 38000。不用再跑 sop_next;日常 = `git pull --rebase --autostash` + 按当前实验卡跑。
 
 ## 报告规矩补充(2026-07-15,对应 cd996eb / 5c48581 两次事故)
 

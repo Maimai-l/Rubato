@@ -150,8 +150,26 @@ def validate_a2s(a2s_text: str) -> list[str]:
 
 # ---------------------------------------------------------------- 自研自回归解码(换表后唯一路径)
 
+def _apply_rep_penalty(row, ids: list[int], n_prompt: int,
+                       penalty: float, window: int):
+    """重复惩罚(纯逻辑,可测):最近 window 个已生成 token 的 log-prob 减 log(penalty)。
+    为什么:step30000 前缀acc=0.69(教师强制已过 0.60 线)而自由生成仍锁死在两和弦循环
+    (c5E5↔e5C5)—— 贪心的循环捕获成了 parseable 的主瓶颈。LEGATO 终评同款(penalty 1.1),
+    幅度温和(logit 平移 ~0.095),只翻近平局,强预测(如合法的 1/16 连续时值)不受影响。
+    只罚已生成段,不罚 prompt。"""
+    if not penalty or penalty == 1.0 or len(ids) <= n_prompt:
+        return row
+    import math
+    import torch
+    recent = sorted(set(ids[max(n_prompt, len(ids) - window):]))
+    row = row.clone()
+    row[torch.tensor(recent, device=row.device)] -= math.log(penalty)
+    return row
+
+
 def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
-                          max_new: int = 900) -> str:
+                          max_new: int = 900, rep_penalty: float = 1.1,
+                          rep_window: int = 128) -> str:
     """
     贪心解码,只依赖【训练验证过的同一个 forward】。为什么不用 NeMo transcribe/generate
     (执行端 step1000 eval 实测 parseable=0):词表已换成自有 8000 spm、forward 直喂 id,
@@ -211,7 +229,8 @@ def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
                   "把本行原文+NeMo 版本贴回规划端)", flush=True)
 
         for _ in range(max_new):
-            nxt = int(lp[0, -1].argmax())
+            row = _apply_rep_penalty(lp[0, -1], ids, n_prompt, rep_penalty, rep_window)
+            nxt = int(row.argmax())
             if nxt == eot or len(ids) >= 1023:
                 break
             ids.append(nxt)

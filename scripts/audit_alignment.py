@@ -134,6 +134,9 @@ def label_onsets(label_text: str, dialect: str) -> list[float]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--per-source", type=int, default=8)
+    ap.add_argument("--pitch", action="store_true",
+                    help="附加音高(chroma)审计:起音审计是音高盲的,时间齐但音高错"
+                         "(移调/同节奏错配)只有它抓得到。AMT 样本自动启用 notes 比对")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent
                                          / "reports" / "alignment_audit.md"))
     args = ap.parse_args()
@@ -181,6 +184,12 @@ def main():
                 row = (f"  {kind} {u['utt_id']}/{dia}: {v} corr0={r['corr0']} "
                        f"peak={r['peak']} lag={r['lag_ms']}ms onsets={len(ons)} "
                        f"帧={r['n_frames']}")
+                if args.pitch and dia == "AMT":
+                    from rubato.model.evaluate import amt_text_to_notes
+                    pv = pitch_verdict(audio, amt_text_to_notes(text))
+                    counts[pv["verdict"]] = counts.get(pv["verdict"], 0) + 1
+                    row += (f" | 音高: {pv['verdict']} sim={pv['sim']} "
+                            f"base={pv['base']} Δ={pv['delta']}")
             except Exception as e:
                 counts["ERROR"] = counts.get("ERROR", 0) + 1
                 row = f"  {kind} {u['utt_id']}/{dia}: ERROR {type(e).__name__}: {e}"
@@ -207,3 +216,72 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------- 音高(chroma)审计,AMT 专项
+# 起音审计是音高盲的:时间对齐完美、音高整体错(如移调/配错同节奏版本)它抓不到 ——
+# 而这正是"maestro/AMT 对齐 OK 但模型不读其音高"最需要排除的病灶。
+
+def chroma_from_audio(audio, sr: int = SR, hop_ms: int = 100):
+    """音频 → (n_frames, 12) 音级能量(A440 平均律)。纯 numpy STFT,100ms 粗帧足够。"""
+    import numpy as np
+    a = np.asarray(audio, dtype=np.float32).reshape(-1)
+    hop = int(sr * hop_ms / 1000)
+    frame = hop * 2
+    if len(a) < frame:
+        return np.zeros((0, 12), dtype=np.float32)
+    n = 1 + (len(a) - frame) // hop
+    win = np.hanning(frame).astype(np.float32)
+    freqs = np.fft.rfftfreq(frame, 1.0 / sr)
+    # 频率 → MIDI 音级(27.5Hz~4.2kHz 之外丢弃,直流/超高频不进账)
+    valid = (freqs > 27.0) & (freqs < 4200.0)
+    midi = 69 + 12 * np.log2(np.maximum(freqs, 1e-6) / 440.0)
+    pc = (np.round(midi).astype(int) % 12)
+    out = np.zeros((n, 12), dtype=np.float32)
+    for i in range(n):
+        seg = a[i * hop: i * hop + frame] * win
+        mag = np.abs(np.fft.rfft(seg))
+        mag[~valid] = 0.0
+        for k in range(12):
+            out[i, k] = float(mag[pc == k].sum())
+    return out
+
+
+def chroma_from_notes(notes, n_frames: int, hop_ms: int = 100):
+    """[{pitch,on,off}] → (n_frames, 12) 活跃音级指示(响铃期间置 1)。"""
+    import numpy as np
+    out = np.zeros((max(n_frames, 1), 12), dtype=np.float32)
+    for nt in notes:
+        i0 = max(0, int(nt["on"] * 1000 / hop_ms))
+        i1 = min(len(out), max(i0 + 1, int(nt.get("off", nt["on"] + 0.1) * 1000 / hop_ms) + 1))
+        out[i0:i1, int(nt["pitch"]) % 12] = 1.0
+    return out
+
+
+def chroma_similarity(ca, cn) -> float:
+    """逐帧余弦相似度均值(双方都有能量的帧)。"""
+    import numpy as np
+    n = min(len(ca), len(cn))
+    if n == 0:
+        return 0.0
+    ca, cn = np.asarray(ca[:n]), np.asarray(cn[:n])
+    na = np.linalg.norm(ca, axis=1)
+    nb = np.linalg.norm(cn, axis=1)
+    ok = (na > 1e-6) & (nb > 1e-6)
+    if not ok.any():
+        return 0.0
+    cos = (ca[ok] * cn[ok]).sum(axis=1) / (na[ok] * nb[ok])
+    return float(cos.mean())
+
+
+def pitch_verdict(audio, notes, hop_ms: int = 100) -> dict:
+    """音高对齐判定:真相似度 vs 循环平移半窗的基线相似度(同曲错位 = 破坏音高-时间对应)。
+    判读(预登记):sim - base ≥ 0.10 → PITCH_OK;< 0.05 → PITCH_MISMATCH;之间 AMBIG。"""
+    import numpy as np
+    ca = chroma_from_audio(audio, hop_ms=hop_ms)
+    cn = chroma_from_notes(notes, len(ca), hop_ms=hop_ms)
+    sim = chroma_similarity(ca, cn)
+    base = chroma_similarity(ca, np.roll(cn, len(cn) // 2, axis=0))
+    d = sim - base
+    v = "PITCH_OK" if d >= 0.10 else ("PITCH_MISMATCH" if d < 0.05 else "PITCH_AMBIG")
+    return {"sim": round(sim, 3), "base": round(base, 3), "delta": round(d, 3), "verdict": v}

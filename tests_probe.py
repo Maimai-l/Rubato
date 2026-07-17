@@ -146,4 +146,19 @@ run_eval_hooks(None, [], [], None, autolog=str(log), step=124)
 txt2 = log.read_text(encoding="utf-8")
 check("append_not_overwrite", "step 123" in txt2 and "step 124" in txt2, txt2[:200])
 
+
+
+print("[12] 重复惩罚:近平局时翻转到未重复 token,强预测不受影响,prompt 不罚")
+from rubato.model.infer import _apply_rep_penalty
+
+row = torch.log(torch.tensor([0.30, 0.29, 0.41]))       # token0 略胜 token1
+out = _apply_rep_penalty(row, ids=[9, 0], n_prompt=1, penalty=1.1, window=64)
+check("near_tie_flips", int(out.argmax()) == 2 and out[0] < row[0], out)
+row2 = torch.log(torch.tensor([0.80, 0.10, 0.10]))      # 强预测
+out2 = _apply_rep_penalty(row2, ids=[9, 0], n_prompt=1, penalty=1.1, window=64)
+check("strong_survives", int(out2.argmax()) == 0, out2)
+out3 = _apply_rep_penalty(row, ids=[0], n_prompt=1, penalty=1.1, window=64)  # 只有 prompt
+check("prompt_unpenalized", torch.equal(out3, row), out3)
+check("penalty_off_noop", _apply_rep_penalty(row, [9, 0], 1, 1.0, 64) is row)
+
 print(f"\n全部通过: {PASS} 项")

@@ -69,4 +69,36 @@ except Exception as e:
     print(f"  skip amt_onsets(沙盒无该文法样例:{type(e).__name__}: {e})")
     PASS += 1
 
+
+
+print("[6] 音高审计:正确音高 PITCH_OK;移调 +3 半音 → 相似度崩,非 OK")
+from scripts.audit_alignment import pitch_verdict
+
+
+def tone_audio(notes, dur_s=8.0, sr=SR):
+    """按 [{pitch,on,off}] 放正弦(带谐波)的合成音频。"""
+    t_axis = np.arange(int(dur_s * sr)) / sr
+    a = np.random.default_rng(1).normal(0, 0.001, len(t_axis)).astype(np.float32)
+    for nt in notes:
+        f = 440.0 * 2 ** ((nt["pitch"] - 69) / 12)
+        i0, i1 = int(nt["on"] * sr), min(len(a), int(nt["off"] * sr))
+        if i1 <= i0:
+            continue
+        seg = t_axis[i0:i1]
+        a[i0:i1] += (0.3 * np.sin(2 * np.pi * f * seg)
+                     + 0.1 * np.sin(2 * np.pi * 2 * f * seg)).astype(np.float32)
+    return a
+
+
+NOTES = [{"pitch": 60, "on": 0.3, "off": 1.2}, {"pitch": 64, "on": 1.4, "off": 2.5},
+         {"pitch": 67, "on": 2.7, "off": 3.8}, {"pitch": 60, "on": 4.0, "off": 5.0},
+         {"pitch": 65, "on": 5.2, "off": 6.3}, {"pitch": 69, "on": 6.5, "off": 7.6}]
+aud = tone_audio(NOTES)
+r_ok = pitch_verdict(aud, NOTES)
+check("pitch_ok", r_ok["verdict"] == "PITCH_OK", r_ok)
+transposed = [{**n, "pitch": n["pitch"] + 3} for n in NOTES]
+r_bad = pitch_verdict(aud, transposed)
+check("transposed_not_ok", r_bad["verdict"] != "PITCH_OK", r_bad)
+check("transposed_delta_lower", r_bad["delta"] < r_ok["delta"], (r_bad, r_ok))
+
 print(f"\n全部通过: {PASS} 项")

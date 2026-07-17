@@ -462,6 +462,12 @@ def main():
     dm.probe_utts = [u for u in (_first_labeled(nasap_val, "nasap"),
                                  _first_labeled(maestro_val, "maestro"),
                                  _first_labeled(train_utts, "pdmx")) if u]
+    # 第 4 条:联合仪器实测读音频最强的 pdmx 样本(Δsem+0.17/审计 OK)——原第 3 条恰是
+    # 弱相关样本,代表性差;只加不换,保留前三条的逐 eval 趋势连续性
+    _good = next((u for u in train_utts
+                  if u.get("utt_id") == "pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000"), None)
+    if _good:
+        dm.probe_utts.append(_good)
     cfg = {
         "lr_encoder": args.lr_enc if args.lr_enc is not None
                       else (1e-4 if not args.from_scratch else 5e-4),   # 从头训:统一 lr

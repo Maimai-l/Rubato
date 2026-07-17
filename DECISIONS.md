@@ -44,6 +44,8 @@
 
 | D29 | **复训决定:不重跑,从 ckpt 22000 续训(参数不变)**。联合仪器 24 条定局:数据按源分层——pdmx 读音频(Δsem 至 +0.17)、nasap 有真实信号(Δsem +0.07、Δts 强正;能量审计在柔和钢琴上系统性误报,"nASAP 对齐故障"降级)、**唯一真异常=maestro/AMT 音高 Δsem≈0**(7 窗完美对齐仍不读,55% 训练对的音高监督空转)。测量层根治:常规 eval 内置多源 Δsem 探针(固定池,逐 eval 可比)+ probe-only 曲目去重。下次复盘 step 30000,仪表预登记(maestro Δsem 仍 0 → 开 AMT 专项) | 2026-07-16 | eval_autolog @64b9cd8(联合 24 条);重启无益:同样数据会学出同样行为,病灶不在初始化 | train.py probe_utts 多源探针;build_dataset 探针池+去重;EXPERIMENT_C_ROOTCAUSE 终局节 |
 
+| D30 | **step 30000 复盘**:复训健康——nasap 探针 acc 0.52→0.58、Δts 升至 +0.20,A2S 2.92→2.83(速率与前段一致),parseable 0→0.06、empty 1.0→0.94、omr_ned 首次可算(0.91);**maestro/AMT Δsem 八次 eval 全 ≈0 → 预登记条件命中,开 AMT 专项卡**(chroma 音高审计,起音审计的音高盲区补上,合成移调回归已验证);**前缀acc=0.69 过 0.60 线 → 贪心循环成 parseable 主瓶颈,自由解码加重复惩罚 1.1**(LEGATO 同款,仅监控解码);探针池加第 4 条(已知读音频最强的 pdmx 样本,原 pdmx 条是弱相关样本代表性差) | 2026-07-17 | eval_autolog 23000-30000 八点趋势 + STEP_30000.txt;所有触发条件皆 D29 时预声明 | EXPERIMENT_AMT.md;audit_alignment --pitch(chroma);infer._apply_rep_penalty;build_dataset 探针池 v2 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
