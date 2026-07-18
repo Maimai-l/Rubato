@@ -1,7 +1,3 @@
-A2S=2.72
-A2S=2.72
-A2S=2.73
----
-  eval 汇总: parseable=0.08 empty=0.9166666666666666 n=48 样本0='|4/4k0' 探针acc=0.55/前缀0.72 eotP0=0.0000
-  eval 指标: parseable=0.08 amt_f1=0.0 omr_ned=0.8882317653461482 n_nasap=48 n_maestro=48
-  (不停训:parseable=0.08 但 step<4000=False / sem=2.50>2.0=模型未熟;连续多个 eval 后 sem<门槛仍 0 才算真故障)
+step 40800 loss=34.8206 avg50=56.3424 sem=2.5084 ts=0.0000 gn=17.7/avg30.4 enc=12.3 dec=12.7 lrE=6.90e-05 lrD=2.07e-04 audio=58s | A2S=2.69 A2S_lite=2.78 AMT=2.32 TAST=2.26
+step 40850 loss=42.9558 avg50=49.1359 sem=2.2866 ts=1.9822 gn=22.2/avg24.6 enc=12.5 dec=18.3 lrE=6.90e-05 lrD=2.07e-04 audio=54s | A2S=2.70 A2S_lite=2.79 AMT=2.32 TAST=2.26
+step 40900 loss=24.0651 avg50=52.9316 sem=2.2217 ts=1.9792 gn=23.5/avg27.4 enc=17.5 dec=15.7 lrE=6.89e-05 lrD=2.07e-04 audio=37s | A2S=2.68 A2S_lite=2.80 AMT=2.31 TAST=2.25
