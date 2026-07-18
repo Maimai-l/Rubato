@@ -33,3 +33,29 @@ python scripts/s4_parallel.py
 新音频在**下一次训练重启**时自动进池(装配器按 resolve_audio 现场发现),
 checkpoint 照常续,不从头训。计划:渲染在 50000 步复盘前完成的话,
 就借复盘那次重启一并生效;没完成就下一次。
+
+---
+
+## 第二步:切段,不是渲染(2026-07-18,@42bf7f6 执行端分析正确)
+
+执行端查实:整曲 opus 全在(s4_parallel 全跳),缺的是**段级 flac** ——
+"整曲渲染 → 按段切割"这一环当年没对全量跑完(s4_slice_segments.py 文档自述此缺口)。
+修法降级为切片(轻 CPU 活,比渲染快得多):
+
+```bat
+git pull --rebase --autostash
+:: 先看磁盘(约需 ~20GB:46,740 段 × ~400KB flac):
+python scripts/procmon.py mem
+:: 冒烟 20 曲,看 sliced/skip 计数:
+python scripts/s4_slice_segments.py --limit 20
+:: 计数合理(sliced>0,skip 有理由)→ 全量,已切的自动跳过、断了重跑即续:
+python scripts/s4_slice_segments.py
+```
+
+预期与验收:
+- **不会全部回来**:结构不匹配(已知 ~5,792)和时长越界(<2s / >41s)的段会被
+  脚本明确计数跳过,继续留在 no_audio —— 这是设计,不是失败。
+- 切完跑 `python scripts/build_dataset.py --dry-run`,连同切割脚本的计数行一起
+  push 新文件 reports/RECALL_RESULT_2.txt:验收 = pdmx no_audio 从 46,740 大幅下降,
+  残余数 ≈ 脚本 skip 计数之和(账要对上)。
+- 内存/训练优先规则同第一步;切片吃 CPU/磁盘 IO,内存压力远小于渲染。
