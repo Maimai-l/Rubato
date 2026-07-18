@@ -1,1 +1,5 @@
-S4 recall: ok=0 fail=0 skipped=0 — 34772 pieces all already rendered or not in manifest. 46,740 no_audio labels remain unresolved.
+## RECALL 分析
+
+s4_parallel: ok=0 fail=0 — 全跳,整曲 opus 已存在。
+46,740 no_audio = A2S 段 flac 缺失,不是整曲。需跑 s4_slice_segments.py 从已有 opus 切段补齐。
+VirtuosoNet perf labels (34,887): 0 missing — 全部有 wav。
