@@ -59,3 +59,37 @@ python scripts/s4_slice_segments.py
   push 新文件 reports/RECALL_RESULT_2.txt:验收 = pdmx no_audio 从 46,740 大幅下降,
   残余数 ≈ 脚本 skip 计数之和(账要对上)。
 - 内存/训练优先规则同第一步;切片吃 CPU/磁盘 IO,内存压力远小于渲染。
+
+---
+
+## 结案:召回净收成 = 0,46,740 全部是"按设计出局"(2026-07-18,@963ff2d,D34)
+
+切割全量跑完:**sliced=0**,已存段 flac 89,237 个(≈ 现役 76.7k 训练对 + 12.9k 去重行,
+账闭合)。46,740 的分解(计数器口径已从代码核实:no_whole_audio/structure_mismatch/no_midi
+按曲,seg_* 按段):
+
+| 类别 | 量 | 定性 |
+|---|---|---|
+| 缺整曲的 3,683 曲的标签行 | 大头 | 见下"诡异"解释,多为清场遗留,勿复活 |
+| structure_mismatch 5,792 曲的行 | 中 | 反复展开坐标错位,守卫拒切(防毒),映射修复另议 |
+| 段太长(>41s 慢演绎)4,452 段 | 小 | D14 设计出局(超训练窗) |
+| 段太短(<2s)1,404 段 | 小 | D5 设计出局(退化样本) |
+| no_midi 47 曲 | 微 | 无渲染 MIDI |
+
+**D33 的"+20% 训练数据"预估作废**(规划端之误:拿召回清单毛数当净数,没先分解)。
+真正剩余的可回收池只有 structure_mismatch 曲(需谱面侧反复展开映射,中等工程,挂账)。
+
+### "3,683 缺整曲"之谜(执行端问得对)
+
+s4_parallel 按 **manifest(过滤后)** 名单干活,切割器按 **标签文件** 名单干活 ——
+3,683 = 在标签里、不在(或已被清出)manifest 的曲:非钢琴清场/黑名单/清理的**遗留标签行**。
+两个工具都没错,名单不同而已。按铁律它们**必须留在池外**。
+证据不靠推理:跑对账脚本,逐曲定性(A 清场遗留/B·D 无害/C 矛盾类应为 0):
+
+```bat
+git pull --rebase --autostash
+python scripts/recall_explain.py
+git add reports/recall_explain.md && git commit -m "recall explain" && git push
+```
+
+若报告出现 C 类(在 manifest 且段缺)→ 那才是真问题,贴回待查;A/B/D 全覆盖 = 结案。
