@@ -95,7 +95,11 @@ def main():
     with open(MANIFEST, 'r', encoding='utf-8') as f:
         for line in f:
             p = json.loads(line.strip())
-            if p.get("split") == "train" and p.get("midi_path"):
+            # 【D35 修复】原条件 split=="train" 把 split 缺失的曲(装配端默认按 train 用)
+            # 和 val/test 曲静默漏渲 —— 3,150 曲 12,014 行因此成了永久 no_audio,而且
+            # pdmx val/test 无音频导致其评测池形同虚设。渲染资格 = 有 MIDI,与 split 无关
+            # (val/test 也需要音频才能被评测;泄漏防护在装配端黑名单,不靠不渲染)。
+            if p.get("midi_path"):
                 pieces.append(p)
     tasks = [(p["midi_path"], f"pdmx_{p['piece_id']}", str(OUT_DIR)) for p in pieces[:N_PIECES]]
 

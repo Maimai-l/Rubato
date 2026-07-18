@@ -330,6 +330,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     truncated = False
     omr_scores = []
     sample_preds: list[str] = []
+    ok_pred = ok_utt = ok_ref = None     # 首个过校验的预测(展示偏差修复:别只看失败样本)
     probe: dict = {}
     n_probed = 0
     _probe0 = None                       # 样本0 的 (参照, 方言, domain),供错配对照
@@ -443,6 +444,12 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
             viol = viol or ["empty_fallback"]
         if not viol:
             n_ok += 1
+            if ok_pred is None and pred != _EMPTY_A2S:
+                # 首个真正通过校验的预测:样本预测[0]/[1] 是确定性子集的前两个样本,
+                # 它们长期失败 → 显示的永远是兜底常量,通过的样本反而从未被看见(展示偏差)
+                ok_pred = pred[:160]
+                ok_utt = sample.get("utt_id", "?")
+                ok_ref = (labels.get(ok_utt, {}) or {}).get("A2S") or ""
             ref_a2s = labels.get(sample.get("utt_id"), {}).get("A2S")
             if legato_omr_fn and sample.get("ref_xml"):
                 omr_scores.append(legato_omr_fn(pred, sample["ref_xml"]))
@@ -454,6 +461,9 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     metrics["eval_truncated"] = truncated
     for k, p in enumerate(sample_preds):
         _p(f"  eval 样本预测[{k}]: {p!r}")
+    if ok_pred is not None:
+        _p(f"  eval 样本预测[首个通过 {ok_utt}]: {ok_pred!r}")
+        _p(f"  eval 同样本参照:              {ok_ref[:160]!r}")
     # 兜底 ≠ 模型输出:'|4/4k0' 是异常/拒绝的兜底常量(执行端 6 轮 eval 被它蒙蔽)。
     # 只要出现兜底,把吞错现场打出来 —— 模型真实输出/违规项/异常栈,三选一必有。
     if n_empty:

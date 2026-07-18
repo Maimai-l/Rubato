@@ -53,6 +53,8 @@
 
 | D34 | **召回结案:净收成 0,D33 的"+20%"预估作废**(规划端拿召回清单毛数当净数之误)。切割全量 sliced=0、已存段 89,237(≈76.7k 现役+12.9k 去重行,账闭合);46,740 = 清场遗留曲的标签行(3,683 曲,s4_parallel 按 manifest / 切割器按标签,名单不同所致,勿复活)+ structure_mismatch 5,792 曲(守卫防毒拒切)+ 超窗 4,452 段(D14)+ 过短 1,404 段(D5)+ 无 MIDI 47 曲。唯一剩余可回收池 = structure_mismatch 曲(谱面侧反复展开映射,中等工程,挂账)。对账脚本 recall_explain.py 逐曲定性(C 矛盾类应为 0),执行端一命令出证据 | 2026-07-18 | RECALL_RESULT_2 @963ff2d + 计数器口径代码核实;50000 重启不再有数据变更动因(重启照常做,复盘用) | scripts/recall_explain.py + tests_recall_explain.py;RECALL_PDMX 结案节 |
 
+| D35 | **D34 部分作废,召回第三步 = 真渲染**:recall_explain 实证 A 清场遗留仅 11 曲/699 行,C 类矛盾 3,150 曲/12,014 行 —— 根因是 s4_parallel 名单条件 `split=="train"` 与装配端"缺 split 默认 train"口径不一致,split 缺失曲与 val/test 曲被静默漏渲(pdmx val/test 评测池因此一直无音频)。修复:渲染资格=有 MIDI 不看 split。净收益修正:+12,014 训练行(≈+5%)+ pdmx 获得干净评测源资格。教训链:D33"+20%"(毛当净)→ D34"0"(推断当证据)→ D35 实证 +5% —— 对账脚本抓真 bug,证据文化再次自证 | 2026-07-18 | reports/recall_explain.md @ea8b6f6 + s4_parallel.py:96 代码事实 | s4_parallel 名单修复;RECALL_PDMX 第三步;eval 展示偏差同步修复(样本预测新增"首个通过"行+同样本参照) |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

@@ -93,3 +93,30 @@ git add reports/recall_explain.md && git commit -m "recall explain" && git push
 ```
 
 若报告出现 C 类(在 manifest 且段缺)→ 那才是真问题,贴回待查;A/B/D 全覆盖 = 结案。
+
+---
+
+## 第三步:真渲染(D35 —— D34"净收成 0"部分作废,对账脚本抓到真 bug)
+
+recall_explain @ea8b6f6 的定性推翻了上一节的推断:清场遗留只有 **A=11 曲/699 行**,
+而 **C=3,150 曲/12,014 行在 manifest 里、整曲缺、段也缺** —— s4_parallel 建名单时
+要求 `split=="train"` 才渲,把 split 缺失的曲(装配端默认按 train 用)和 val/test 曲
+**静默漏渲**。两端口径不一致,一行代码之误。已修:渲染资格 = 有 MIDI,与 split 无关
+(val/test 也要音频才能被评;泄漏防护在装配端黑名单,不靠不渲)。
+
+净收益修正:**+12,014 训练行(≈+5%)+ pdmx val/test 首次获得音频**(此后 pdmx 可作干净评测源)。
+
+```bat
+git pull --rebase --autostash
+:: 真渲染(~3,150 曲,sfizz CPU,数小时;训练优先,内存规则同第一步):
+set S4_RESERVE_GB=10
+python scripts/s4_parallel.py
+:: 渲完切段(只会切新渲的曲,旧段自动跳过):
+python scripts/s4_slice_segments.py
+:: 验收:装配统计 + 切割计数,push 新文件 reports/RECALL_RESULT_3.txt
+python scripts/build_dataset.py --dry-run
+```
+
+验收判据:pdmx no_audio 从 46,740 降 ≈12,014;渲染 ok≈3,150(fail 贴回分诊);
+sliced ≈ 12,014 ±(段时长守卫会拦掉少量)。对账残差 ~522 曲(切割器 3,683 vs
+对账 3,161)属两工具统计口径差,渲后复跑 recall_explain 应归零或可解释,一并贴回。
