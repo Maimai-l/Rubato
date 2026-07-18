@@ -1,0 +1,4 @@
+## S4 recall step3 — sfizz全崩
+
+ok=0 fail=3480 — 全崩, sfizz_render.EXE CalledProcessError
+推测:训练并行时内存争抢或 sfizz 子进程环境问题
