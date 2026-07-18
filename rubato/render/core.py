@@ -150,7 +150,7 @@ def render_midi_to_wav44(midi_path: str, source: dict, sources_cfg: dict,
         extra = list(source.get("sfizz_flags") or render_cfg.get("sfizz_flags") or [])
         run("sfizz_render", ["--sfz", sfpath, "--midi", midi_path,
                              "--wav", out_wav, "--samplerate", str(sr), *extra],
-            timeout=timeout_s)
+            timeout=timeout_s, cwd=pathlib.Path(__file__).resolve().parent.parent.parent)
     else:
         raise ValueError(f"未知引擎 {engine}")
 
