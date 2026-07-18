@@ -120,3 +120,26 @@ python scripts/build_dataset.py --dry-run
 验收判据:pdmx no_audio 从 46,740 降 ≈12,014;渲染 ok≈3,150(fail 贴回分诊);
 sliced ≈ 12,014 ±(段时长守卫会拦掉少量)。对账残差 ~522 曲(切割器 3,683 vs
 对账 3,161)属两工具统计口径差,渲后复跑 recall_explain 应归零或可解释,一并贴回。
+
+---
+
+## 第四步:全崩分诊(2026-07-18,@b2cf3e1)
+
+3,480 曲渲染 **100% CalledProcessError**。"全崩"不是内存争抢(那是间歇杀手,不会齐崩),
+是系统性前置条件坏了。执行端"内存争抢/环境问题"两个猜测先不采纳 —— 取证再判。
+
+头号嫌疑(与这批曲的身世自洽):它们**历史上从未被渲过**,如果产 MIDI 的上游步骤
+(D7 tempo 钳制重写)当年也按 `split=="train"` 过滤,这批曲的 midi_path 就是
+"记了账没造货" —— 文件缺失/零字节,sfizz 必崩且恰好 100% 崩。
+
+```bat
+git pull --rebase --autostash
+python scripts/s4_diag.py
+git add reports/s4_diag.md && git commit -m "s4 diag" && git push
+```
+
+脚本三件事(分钟级):① stat 全部待渲 MIDI(缺失/零字节/实存计数,≥90% 缺 → 当场定案);
+② 环境对照:重渲 1 首当年成功过的曲到临时目录(它也崩=环境坏,成功=环境无罪);
+③ 对 2 首 MIDI 实存的失败曲打印【完整 stderr】(渲染报告 80 字符截断一直在丢证据)。
+三份证据齐了按矩阵走:MIDI 缺 → 修上游产 MIDI 步骤;环境崩 → 修 sfizz/音源路径;
+stderr 指向具体 flag/音源 → 对症修。训练不受影响,继续跑。
