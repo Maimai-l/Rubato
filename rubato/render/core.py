@@ -141,16 +141,22 @@ def render_midi_to_wav44(midi_path: str, source: dict, sources_cfg: dict,
         sfpath = source["path"]
 
     from rubato.platform import run
+    # 【D36】sources.yaml 里的音源路径是相对路径(assets/soundfonts/...),按【工作目录】解析
+    # —— 换个目录启动就是 3,480 曲 100% 全崩(SFZ not found),且此雷在"大家恰好都从
+    # 同一目录启动"的几周里完全隐形。渲染进程的 cwd 一律钉在 repo 根,两个引擎同待遇。
+    # (执行端 8b53bad 修 sfizz 分支,规划端审后追认并补齐 fluidsynth 分支。)
+    repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
     if engine == "fluidsynth":
         gain = render_cfg["fluidsynth_gain"]
         run("fluidsynth", ["-ni", "-F", out_wav, "-r", str(sr),
-                           "-g", str(gain), sfpath, midi_path], timeout=timeout_s)
+                           "-g", str(gain), sfpath, midi_path],
+            timeout=timeout_s, cwd=repo_root)
     elif engine == "sfizz":
         # sfizz_render flag 以 --help 为准(冒烟阶段核实);常见形式如下
         extra = list(source.get("sfizz_flags") or render_cfg.get("sfizz_flags") or [])
         run("sfizz_render", ["--sfz", sfpath, "--midi", midi_path,
                              "--wav", out_wav, "--samplerate", str(sr), *extra],
-            timeout=timeout_s, cwd=pathlib.Path(__file__).resolve().parent.parent.parent)
+            timeout=timeout_s, cwd=repo_root)
     else:
         raise ValueError(f"未知引擎 {engine}")
 

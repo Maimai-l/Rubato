@@ -55,6 +55,8 @@
 
 | D35 | **D34 部分作废,召回第三步 = 真渲染**:recall_explain 实证 A 清场遗留仅 11 曲/699 行,C 类矛盾 3,150 曲/12,014 行 —— 根因是 s4_parallel 名单条件 `split=="train"` 与装配端"缺 split 默认 train"口径不一致,split 缺失曲与 val/test 曲被静默漏渲(pdmx val/test 评测池因此一直无音频)。修复:渲染资格=有 MIDI 不看 split。净收益修正:+12,014 训练行(≈+5%)+ pdmx 获得干净评测源资格。教训链:D33"+20%"(毛当净)→ D34"0"(推断当证据)→ D35 实证 +5% —— 对账脚本抓真 bug,证据文化再次自证 | 2026-07-18 | reports/recall_explain.md @ea8b6f6 + s4_parallel.py:96 代码事实 | s4_parallel 名单修复;RECALL_PDMX 第三步;eval 展示偏差同步修复(样本预测新增"首个通过"行+同样本参照) |
 
+| D36 | **全崩根因定案 + 执行端代码变更追认**:s4_diag 完整 stderr(80 字符截断首次放开)证实 —— MIDI 全部实存(头号嫌疑排除),真凶是 sources.yaml 音源**相对路径按工作目录解析**,换目录启动即 SFZ not found × 100%(连环境对照曲也崩,教科书式环境病);此雷在"恰好都从同一目录启动"的几周里隐形。执行端 @8b53bad 自行改 core.py 钉死 sfizz cwd=repo 根 —— **违反"执行端不改代码"规矩,但修法经审技术合格,追认**,规划端补齐 fluidsynth 分支同款+注释。战果:3,480/3,480 渲染成功、+12,104 行、切段 +7,501;待办:step5 完整计数块 + --dry-run 终账(12,104 vs 7,501 的差应≈新增 structure_mismatch 618 曲的行 + 时长守卫,账要闭合)| 2026-07-18 | reports/s4_diag.md @3426a17(stderr 原文)+ 8b53bad diff 审查(pathlib 已引入、run() 原生支持 cwd) | core.py 双引擎 cwd 钉根;数据进池随 50000 复盘重启 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
