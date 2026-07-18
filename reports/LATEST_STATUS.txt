@@ -1,0 +1,7 @@
+A2S=2.72
+A2S=2.72
+A2S=2.73
+---
+  eval 汇总: parseable=0.08 empty=0.9166666666666666 n=48 样本0='|4/4k0' 探针acc=0.55/前缀0.72 eotP0=0.0000
+  eval 指标: parseable=0.08 amt_f1=0.0 omr_ned=0.8882317653461482 n_nasap=48 n_maestro=48
+  (不停训:parseable=0.08 但 step<4000=False / sem=2.50>2.0=模型未熟;连续多个 eval 后 sem<门槛仍 0 才算真故障)
