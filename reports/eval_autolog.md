@@ -281,3 +281,14 @@ probe-only 联合仪器(对齐×Δsem)@ step 22000,每源 8 条
   eval 解码现场: {'stage': 'validate_reject', 'viol': ['TERMINAL_BAR_MISSING'], 'raw': '|4/4k0PR:C4 <|0.01|> 1/8c4E4 <|0.23|> 1/8e4C4 <|0.42|> 1/8c4E4 <|0.53|> 1/8e4C4 <|0.65|> 1/8c4E4 <|0.79|> 1/8e4C4 <|0.97|> 1/8c4 <|1.10|> |4/4k0B3 <|1.10|> 1/8b', 'truncated': '|4/4k0PR:C4 <|0.01|> 1/8c4E4 <|0.23|> 1/8e4C4 <|0.42|> 1/8c4E4 <|0.53|> 1/8e4C4 <|0.65|> 1/8c4E4 <|0'}
   eval 汇总: parseable=0.10 empty=0.8958333333333334 n=48 样本0='|4/4k0' 探针acc=0.52/前缀0.56 eotP0=0.0000
   eval 指标: parseable=0.10 amt_f1=0.0 omr_ned=0.8825374082552659 n_nasap=48 n_maestro=48
+
+## eval @ step 40000 (2026-07-18 20:34:10)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.04 Δts=+0.12 真sem=0.66 静sem=0.62 acc=0.54 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.01 Δts=+0.00 真sem=0.72 静sem=0.71 acc=0.63 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.08 Δts=+0.03 真sem=0.59 静sem=0.52 acc=0.51 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.16 Δts=+0.17 真sem=0.69 静sem=0.53 acc=0.63 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ['MEASURE_SUM:3 got 7/8 want 1', 'MEASURE_SUM:4 got 7/8 want 1', 'MEASURE_SUM:5 got 7/8 want 1', 'MEASURE_SUM:6 got 7/8 want 1'], 'raw': '|4/4k0PR:C4 <|0.00|> 1/8c4E4 <|0.27|> 1/8e4C4 <|0.48|> 1/8c4E4 <|0.64|> 1/8e4C4 <|0.81|> 1/8c4E4 <|0.99|> 1/8e4C4 <|1.14|> 1/8c4 <|1.30|> |4/4k0B3 <|1.30|> 1/8b', 'truncated': '|4/4k0PR:C4 <|0.00|> 1/8c4E4 <|0.27|> 1/8e4C4 <|0.48|> 1/8c4E4 <|0.64|> 1/8e4C4 <|0.81|> 1/8c4E4 <|0'}
+  eval 汇总: parseable=0.08 empty=0.9166666666666666 n=48 样本0='|4/4k0' 探针acc=0.54/前缀0.59 eotP0=0.0000
+  eval 指标: parseable=0.08 amt_f1=0.0 omr_ned=0.9184108003793332 n_nasap=48 n_maestro=48
