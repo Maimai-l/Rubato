@@ -1,0 +1,9 @@
+  eval 指标: parseable=0.08 amt_f1=0.0 omr_ned=0.9131696769978843 n_nasap=48 n_maestro=48
+  (不停训:parseable=0.08 但 step<4000=False / sem=2.51>2.0=模型未熟;连续多个 eval 后 sem<门槛仍 0 才算真故障)
+  eval 汇总: parseable=0.08 empty=0.9166666666666666 n=48 样本0='|4/4k-1PL:D2A2D3PR:A3 1/8a3D4 1/8d4E4 1/8e4F4 1/8f4E4 1/8e4D' 探针acc=0.59/前缀0.62 eotP0=0.0000
+  eval 指标: parseable=0.08 amt_f1=0.0 omr_ned=0.8355726196897306 n_nasap=48 n_maestro=48
+  (不停训:parseable=0.08 但 step<4000=False / sem=2.44>2.0=模型未熟;连续多个 eval 后 sem<门槛仍 0 才算真故障)
+---
+step 49500 loss=56.6529 avg50=54.7239 sem=2.6731 ts=1.2247 gn=24.1/avg23.7 enc=15.7 dec=18.3 lrE=5.68e-05 lrD=1.70e-04 audio=40s | A2S=2.65 A2S_lite=2.67 AMT=2.33 TAST=2.19
+step 49550 loss=47.7248 avg50=52.8571 sem=2.5911 ts=1.5812 gn=14.7/avg25.6 enc=10.8 dec=10.0 lrE=5.67e-05 lrD=1.70e-04 audio=48s | A2S=2.63 A2S_lite=2.68 AMT=2.34 TAST=2.19
+step 49600 loss=41.6253 avg50=48.2705 sem=2.6593 ts=0.0000 gn=20.1/avg28.0 enc=11.6 dec=16.4 lrE=5.67e-05 lrD=1.70e-04 audio=39s | A2S=2.62 A2S_lite=2.68 AMT=2.36 TAST=2.20
