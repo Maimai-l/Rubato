@@ -292,3 +292,47 @@ probe-only 联合仪器(对齐×Δsem)@ step 22000,每源 8 条
   eval 解码现场: {'stage': 'validate_reject', 'viol': ['MEASURE_SUM:3 got 7/8 want 1', 'MEASURE_SUM:4 got 7/8 want 1', 'MEASURE_SUM:5 got 7/8 want 1', 'MEASURE_SUM:6 got 7/8 want 1'], 'raw': '|4/4k0PR:C4 <|0.00|> 1/8c4E4 <|0.27|> 1/8e4C4 <|0.48|> 1/8c4E4 <|0.64|> 1/8e4C4 <|0.81|> 1/8c4E4 <|0.99|> 1/8e4C4 <|1.14|> 1/8c4 <|1.30|> |4/4k0B3 <|1.30|> 1/8b', 'truncated': '|4/4k0PR:C4 <|0.00|> 1/8c4E4 <|0.27|> 1/8e4C4 <|0.48|> 1/8c4E4 <|0.64|> 1/8e4C4 <|0.81|> 1/8c4E4 <|0'}
   eval 汇总: parseable=0.08 empty=0.9166666666666666 n=48 样本0='|4/4k0' 探针acc=0.54/前缀0.59 eotP0=0.0000
   eval 指标: parseable=0.08 amt_f1=0.0 omr_ned=0.9184108003793332 n_nasap=48 n_maestro=48
+
+## eval @ step 41000 (2026-07-18 23:30:11)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.03 Δts=+0.14 真sem=0.66 静sem=0.63 acc=0.55 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=-0.01 Δts=+0.04 真sem=0.72 静sem=0.72 acc=0.63 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.05 Δts=+0.01 真sem=0.58 静sem=0.54 acc=0.50 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.15 Δts=+0.14 真sem=0.69 静sem=0.54 acc=0.63 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ['TERMINAL_BAR_MISSING'], 'raw': '|4/4k0PL:C4PR:E5 <|0.01|> 1/8PL:c4B3PR:e5D5 <|0.28|> 1/8PL:b3A3PR:d5C5 <|0.48|> 1/8PL:a3G3PR:c5B4 <|0.70|> 1/8PL:g3A3PR:b4C5 <|0.89|> 1/8PL:a3B3PR:c5D5 <|1.07|>', 'truncated': '|4/4k0PL:C4PR:E5 <|0.01|> 1/8PL:c4B3PR:e5D5 <|0.28|> 1/8PL:b3A3PR:d5C5 <|0.48|> 1/8PL:a3G3PR:c5B4 <|'}
+  eval 汇总: parseable=0.06 empty=0.9375 n=48 样本0='|4/4k0' 探针acc=0.55/前缀0.56 eotP0=0.0000
+  eval 指标: parseable=0.06 amt_f1=0.11270833333333334 omr_ned=0.890731781556004 n_nasap=48 n_maestro=48
+
+## eval @ step 42000 (2026-07-19 02:25:08)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.06 Δts=+0.12 真sem=0.71 静sem=0.65 acc=0.58 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=-0.01 Δts=+0.07 真sem=0.71 静sem=0.72 acc=0.62 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.06 Δts=+0.01 真sem=0.59 静sem=0.54 acc=0.50 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.16 Δts=+0.18 真sem=0.69 静sem=0.52 acc=0.64 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ['MEASURE_SUM:2 got 9/8 want 1', 'MEASURE_SUM:3 got 9/8 want 1', 'MEASURE_SUM:4 got 7/8 want 1', 'MEASURE_SUM:5 got 7/8 want 1'], 'raw': '|4/4k0PL:C4PR:C5 <|0.00|> 1/8PL:c4B3PR:c5B4 <|0.37|> 1/8PL:b3A3PR:b4C5 <|0.63|> 1/8PL:a3B3PR:c5D5 <|0.81|> 1/8PL:b3C4PR:d5E5 <|0.97|> 1/8PL:c4B3PR:e5F5 <|1.14|>', 'truncated': '|4/4k0PL:C4PR:C5 <|0.00|> 1/8PL:c4B3PR:c5B4 <|0.37|> 1/8PL:b3A3PR:b4C5 <|0.63|> 1/8PL:a3B3PR:c5D5 <|'}
+  eval 汇总: parseable=0.10 empty=0.8958333333333334 n=48 样本0='|4/4k0' 探针acc=0.58/前缀0.62 eotP0=0.0000
+  eval 指标: parseable=0.10 amt_f1=0.0 omr_ned=0.8995695280130402 n_nasap=48 n_maestro=48
+
+## eval @ step 43000 (2026-07-19 05:20:27)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.06 Δts=+0.12 真sem=0.67 静sem=0.62 acc=0.55 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=-0.01 Δts=+0.01 真sem=0.71 静sem=0.72 acc=0.62 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.05 Δts=+0.03 真sem=0.58 静sem=0.53 acc=0.50 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.18 Δts=+0.08 真sem=0.69 静sem=0.51 acc=0.63 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ['MEASURE_SUM:4 got 9/8 want 1', 'MEASURE_SUM:5 got 7/8 want 1', 'MEASURE_SUM:8 got 9/8 want 1', 'MEASURE_SUM:16 got 7/8 want 1'], 'raw': '|4/4k0PL:C4PR:E4 <|0.02|> 1/8PL:c4A3PR:e4F4 <|0.32|> 1/8PL:a3G3PR:f4E4 <|0.55|> 1/8PL:g3F3PR:e4F4 <|0.78|> 1/8PL:f3E3PR:f4E4 <|0.98|> 1/8PL:e3D3PR:e4D4 <|1.17|>', 'truncated': '|4/4k0PL:C4PR:E4 <|0.02|> 1/8PL:c4A3PR:e4F4 <|0.32|> 1/8PL:a3G3PR:f4E4 <|0.55|> 1/8PL:g3F3PR:e4F4 <|'}
+  eval 汇总: parseable=0.06 empty=0.9375 n=48 样本0='|4/4k0' 探针acc=0.55/前缀0.62 eotP0=0.0000
+  eval 指标: parseable=0.06 amt_f1=0.0 omr_ned=0.8466225477379711 n_nasap=48 n_maestro=48
+
+## eval @ step 44000 (2026-07-19 08:17:16)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.06 Δts=+0.11 真sem=0.71 静sem=0.64 acc=0.58 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=-0.01 Δts=-0.03 真sem=0.72 静sem=0.72 acc=0.62 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.07 Δts=+0.02 真sem=0.60 静sem=0.53 acc=0.51 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.20 Δts=+0.12 真sem=0.70 静sem=0.50 acc=0.64 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=0, octave=2))@97/8", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='G', alter=0, octave=2))@119/8", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=0, octave=2))@67/4", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=0, octave=2))@75/4"], 'raw': '|4/4k0PL:G3PR:E4 <|0.00|> 1/8PL:g3A3PR:e4C4 <|0.39|> 1/8PL:a3B3PR:c4 <|0.63|> 1/8PL:b3A3 <|0.85|> 1/8a3G3 <|1.04|> 1/8g3F3 <|1.23|> 1/8f3E3 <|1.41|> 1/8e3 <|1.5', 'truncated': '|4/4k0PL:G3PR:E4 <|0.00|> 1/8PL:g3A3PR:e4C4 <|0.39|> 1/8PL:a3B3PR:c4 <|0.63|> 1/8PL:b3A3 <|0.85|> 1/'}
+  eval 汇总: parseable=0.04 empty=0.9583333333333334 n=48 样本0='|4/4k0' 探针acc=0.58/前缀0.72 eotP0=0.0000
+  eval 指标: parseable=0.04 amt_f1=0.0 omr_ned=0.9521121361443561 n_nasap=48 n_maestro=48
