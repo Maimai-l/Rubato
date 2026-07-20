@@ -391,3 +391,49 @@ probe-only 联合仪器(对齐×Δsem)@ step 22000,每源 8 条
   eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=0, octave=2))@11/2", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=0, octave=2))@51/8", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=0, octave=2))@29/4", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='C', alter=0, octave=3))@63/8"], 'raw': '|4/4k0PL:G3PR:E4 <|0.02|> 1/8PL:g3A3PR:e4 <|0.32|> 1/8PL:a3G3 <|0.51|> 1/8g3A3 <|0.72|> 1/8a3G3 <|0.93|> 1/8g3F3 <|1.12|> 1/8f3E3 <|1.31|> 1/8e3 <|1.48|> |4/4k0', 'truncated': '|4/4k0PL:G3PR:E4 <|0.02|> 1/8PL:g3A3PR:e4 <|0.32|> 1/8PL:a3G3 <|0.51|> 1/8g3A3 <|0.72|> 1/8a3G3 <|0.'}
   eval 汇总: parseable=0.08 empty=0.9166666666666666 n=48 样本0='|4/4k-1PL:D2A2D3PR:A3 1/8a3D4 1/8d4E4 1/8e4F4 1/8f4E4 1/8e4D' 探针acc=0.59/前缀0.62 eotP0=0.0000
   eval 指标: parseable=0.08 amt_f1=0.0 omr_ned=0.8355726196897306 n_nasap=48 n_maestro=48
+
+## eval @ step 50000 (2026-07-20 01:53:51)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.11 Δts=+0.16 真sem=0.70 静sem=0.59 acc=0.60 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.02 Δts=-0.07 真sem=0.72 静sem=0.70 acc=0.62 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.06 Δts=+0.01 真sem=0.60 静sem=0.54 acc=0.52 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.14 Δts=+0.17 真sem=0.68 静sem=0.54 acc=0.62 n=724
+  eval 样本预测[0]: '|4/4k-1PL:D3F3A3PR:F4 1/8f4E4 1/8e4D4 1/8d4C#4 1/8c#4D4 1/8d4C#4 1/8c#4D4 1/8PL:d3f3a3PR:d4 |4/4k-1PL:C#3E3A3PR:C#4 1/8c#4E4 1/8e4C#4 1/8c#4E4 1/8e4C#4 1/8c#4E4'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_ORPHAN_OFFSET:('PL', SPitch(step='D', alter=0, octave=3))@11/2", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='D', alter=0, octave=3))@107/16", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='F', alter=0, octave=3))@63/8", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='D', alter=0, octave=3))@141/16"], 'raw': '|4/4k0PL:A3PR:A4 <|0.00|> 1/16PL:a3G3 <|0.26|> 1/16g3F3 <|0.39|> 1/16f3E3 <|0.52|> 1/16e3D3 <|0.63|> 1/16d3C3 <|0.75|> 1/16c3B2 <|0.88|> 1/16b2A2 <|0.99|> 1/16a', 'truncated': '|4/4k0PL:A3PR:A4 <|0.00|> 1/16PL:a3G3 <|0.26|> 1/16g3F3 <|0.39|> 1/16f3E3 <|0.52|> 1/16e3D3 <|0.63|>'}
+  eval 汇总: parseable=0.10 empty=0.8958333333333334 n=48 样本0='|4/4k-1PL:D3F3A3PR:F4 1/8f4E4 1/8e4D4 1/8d4C#4 1/8c#4D4 1/8d' 探针acc=0.60/前缀0.69 eotP0=0.0000
+  eval 指标: parseable=0.10 amt_f1=0.0 omr_ned=0.8809060079117771 n_nasap=48 n_maestro=48
+
+## eval @ step 51000 (2026-07-20 04:47:05)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.12 Δts=+0.09 真sem=0.74 静sem=0.62 acc=0.60 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.00 Δts=+0.01 真sem=0.72 静sem=0.72 acc=0.63 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.10 Δts=-0.01 真sem=0.64 静sem=0.54 acc=0.54 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.18 Δts=+0.10 真sem=0.69 静sem=0.51 acc=0.63 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ['MEASURE_SUM:2 got 9/8 want 1', 'MEASURE_SUM:10 got 9/8 want 1', 'MEASURE_SUM:13 got 9/8 want 1', 'MEASURE_SUM:14 got 9/8 want 1'], 'raw': '|4/4k0PL:G3PR:G4 <|0.00|> 1/8PL:g3A3 <|0.27|> 1/8a3G3 <|0.47|> 1/8g3F3 <|0.66|> 1/8f3E3 <|0.80|> 1/8e3D3 <|0.92|> 1/8d3C3 <|1.05|> 1/8c3B2 <|1.17|> 1/8b2PR:g4 <', 'truncated': '|4/4k0PL:G3PR:G4 <|0.00|> 1/8PL:g3A3 <|0.27|> 1/8a3G3 <|0.47|> 1/8g3F3 <|0.66|> 1/8f3E3 <|0.80|> 1/8'}
+  eval 汇总: parseable=0.06 empty=0.9375 n=48 样本0='|4/4k0' 探针acc=0.60/前缀0.72 eotP0=0.0000
+  eval 指标: parseable=0.06 amt_f1=0.0 omr_ned=0.8542797506930708 n_nasap=48 n_maestro=48
+
+## eval @ step 52000 (2026-07-20 07:40:30)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.12 Δts=+0.23 真sem=0.71 静sem=0.60 acc=0.61 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.01 Δts=-0.01 真sem=0.72 静sem=0.71 acc=0.63 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.12 Δts=+0.02 真sem=0.65 静sem=0.52 acc=0.55 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.15 Δts=+0.08 真sem=0.68 静sem=0.54 acc=0.62 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_ORPHAN_OFFSET:('PL', SPitch(step='D', alter=0, octave=3))@57/8", "DYCK_UNCLOSED:[('PR', SPitch(step='C', alter=0, octave=5))]", 'MEASURE_SUM:0 got 9/8 want 1', 'MEASURE_SUM:1 got 19/16 want 1'], 'raw': '|4/4k0PL:E3PR:C5 <|0.02|> 1/16PL:e3G3 <|0.26|> 1/16g3E3 <|0.43|> 1/16e3G3 <|0.53|> 1/16g3E3 <|0.63|> 1/16e3G3 <|0.78|> 1/16g3E3 <|0.89|> 1/16e3G3 <|1.02|> 1/16g', 'truncated': '|4/4k0PL:E3PR:C5 <|0.02|> 1/16PL:e3G3 <|0.26|> 1/16g3E3 <|0.43|> 1/16e3G3 <|0.53|> 1/16g3E3 <|0.63|>'}
+  eval 汇总: parseable=0.06 empty=0.9375 n=48 样本0='|4/4k0' 探针acc=0.61/前缀0.66 eotP0=0.0000
+  eval 指标: parseable=0.06 amt_f1=0.0 omr_ned=0.892668305359621 n_nasap=48 n_maestro=48
+
+## eval @ step 53000 (2026-07-20 10:45:08)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.23 Δts=+0.19 真sem=0.76 静sem=0.53 acc=0.64 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=-0.00 Δts=+0.03 真sem=0.72 静sem=0.72 acc=0.63 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.10 Δts=-0.05 真sem=0.66 静sem=0.56 acc=0.56 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.22 Δts=+0.12 真sem=0.70 静sem=0.48 acc=0.63 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 样本预测[首个通过 nasap_GiacomelliN04M_861c59b0_016]: '|4/4k#2PR:D5 3/16d5 |4/4k#2'
+  eval 同样本参照:              '|3/4k#1PL:D#5PR:A5C6 1/4PL:d#5PR:a5c6 1/4E5E6 1/4 |3/4k#1PL:G2E3B3 3/8PR:e5e6D#5D#6 1/8d#5d#6E5E6 1/4PL:g2e3b3PR:e5e6 |3/4k#1PL:A2PR:C4E4F#4 1/2PL:a2A#2PR:c4e4f'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_ORPHAN_OFFSET:('PL', SPitch(step='G', alter=0, octave=2))@47/16", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=0, octave=2))@61/8", "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='C', alter=0, octave=3))@137/16", "DYCK_UNCLOSED:[('PR', SPitch(step='C', alter=0, octave=5))]"], 'raw': '|4/4k0PL:E3PR:C5 <|0.02|> 1/16PL:e3G3 <|0.23|> 1/16g3E3 <|0.36|> 1/16e3G3 <|0.45|> 1/16g3E3 <|0.56|> 1/16e3G3 <|0.67|> 1/16g3E3 <|0.82|> 1/16e3G3 <|0.92|> 1/16g', 'truncated': '|4/4k0PL:E3PR:C5 <|0.02|> 1/16PL:e3G3 <|0.23|> 1/16g3E3 <|0.36|> 1/16e3G3 <|0.45|> 1/16g3E3 <|0.56|>'}
+  eval 汇总: parseable=0.04 empty=0.9583333333333334 n=48 样本0='|4/4k0' 探针acc=0.64/前缀0.59 eotP0=0.0000
+  eval 指标: parseable=0.04 amt_f1=0.0 omr_ned=0.9508553955434704 n_nasap=48 n_maestro=48
