@@ -47,8 +47,11 @@ python scripts/sop_next.py --go
 **贴回(新文件 reports/SPEED_RESTART.txt)**:
 ① 配置回显行(应见 `prefetch=3`;没有 = 旧代码,先 pull);② `续训:恢复 step=…` 行;
 ③ 重启 ≥30 分钟后:`nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv -l 5`
-采 ≥10 行 + 任务管理器"共享 GPU 内存"当前数值;
+采 ≥10 行 + **任务管理器 → 详细信息 → 添加列"专用 GPU 内存"/"共享 GPU 内存" →
+python.exe 一行的两个具体数**(你 SPEED_CONCERN 里的 28-29GB 需要这个出处才能定案;
+面板上的"共享 GPU 内存 16GB"是容量不是占用,别贴那个);
 ④ 此后逢 eval 照常 push autolog。异常(nan/卡死/日志断流)→ 同命令加 `--prefetch 0` 重启并上报。
+你的两个提问已答,见 EXPERIMENT_SPEED.md"答执行端"节(accum 不降,减层否决,checkpointing 备选)。
 
 ## 上一阶段存档(2026-07-20,D38:一次重启,三事同车)
 
