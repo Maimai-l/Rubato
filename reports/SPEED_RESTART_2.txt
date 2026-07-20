@@ -1,0 +1,22 @@
+# SPEED_RESTART_2 — prefetch=proc:3
+
+## 配置确认
+prefetch=proc:3 ✓ (非旧版 prefetch=3)
+续训 step=54200
+
+## 装配统计
+pdmx kept=119106 no_audio=37920 / nasap 7098 / maestro 144087
+TOTAL=270291
+
+## GPU 采样 (30分钟后)
+GPU 利用率: 20-35%, 中值 ~28%
+VRAM: 14.6-15.6 GB
+
+## 吞吐量
+54200→54300 = 100 步 / 30 分钟 = **18 秒/步**
+串行基线: 10.5 秒/步
+**更慢**
+
+## 结论
+prefetch (thread/proc 两种) 均未提速。CPU 70%/GPU 20% — 数据加载是瓶颈,不在计算/IO重叠。
+建议:训练本身健康,继续跑直到规划端另辟思路。
