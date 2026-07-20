@@ -776,7 +776,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     opt.zero_grad()
     accum_sec = 0.0
     tstat = {"data": 0.0, "comp": 0.0}
-    t_last_step = 0
+    t_last_step = step          # 断点续训从恢复步起算,否则首行 td/tc 分母错拿总步数显示 0.0
     for epoch in range(start_epoch, cfg.get("max_epochs", 1000)):
         for batch in timed_iter(prefetch_batches(datamodule, epoch,
                                                  depth=int(cfg.get("prefetch_batches", 0))),
