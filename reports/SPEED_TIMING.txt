@@ -1,0 +1,20 @@
+# SPEED_TIMING — prefetch=关, serial baseline
+
+## GPU 进程内存 (powershell Get-Counter)
+python.exe PID 31100: 专用=15,305 MB | 共享=1,576 MB | 总计=16,881 MB | 利用率=49%
+
+总 VRAM: 16,303 MB (nvidia-smi)
+溢出共享内存: 1,576 MB → WDDM sysmem fallback 已触发
+
+## 连续 5 步 td=/tc= (避开 eval)
+step 54800: td=0.7s tc=8.6s total=9.3s
+step 54850: td=0.6s tc=8.4s total=9.0s
+step 54900: td=0.7s tc=8.4s total=9.1s
+step 54950: td=0.7s tc=8.4s total=9.1s
+step 55000: td=0.7s tc=8.3s total=9.0s
+
+均值: td=0.68s tc=8.42s total=9.1s/步
+
+## 结论
+prefetch=关 9.1s/步, 比串行基线 10.5s 略快(无 prefetch 争抢)。
+GPU 1.6GB 溢出到共享内存 —— 符合 WDDM fallback 预期。
