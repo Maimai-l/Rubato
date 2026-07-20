@@ -628,6 +628,31 @@ def prefetch_batches(dm, epoch: int, depth: int = 3,
             pass
 
 
+def timed_iter(gen, stat: dict):
+    """
+    装批/计算时间分账(D41:两次提速尝试都建立在"GPU 利用率 52% ⇒ 48% 时间在等数据"
+    这个【未经测量的换算】上,双双负收益 —— 计算阶段内部利用率本就可以远低于 100%,
+    利用率不是时间份额)。本计时器把每步真实拆成两个数:
+      stat["data"] += 等 __next__ 返回的墙钟(装批);stat["comp"] += 两次取批之间的墙钟(计算)。
+    损失标量在日志缓冲处已隐式同步 CUDA,step 粒度的分账是诚实的。开销 = 每 micro-batch
+    两次 perf_counter,可忽略。提速决策树(预登记)只认这两个数。
+    """
+    import time as _time
+    it = iter(gen)
+    last_out = None
+    while True:
+        t0 = _time.perf_counter()
+        if last_out is not None:
+            stat["comp"] = stat.get("comp", 0.0) + (t0 - last_out)
+        try:
+            b = next(it)
+        except StopIteration:
+            return
+        last_out = _time.perf_counter()
+        stat["data"] = stat.get("data", 0.0) + (last_out - t0)
+        yield b
+
+
 def save_snapshot(path, model, opt, sched, step: int, epoch: int):
     """全状态快照(模型+优化器+调度器+进度),原子替换写。为什么必须有:执行端 16GB 卡
     余量 45MiB,数周长跑必然中途崩;只存模型权重的 ckpt 恢复不了 Adam 动量和 lr 进度,
@@ -717,11 +742,12 @@ def train(model, datamodule, cfg: dict, tokenizer,
           f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)} "
           + ("mix=D2纸面(.35/.15/.20/.30)" if not cfg.get("dialect_mix") else
              "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items())))
-          + f" prefetch={'proc:' + str(int(cfg.get('prefetch_batches', 3))) if int(cfg.get('prefetch_batches', 3)) > 0 else '关'}",
+          + f" prefetch={'proc:' + str(int(cfg.get('prefetch_batches', 0))) if int(cfg.get('prefetch_batches', 0)) > 0 else '关'}",
           flush=True)
     # 指令随日志走(执行端只看日志不看文档的现实约束):贴回要求印在产物里
-    print("【执行端贴回】① 上面的配置回显行 ② 续训:恢复… 行 ③ 启动装配统计块 "
-          "④ 重启30分钟后 nvidia-smi 采样10行;日志中任何「预取:」开头的行=发生回退,原样贴回", flush=True)
+    print("【执行端贴回】① 上面的配置回显行(应含 prefetch=关) ② 续训:恢复… 行 "
+          "③ 跑 1 小时后:连续 5 行带 td=/tc= 的日志(不含 eval 的窗口) "
+          "④ 任务管理器→详细信息→python.exe 的「专用 GPU 内存」和「共享 GPU 内存」两个数(必贴)", flush=True)
 
     # 断点续训:last.pt 存在且未禁用 → 全状态恢复(所在 epoch 从头重放,至多重复
     # save_every-1 步的样本 —— 每 epoch 采样确定,重复无害,远好于从 step 0 重来)
@@ -749,9 +775,12 @@ def train(model, datamodule, cfg: dict, tokenizer,
     model.train()
     opt.zero_grad()
     accum_sec = 0.0
+    tstat = {"data": 0.0, "comp": 0.0}
+    t_last_step = 0
     for epoch in range(start_epoch, cfg.get("max_epochs", 1000)):
-        for batch in prefetch_batches(datamodule, epoch,
-                                      depth=int(cfg.get("prefetch_batches", 3))):
+        for batch in timed_iter(prefetch_batches(datamodule, epoch,
+                                                 depth=int(cfg.get("prefetch_batches", 0))),
+                                tstat):
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,
                                             ts_token_ids=ts_token_ids, loss_cfg=loss_cfg,
@@ -794,12 +823,18 @@ def train(model, datamodule, cfg: dict, tokenizer,
             if len(recent_gn) > 50:
                 recent_gn.pop(0)
             if step % log_every == 0 or step == 1:
+                # td/tc:自上条日志以来【每优化步】平均的装批等待/计算墙钟(timed_iter 分账)。
+                # 这两个数是提速决策的唯一依据(D41);含 eval 的窗口 tc 会虚高,跳过该行判读。
+                _nw = max(step - t_last_step, 1)
+                _td, _tc = tstat["data"] / _nw, tstat["comp"] / _nw
+                tstat["data"] = tstat["comp"] = 0.0
+                t_last_step = step
                 print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
                       f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
                       f"enc={gn_groups[0]:.1f} dec={gn_groups[1]:.1f} "
                       f"lrE={opt.param_groups[0]['lr']:.2e} lrD={opt.param_groups[-1]['lr']:.2e} "
-                      f"audio={batch_sec:.0f}s"
+                      f"audio={batch_sec:.0f}s td={_td:.1f}s tc={_tc:.1f}s"
                       f" | {_dia_line()}", flush=True)
             if step % save_every == 0:
                 save_snapshot(last_pt, model, opt, sched, step, epoch)

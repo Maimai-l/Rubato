@@ -147,6 +147,33 @@ def test_real_classes_end_to_end():
                 assert gb[k] == wb[k], f"批字段 {k} 不同"
 
 
+
+
+def test_timed_iter_accounting():
+    """timed_iter 的分账要对得上真实睡眠:装批 ~20ms/批,计算 ~30ms/批。"""
+    from rubato.model.train import timed_iter
+
+    def slow_gen():
+        for i in range(8):
+            time.sleep(0.02)              # 装批
+            yield i
+
+    stat = {"data": 0.0, "comp": 0.0}
+    got = []
+    for b in timed_iter(slow_gen(), stat):
+        time.sleep(0.03)                  # 计算
+        got.append(b)
+    assert got == list(range(8))
+    assert 0.12 <= stat["data"] <= 0.30, f"data 分账失真: {stat['data']:.3f}(应 ≈0.16)"
+    assert 0.16 <= stat["comp"] <= 0.40, f"comp 分账失真: {stat['comp']:.3f}(应 ≈0.21,7 个间隔)"
+
+
+def test_timed_iter_empty():
+    from rubato.model.train import timed_iter
+    stat = {"data": 0.0, "comp": 0.0}
+    assert list(timed_iter(iter([]), stat)) == []
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
