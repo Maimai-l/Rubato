@@ -38,15 +38,21 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段(2026-07-21 午,D42:速度案已结,正常长跑;此节为唯一现行指令)
+## 当前阶段(2026-07-21 晚,D43:一次重启 = 溢出试验 + 新仪表;此节为唯一现行指令)
 
-速度问题终审完毕(td=0.5s 装载仅占 6%,结案),**不需要再重启,不要动训练**。
-你只欠两件事:
-1. 任务管理器 → 详细信息 → python.exe 的「专用 GPU 内存」「共享 GPU 内存」两个具体数,
-   写进新文件 reports/GPU_MEM.txt push(**这是第三次催,必须交**);
-2. 照常逢 eval push autolog,等 61000 复盘(判 O4 混比 + 切 eval 频率)。
-提醒:你报告里的时间估计("50 步 20-30 分钟""100 步/30 分钟")已两次被否,今后
-报告只贴日志原文与 td/tc 行,不要自己换算速度。
+你的两份材料都收了:显存数合格(共享 1,576MB → 溢出坐实,试验开庭);仪表提议采纳一半
+(拒因直方图 + 探针音高分型,已进代码),缓办一半(时间戳 MAE/逐方言 F1,可解析样本
+太少撑不起统计,parseable>0.5 再议)。本轮报告合规,保持这个标准。
+
+操作(唯一变化 = 加 `--max-batch-sec 50`):
+1. 停训 → `git pull --rebase --autostash`;
+2. 重启:`... build_dataset.py --clip-norm 25 --lr-dec 3e-4 --amt-mix 0.22 --max-batch-sec 50 >> train_full.log 2>&1`
+3. 贴回(新文件 reports/MAXBATCH_50.txt):回显行(应含 batch_sec=50.0)+ 恢复行 +
+   跑 1 小时后 5 行 td=/tc=(避开 eval)+ **复测 Get-Counter 的专用/共享两个数**;
+4. 之后照常:逢 eval push autolog(新 eval 块会多「拒因」行和 Δpitch 字段,属正常);
+   等 61000 复盘。
+规矩补充:不要把 train_full.log 整个 commit(这次 16K 无妨,日志会长大)——报告里贴
+需要的片段即可。
 
 ## 上一阶段存档(2026-07-21,D41)【已被 D42 取代】
 

@@ -258,6 +258,42 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
 
 # ---------------------------------------------------------------- 评测钩子(R-S11.5)
 
+def viol_tally(entries: list) -> dict:
+    """
+    eval 拒因直方图(D43,执行端提议采纳):entries = [(is_fallback, viol_list)]。
+    回答"parseable 卡在哪类校验"——兜底样本只记「兜底」(其 viol 是对兜底常量的校验,
+    非模型产物);其余按违规类别记样本数(一样本可入多类);零违规记「通过」。
+    """
+    out: dict = {}
+
+    def _add(c):
+        out[c] = out.get(c, 0) + 1
+
+    for fb, viols in entries:
+        if fb:
+            _add("兜底")
+            continue
+        if not viols:
+            _add("通过")
+            continue
+        cats = set()
+        for v in viols:
+            s = str(v)
+            if s.startswith("DYCK"):
+                cats.add("DYCK")
+            elif s.startswith("MEASURE"):
+                cats.add("MEASURE")
+            elif s.startswith("TERMINAL_BAR"):
+                cats.add("TERMINAL")
+            elif s.startswith("empty"):
+                cats.add("兜底")
+            else:
+                cats.add(s.split(":", 1)[0][:16] or "OTHER")
+        for c in cats:
+            _add(c)
+    return out
+
+
 def _eval_subset(samples: list[dict], eval_max: int) -> list[dict]:
     """确定性抽 eval 子集(按 utt_id 哈希排序取前 N)—— nasap/maestro val 可达数千段,
     每 3000 步全量跑 beam 解码要小时级;子集稳定(与步数/epoch 无关),指标可跨 eval 对比。"""
@@ -329,6 +365,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     n_ok, n_total, n_empty = 0, 0, 0
     truncated = False
     omr_scores = []
+    viol_entries: list = []              # (is_fallback, viol_list) → viol_tally 拒因直方图
     sample_preds: list[str] = []
     ok_pred = ok_utt = ok_ref = None     # 首个过校验的预测(展示偏差修复:别只看失败样本)
     probe: dict = {}
@@ -356,10 +393,14 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
                     if (pr.get("acc_sem") is not None and mu.get("acc_sem") is not None) else None
                 dt = (pr["acc_ts"] - mu["acc_ts"]) \
                     if (pr.get("acc_ts") is not None and mu.get("acc_ts") is not None) else None
+                dpit = (pr["acc_pitch"] - mu["acc_pitch"]) \
+                    if (pr.get("acc_pitch") is not None and mu.get("acc_pitch") is not None) else None
                 _p(f"  eval 多源探针 {u.get('kind')}/{_dia}[{u.get('utt_id')}]: "
                    f"Δsem={_fmt2(ds) if ds is None else f'{ds:+.2f}'} "
                    f"Δts={_fmt2(dt) if dt is None else f'{dt:+.2f}'} "
+                   f"Δpitch={_fmt2(dpit) if dpit is None else f'{dpit:+.2f}'} "
                    f"真sem={_fmt2(pr.get('acc_sem'))} 静sem={_fmt2(mu.get('acc_sem'))} "
+                   f"真pitch={_fmt2(pr.get('acc_pitch'))} "
                    f"acc={pr['acc']:.2f} n={pr['n_scored']}")
                 if not probe:
                     probe = pr
@@ -442,6 +483,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         if pred == _EMPTY_A2S:
             n_empty += 1
             viol = viol or ["empty_fallback"]
+        viol_entries.append((pred == _EMPTY_A2S, viol))
         if not viol:
             n_ok += 1
             if ok_pred is None and pred != _EMPTY_A2S:
@@ -475,6 +517,11 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
             _p("  eval 兜底但无现场记录 —— 空谱来自非异常路径,贴回本行")
     if omr_scores:
         metrics["val_omr_ned"] = sum(omr_scores) / len(omr_scores)
+    if viol_entries:
+        _vt = viol_tally(viol_entries)
+        _p("  eval 拒因(样本数): "
+           + " ".join(f"{k}={v}" for k, v in sorted(_vt.items(), key=lambda kv: (-kv[1], kv[0])))
+           + f" /共{len(viol_entries)}")
     # 一行汇总:把判读必需的全部证据压进单行 —— 执行端按行摘录日志时,丢哪行都不致盲
     _p0 = sample_preds[0][:60] if sample_preds else ""
     _pr = (f"探针acc={probe['acc']:.2f}/前缀{probe['acc_prefix']:.2f}"

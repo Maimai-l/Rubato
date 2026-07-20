@@ -455,6 +455,21 @@ def _probe_from_logprobs(lp, labels, loss_mask, eot_id, tokenizer=None, prefix_n
         for name, want in (("acc_sem", 0), ("acc_ts", 1)):
             sel = idx[tt[idx] == want]
             out[name] = float((pred[sel] == lab[sel]).float().mean()) if sel.numel() else None
+    if tokenizer is not None and hasattr(tokenizer, "id_to_piece"):
+        # 音高分型(D43,执行端提议采纳):音高字形是原子 piece(AMT/TAST 的 N60/n60,
+        # A2S 的 C4/F##5/A-3)。O4 的核心问题"AMT 音高从音频读没读"要看 Δacc_pitch ——
+        # 总 acc_sem 被 velocity/结构 token 稀释,音高单列才锋利。
+        import re as _re
+        _pit = _re.compile(r"^(?:[Nn]\d{1,3}|[a-gA-G](?:#{1,2}|-{1,2})?\d)$")
+        try:
+            sel = idx[torch.tensor([bool(_pit.match(tokenizer.id_to_piece(int(t))))
+                                    for t in lab[idx]], dtype=torch.bool)]
+            out["n_pitch"] = int(sel.numel())
+            out["acc_pitch"] = float((pred[sel] == lab[sel]).float().mean()) \
+                if sel.numel() else None
+        except Exception:
+            out["acc_pitch"] = None                 # 分词器不支持/解码失败:缺仪表不毒化探针
+            out["n_pitch"] = 0
     if tokenizer is not None:
         out["argmax_prefix"] = tokenizer.decode([int(i) for i in pred[head]])[:80]
         out["ref_prefix"] = tokenizer.decode([int(i) for i in lab[head]])[:80]

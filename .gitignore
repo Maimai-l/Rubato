@@ -10,3 +10,4 @@ assets/
 third_party/
 rubato-repl/
 _*
+reports/train_full.log
