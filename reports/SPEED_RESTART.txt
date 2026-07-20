@@ -1,0 +1,12 @@
+=== 装配统计(每一步丢弃都计数,不静默)===
+  pdmx     rows= 171265 kept= 119106 no_audio=  37920 no_dialect=     0 bad_schema=    0 dup=14239
+  nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+  maestro  rows= 144087 kept= 144087 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+  TOTAL utts=270291 by_dialect={'A2S': 126204, 'A2S_lite': 126127, 'TAST': 29304, 'AMT': 144087}
+  混比(O4 调整): A2S=0.3900 A2S_lite=0.1671 AMT=0.2200 TAST=0.2229
+  epoch0 混比报告: A2S[池108448 额87742 过采x0.81] A2S_lite[池109009 额37604 过采x0.34] AMT[池115823 额49495 过采x0.43] TAST[池20742 额50138 过采x2.42]
+训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48 mix=A2S:0.390,A2S_lite:0.167,AMT:0.220,TAST:0.223 prefetch=3
+续训:恢复 step=54000 epoch=11(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=5.03e-05 dec=1.51e-04)
+  epoch11 混比报告: A2S[池108448 额87742 过采x0.81] A2S_lite[池109009 额37604 过采x0.34] AMT[池115823 额49495 过采x0.43] TAST[池20742 额50138 过采x2.42]
+---
+prefetch=3 confirmed at step 54000
