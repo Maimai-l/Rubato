@@ -1,0 +1,20 @@
+MAXBATCH_50 验收（2026-07-20）
+
+启动配置：
+训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=50.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48 mix=A2S:0.390,A2S_lite:0.167,AMT:0.220,TAST:0.223 prefetch=关
+续训:恢复 step=55600 epoch=11(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=4.81e-05 dec=1.44e-04)
+
+运行超过 1 小时后的连续 5 个非 eval 窗口：
+step 55800: td=0.5s tc=8.5s
+step 55850: td=0.5s tc=8.7s
+step 55900: td=0.7s tc=8.6s
+step 55950: td=0.7s tc=8.6s
+step 56000: td=0.7s tc=8.4s
+tc 均值=8.56s/step。
+
+GPU Process Memory（PID 34460，Get-Counter）：
+专用 GPU 内存=15,652,765,696 B（约 15,653 MB）
+共享 GPU 内存=85,983,232 B（约 86 MB）
+
+与试验前基线（专用 15,305 MB、共享 1,576 MB；td=0.68s、tc=8.42s）相比，
+共享显存已低于 300 MB，且 tc 均值不高于 8.6s。按 D43 的预登记判据，--max-batch-sec 50 固定。
