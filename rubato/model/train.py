@@ -537,6 +537,44 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
 
 # ---------------------------------------------------------------- 断点续训(长跑生死线)
 
+def prefetch_batches(gen, depth: int = 3):
+    """
+    后台线程预取:GPU 算当前批时,CPU 并行装配下一批(soundfile/soxr 解码释放 GIL)。
+    执行端实测 GPU 利用率仅 ~50%(nvidia-smi 43-72% 波动)—— train_batches 是纯串行
+    生成器,装批与算批交替进行,GPU 每批都停下等 CPU,这是 10.5s/步的主要空转来源。
+
+    语义保证(O4 等步进制判据不受影响的根据):同一个生成器、同一调用顺序在产批,
+    批内容/顺序/RNG 消耗与直迭代逐字节相同,线程只改变"何时"装批,不改变"装什么"。
+    depth<=0 = 直通(关闭预取,A/B 对照用)。生产者异常原样重抛,不吞。
+    """
+    if depth <= 0:
+        yield from gen
+        return
+    import queue as _q
+    import threading as _t
+    q: "_q.Queue" = _q.Queue(maxsize=depth)
+    _END = object()
+    err: list = []
+
+    def _produce():
+        try:
+            for b in gen:
+                q.put(b)
+        except BaseException as e:          # 含 KeyboardInterrupt:必须带出主线程
+            err.append(e)
+        finally:
+            q.put(_END)
+
+    _t.Thread(target=_produce, daemon=True, name="batch-prefetch").start()
+    while True:
+        b = q.get()
+        if b is _END:
+            if err:
+                raise err[0]
+            return
+        yield b
+
+
 def save_snapshot(path, model, opt, sched, step: int, epoch: int):
     """全状态快照(模型+优化器+调度器+进度),原子替换写。为什么必须有:执行端 16GB 卡
     余量 45MiB,数周长跑必然中途崩;只存模型权重的 ckpt 恢复不了 Adam 动量和 lr 进度,
@@ -625,7 +663,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
           f"precision={cfg.get('precision') or 'fp32'} max_steps={max_steps} "
           f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)} "
           + ("mix=D2纸面(.35/.15/.20/.30)" if not cfg.get("dialect_mix") else
-             "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items()))),
+             "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items())))
+          + f" prefetch={int(cfg.get('prefetch_batches', 3))}",
           flush=True)
 
     # 断点续训:last.pt 存在且未禁用 → 全状态恢复(所在 epoch 从头重放,至多重复
@@ -655,7 +694,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
     opt.zero_grad()
     accum_sec = 0.0
     for epoch in range(start_epoch, cfg.get("max_epochs", 1000)):
-        for batch in datamodule.train_batches(epoch):
+        for batch in prefetch_batches(datamodule.train_batches(epoch),
+                                      depth=int(cfg.get("prefetch_batches", 3))):
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,
                                             ts_token_ids=ts_token_ids, loss_cfg=loss_cfg,

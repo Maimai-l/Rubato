@@ -38,7 +38,19 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段(2026-07-20,D38:一次重启,三事同车)
+## 当前阶段(2026-07-20 晚,D39:提速重启)
+
+上一节的 O4 重启已完成验收(RESTART_O4.txt 四项全过)。新任务一件:**再重启一次拿提速**
+(GPU 空转 ~45% 的修复已进库,重启即生效;命令与上次完全相同,不加新旗子):
+
+停训 → `git pull --rebase --autostash` → 原命令重启(--clip-norm 25 --lr-dec 3e-4 --amt-mix 0.22)。
+**贴回(新文件 reports/SPEED_RESTART.txt)**:
+① 配置回显行(应见 `prefetch=3`;没有 = 旧代码,先 pull);② `续训:恢复 step=…` 行;
+③ 重启 ≥30 分钟后:`nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv -l 5`
+采 ≥10 行 + 任务管理器"共享 GPU 内存"当前数值;
+④ 此后逢 eval 照常 push autolog。异常(nan/卡死/日志断流)→ 同命令加 `--prefetch 0` 重启并上报。
+
+## 上一阶段存档(2026-07-20,D38:一次重启,三事同车)
 
 50000 复盘已裁决(用户拍板):**AMT 混比 0.30→0.22**。操作 = 停当前训练 →
 `git pull --rebase --autostash` → 用下面命令重启(唯一变化 = 加 `--amt-mix 0.22`):

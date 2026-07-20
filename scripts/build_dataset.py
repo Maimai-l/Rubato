@@ -221,6 +221,9 @@ def main():
     ap.add_argument("--smoke-steps", type=int, default=800,
                     help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
                          "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
+    ap.add_argument("--prefetch", type=int, default=3,
+                    help="预取批深度(后台线程提前装批,GPU 不再等 CPU;执行端实测 GPU 仅 ~50%% "
+                         "利用率的对症修)。0=关闭(串行直迭代,A/B 对照);批内容/顺序不变")
     ap.add_argument("--amt-mix", type=float, default=None,
                     help="O4 旋钮:AMT 方言混比(缺省 None=D2 纸面 0.30)。设定后腾出的权重"
                          "按 35:15:20 等比还给 A2S/A2S_lite/TAST。生效与否看两处:启动回显"
@@ -491,6 +494,7 @@ def main():
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
         "clip_norm": args.clip_norm,
         "dialect_mix": dialect_mix,                # None=D2 纸面;设了 --amt-mix 则为换算后的四元组(回显自证)
+        "prefetch_batches": args.prefetch,         # 预取深度;0=串行直迭代(对照)
         "eval_max": args.eval_max,                 # 每次 eval 抽的 val 子集(逐 token 生成,大了小时级)
         "eval_time_budget_s": 1200,                # eval 硬时限:超时截断按已评样本出指标,不再"疑似卡死"
         # eval 证据自动落盘到 repo 内(追加式);执行端上报 = git add reports/eval_autolog.md

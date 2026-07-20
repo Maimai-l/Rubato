@@ -61,6 +61,8 @@
 
 | D38 | **50000 复盘 + O4 判决:AMT 混比 0.30→0.22,用户拍板通过**。触发核实(预登记条件,未移动):AMT Δsem 45000-53000 九次 eval 全 ≈0(累计 25 连零),amt_f1 全程 0.0;同期大盘健康(A2S 2.72@38000→2.59@53050、nasap Δsem +0.23 新高、样本0 于 49000/50000 两次脱兜底、parseable 0.04-0.10 平台)。处置:`--amt-mix 0.22`(mix_with_amt 等比还权 A2S 0.39/lite 0.167/TAST 0.223),与召回 +7,501 段进池共乘一次重启;判决基线钉死 53050,成功/失败/回滚判据预登记于 EXPERIMENT_O4_MIX.md(61000 判)。配套加固:探针池第 3 条 pdmx 样本改按 utt_id 钉死(新数据改变装配顺序会静默换样本断趋势线);epoch 混比报告落日志(quota 自证)。执行端 3ce1c2f 三主张不采纳:"recall data active"(未重启,数据不可能已进池)、"2x improvement"(+0.22 在 +0.14~0.27 历史带内)、"A2S=2.56"(无出处,贴回文件为 2.59) | 2026-07-20 | autolog 45000-53000 + STEP_50000/53000.txt + 用户原话"我同意0.22";定性诚实版:此举是算力止损不是 AMT 特效药,AMT 可能更晚醒,已声明接受 | sampling.mix_with_amt + tests_amt_mix.py(5 项);build_dataset --amt-mix + 探针钉死;train.py 回显 mix= 字段;dataset.py 混比报告行;EXPERIMENT_O4_MIX.md |
 
+| D39 | **训练慢根因定案 + 预取修复**:用户实测 GPU 利用率仅 ~55%(43-72% 波动)戳穿规划端"≈190×实时≈算力吃满"的估算(实为 ~350× 带宽近半空转,估算≠测量,规划端记误);代码根因 = train_batches 纯串行生成器(dataset.py:389),装批/算批零重叠。修复 = prefetch_batches 后台线程预取(深 3,同一生成器同一顺序,批内容逐字节不变 → O4/61000 判据与 resume 语义零影响;tests_prefetch 六项含实测重叠性;--prefetch 0 一旗回滚)。判据预登记 EXPERIMENT_SPEED.md:基线 10.5-10.6 秒/步(eval 时间戳),成功 ≤9.0,预期区 6.5-8.0;VRAM 贴顶+共享内存(WDDM 静默降速嫌疑)挂账待共享内存具体数,候选杆 --max-batch-sec 50,一次一变量 | 2026-07-20 | 用户 nvidia-smi 实测(对话贴回)+ dataset.py 代码事实;accum 2000s 不动(步数≠学习量,动它作废全部步进制基线),eval_every 1000 判决期不动 | train.prefetch_batches + 回显 prefetch= 字段;build_dataset --prefetch;tests_prefetch.py;EXPERIMENT_SPEED.md |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
