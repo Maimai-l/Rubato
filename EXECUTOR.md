@@ -38,11 +38,21 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段(2026-07-15 晚)
+## 当前阶段(2026-07-20,D38:一次重启,三事同车)
 
-**全部调查已关案(D31),回到正常训练节奏**:训练继续跑(clip 25 / lr-dec 3e-4 不变),
-日常 = 逢 eval push 一次 autolog,没有其它任务。下次复盘 step 38000。
-不用再跑 sop_next;日常 = `git pull --rebase --autostash` + 按当前实验卡跑。
+50000 复盘已裁决(用户拍板):**AMT 混比 0.30→0.22**。操作 = 停当前训练 →
+`git pull --rebase --autostash` → 用下面命令重启(唯一变化 = 加 `--amt-mix 0.22`):
+
+```bat
+cmd /c "D:\ProgramData\envs\nemo_test\python.exe -u D:\vscode_projects\ee_download\Rubato\scripts\build_dataset.py --clip-norm 25 --lr-dec 3e-4 --amt-mix 0.22 >> D:\vscode_projects\ee_download\reports\train_full.log 2>&1"
+```
+
+checkpoint 自动续(~53050),不从头训。重启同时会把召回的 +7,501 段装进池(自动)。
+**贴回清单(写新文件 reports/RESTART_O4.txt,缺一不可)**:
+① 启动装配统计整块(=== 到 train=… 行;这是 RECALL 终验收,pdmx kept 应 +7,501 上下);
+② 配置回显行(应含 `mix=A2S:0.390,…,AMT:0.220`;若显示 `mix=D2纸面` = 旗子没生效,停下贴回);
+③ `epoch0 混比报告` 行(quota 自证);④ `续训:恢复 step=…` 行。
+此后日常照旧:逢 eval push autolog。下次复盘 **61000**(判据已预登记 EXPERIMENT_O4_MIX.md)。
 
 ## 报告规矩补充(2026-07-15,对应 cd996eb / 5c48581 两次事故)
 

@@ -7,6 +7,23 @@ import hashlib
 DIALECT_MIX = {"A2S": 0.35, "A2S_lite": 0.15, "TAST": 0.20, "AMT": 0.30}
 
 
+def mix_with_amt(amt: float) -> dict:
+    """
+    O4 旋钮:AMT 配比设为 amt,腾出的权重按 35:15:20 等比还给其余三方言
+    (保持 D2 纸面混比的内部平衡,只动 AMT 一个自由度)。
+    amt=0.30 时返回值 == DIALECT_MIX(恒等,便于对照)。
+    越界直接抛错:混比错了是整轮训练报废,不静默兜底。
+    """
+    if not (0.05 <= amt <= 0.50):
+        raise ValueError(f"amt_mix={amt} 越界(合理带 0.05-0.50);拒绝启动")
+    rest = 1.0 - amt
+    base = DIALECT_MIX["A2S"] + DIALECT_MIX["A2S_lite"] + DIALECT_MIX["TAST"]   # 0.70
+    return {"A2S": DIALECT_MIX["A2S"] * rest / base,
+            "A2S_lite": DIALECT_MIX["A2S_lite"] * rest / base,
+            "TAST": DIALECT_MIX["TAST"] * rest / base,
+            "AMT": amt}
+
+
 def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
                     mix: dict | None = None, report: dict | None = None):
     """

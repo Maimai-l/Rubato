@@ -623,7 +623,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
           f"accum={float(cfg.get('grad_accum_to_audio_sec', 2000)):.0f}s "
           f"batch_sec={getattr(datamodule, 'max_batch_sec', '?')} "
           f"precision={cfg.get('precision') or 'fp32'} max_steps={max_steps} "
-          f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)}", flush=True)
+          f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)} "
+          + ("mix=D2纸面(.35/.15/.20/.30)" if not cfg.get("dialect_mix") else
+             "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items()))),
+          flush=True)
 
     # 断点续训:last.pt 存在且未禁用 → 全状态恢复(所在 epoch 从头重放,至多重复
     # save_every-1 步的样本 —— 每 epoch 采样确定,重复无害,远好于从 step 0 重来)

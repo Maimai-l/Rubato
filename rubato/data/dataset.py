@@ -304,6 +304,10 @@ class RubatoDataset:
             self._plan = dialect_sampler(av, self.seed, epoch,
                                          mix=self.dialect_mix,
                                          report=self.last_mix_report)
+            # 混比生效自证(O4 验收即看此行):配额来自注入 mix 还是缺省,日志可查,不靠信任
+            print(f"  epoch{epoch} 混比报告: " + " ".join(
+                f"{d}[池{r['pool_size']} 额{r['quota']} 过采x{r['oversample_ratio']}]"
+                for d, r in sorted(self.last_mix_report.items())), flush=True)
         else:
             # eval:每 utt 每可用 dialect 各一次(确定性,不采样)
             self._plan = [(u, d) for u, ds in sorted(av.items()) for d in ds]

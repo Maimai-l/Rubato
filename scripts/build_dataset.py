@@ -221,6 +221,10 @@ def main():
     ap.add_argument("--smoke-steps", type=int, default=800,
                     help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
                          "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
+    ap.add_argument("--amt-mix", type=float, default=None,
+                    help="O4 旋钮:AMT 方言混比(缺省 None=D2 纸面 0.30)。设定后腾出的权重"
+                         "按 35:15:20 等比还给 A2S/A2S_lite/TAST。生效与否看两处:启动回显"
+                         "mix= 字段 + epoch 混比报告的 quota。50000 步复盘用:0.22")
     ap.add_argument("--cpu", action="store_true",
                     help="诊断模式:全程 CPU 跑 3 步。CUDA 的索引越界是异步 device assert,"
                          "栈指向随机后续 kernel(实测三次崩溃三个栈);CPU 上同一越界给出"
@@ -441,8 +445,14 @@ def main():
     print(f"  目标序列上限 = {max_tgt} tok(体检实测位置表);超长样本将丢弃并记账…")
     # 冒烟关增强:alpha 重切分/tiling 每 epoch 换答案,"背下来"在增强下不可能(实测 sem 钉 1.1/
     # ts 钉 6.4)。全量训练保持增强(论文设计)。
+    # O4:混比注入。None = sampling.DIALECT_MIX 缺省(D2 纸面);设了 --amt-mix 则在此换算
+    dialect_mix = None
+    if args.amt_mix is not None:
+        from rubato.model.sampling import mix_with_amt
+        dialect_mix = mix_with_amt(args.amt_mix)
+        print("  混比(O4 调整): " + " ".join(f"{d}={v:.4f}" for d, v in sorted(dialect_mix.items())))
     train_ds = RubatoDataset(train_utts, labels, tok, train=True, max_target_len=max_tgt,
-                             augment=not args.smoke)
+                             augment=not args.smoke, dialect_mix=dialect_mix)
     lf = train_ds.len_filter_report
     print(f"  超长过滤: 保留 {lf.get('kept_pairs')} 对,丢弃 {lf.get('dropped_by_dialect') or 0}")
     _dropped = sum((lf.get("dropped_by_dialect") or {}).values())
@@ -459,9 +469,14 @@ def main():
             if u.get("kind") == kind and (labels.get(u["utt_id"], {}) or {}):
                 return u
         return None
+    # 第 3 条钉死 utt_id:它原是"train 池第一个有标签的 pdmx"——召回的 +7,501 段进池后
+    # 装配顺序会变,按序取会静默换样本,20+ 次 eval 的趋势线就断了。找不到才退回按序。
+    _pdmx_pin = next((u for u in train_utts
+                      if u.get("utt_id") == "pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000"),
+                     None) or _first_labeled(train_utts, "pdmx")
     dm.probe_utts = [u for u in (_first_labeled(nasap_val, "nasap"),
                                  _first_labeled(maestro_val, "maestro"),
-                                 _first_labeled(train_utts, "pdmx")) if u]
+                                 _pdmx_pin) if u]
     # 第 4 条:联合仪器实测读音频最强的 pdmx 样本(Δsem+0.17/审计 OK)——原第 3 条恰是
     # 弱相关样本,代表性差;只加不换,保留前三条的逐 eval 趋势连续性
     _good = next((u for u in train_utts
@@ -475,6 +490,7 @@ def main():
         "precision": "bf16",                       # 5070 Ti 支持;fp32 想开就删这行
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
         "clip_norm": args.clip_norm,
+        "dialect_mix": dialect_mix,                # None=D2 纸面;设了 --amt-mix 则为换算后的四元组(回显自证)
         "eval_max": args.eval_max,                 # 每次 eval 抽的 val 子集(逐 token 生成,大了小时级)
         "eval_time_budget_s": 1200,                # eval 硬时限:超时截断按已评样本出指标,不再"疑似卡死"
         # eval 证据自动落盘到 repo 内(追加式);执行端上报 = git add reports/eval_autolog.md
