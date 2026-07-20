@@ -537,42 +537,95 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
 
 # ---------------------------------------------------------------- 断点续训(长跑生死线)
 
-def prefetch_batches(gen, depth: int = 3):
-    """
-    后台线程预取:GPU 算当前批时,CPU 并行装配下一批(soundfile/soxr 解码释放 GIL)。
-    执行端实测 GPU 利用率仅 ~50%(nvidia-smi 43-72% 波动)—— train_batches 是纯串行
-    生成器,装批与算批交替进行,GPU 每批都停下等 CPU,这是 10.5s/步的主要空转来源。
+def _mp_producer(dm, epoch, q):
+    """预取子进程入口(必须模块级:Windows spawn 按引用导入)。纯 CPU,永不碰 CUDA。"""
+    try:
+        import os
+        import pickle as _pk
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""     # 防御:子进程绝不许抢显存/初始化 CUDA
+        for b in dm.train_batches(epoch):
+            # 按值序列化:mp 队列对 torch 张量默认走共享内存【引用】,子进程一死引用即失效
+            # (实测 ConnectionReset/FileNotFound)。显式 pickle 成字节 = 生命周期完全解耦。
+            q.put(("batch", _pk.dumps(b, protocol=4)))
+        q.put(("end", None))
+    except BaseException:
+        import traceback
+        try:
+            q.put(("error", traceback.format_exc()))
+        except Exception:
+            pass
 
-    语义保证(O4 等步进制判据不受影响的根据):同一个生成器、同一调用顺序在产批,
-    批内容/顺序/RNG 消耗与直迭代逐字节相同,线程只改变"何时"装批,不改变"装什么"。
-    depth<=0 = 直通(关闭预取,A/B 对照用)。生产者异常原样重抛,不吞。
+
+def prefetch_batches(dm, epoch: int, depth: int = 3,
+                     first_timeout_s: float = 1800.0, steady_timeout_s: float = 600.0):
+    """
+    【进程级】预取:子进程跑同一个 train_batches 生成器,批经进程队列传回,主进程只喂 GPU。
+
+    为什么是进程不是线程(D40):线程版实测把 GPU 利用率从 ~50% 打到 ~20% —— 装批线程与
+    主线程共享 GIL/CPU 线程池,kernel 发射节奏被卡死;这正是官方 DataLoader 用进程的原因。
+    语义保证不变:同一生成器、同一调用顺序,批内容/顺序与串行逐字节相同(tests_prefetch)。
+
+    无人值守兜底(27h 约束):启动失败(不可 pickle)/子进程死亡/超时/异常 → 打印完整现场
+    (行首统一「预取:」,贴回可 grep),【自动退回串行装批】重放本 epoch —— 最坏 = 修复前
+    速度,绝不停训;已消费的前 n 批会重复训练一遍(无害,现场行记录 n)。depth<=0 = 串行。
     """
     if depth <= 0:
-        yield from gen
+        yield from dm.train_batches(epoch)
         return
+    import multiprocessing as _mp
     import queue as _q
-    import threading as _t
-    q: "_q.Queue" = _q.Queue(maxsize=depth)
-    _END = object()
-    err: list = []
-
-    def _produce():
+    import time as _time
+    ctx = _mp.get_context("spawn")                  # 与执行端 Windows 同语义;沙盒测的就是它
+    q = ctx.Queue(maxsize=max(1, int(depth)))
+    try:
+        p = ctx.Process(target=_mp_producer, args=(dm, epoch, q),
+                        daemon=True, name="batch-producer")
+        p.start()
+    except Exception as e:
+        print(f"预取: 进程起不来({type(e).__name__}: {e})→ 本 epoch 串行装批", flush=True)
+        yield from dm.train_batches(epoch)
+        return
+    import pickle as _pk
+    n = 0
+    deadline = _time.time() + first_timeout_s
+    try:
+        while True:
+            try:
+                kind, payload = q.get(timeout=5.0)
+                if kind == "batch":
+                    payload = _pk.loads(payload)
+            except _q.Empty:
+                if not p.is_alive():                # 静默死亡(pickle 失败/被杀/OOM):秒级发现
+                    print(f"预取: 子进程死亡且队列已空(已收 {n} 批)→ 本 epoch 串行从头重放"
+                          f"(前 {n} 批重复训练,无害)", flush=True)
+                    yield from dm.train_batches(epoch)
+                    return
+                if _time.time() > deadline:         # 活着但卡死:超时止损
+                    print(f"预取: 子进程超时(已收 {n} 批)→ 杀之,本 epoch 串行从头重放", flush=True)
+                    yield from dm.train_batches(epoch)
+                    return
+                continue
+            except Exception as e:                  # 主侧接收/反序列化故障:同样不许停训
+                print(f"预取: 主侧接收异常({type(e).__name__}: {e},已收 {n} 批)"
+                      f"→ 本 epoch 串行从头重放", flush=True)
+                yield from dm.train_batches(epoch)
+                return
+            deadline = _time.time() + steady_timeout_s
+            if kind == "batch":
+                n += 1
+                yield payload
+            elif kind == "end":
+                return
+            else:                                   # "error":子进程完整栈带回
+                print(f"预取: 子进程异常(已收 {n} 批)→ 本 epoch 串行从头重放;现场:\n"
+                      f"{payload}", flush=True)
+                yield from dm.train_batches(epoch)
+                return
+    finally:
         try:
-            for b in gen:
-                q.put(b)
-        except BaseException as e:          # 含 KeyboardInterrupt:必须带出主线程
-            err.append(e)
-        finally:
-            q.put(_END)
-
-    _t.Thread(target=_produce, daemon=True, name="batch-prefetch").start()
-    while True:
-        b = q.get()
-        if b is _END:
-            if err:
-                raise err[0]
-            return
-        yield b
+            p.terminate()
+        except Exception:
+            pass
 
 
 def save_snapshot(path, model, opt, sched, step: int, epoch: int):
@@ -664,8 +717,11 @@ def train(model, datamodule, cfg: dict, tokenizer,
           f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)} "
           + ("mix=D2纸面(.35/.15/.20/.30)" if not cfg.get("dialect_mix") else
              "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items())))
-          + f" prefetch={int(cfg.get('prefetch_batches', 3))}",
+          + f" prefetch={'proc:' + str(int(cfg.get('prefetch_batches', 3))) if int(cfg.get('prefetch_batches', 3)) > 0 else '关'}",
           flush=True)
+    # 指令随日志走(执行端只看日志不看文档的现实约束):贴回要求印在产物里
+    print("【执行端贴回】① 上面的配置回显行 ② 续训:恢复… 行 ③ 启动装配统计块 "
+          "④ 重启30分钟后 nvidia-smi 采样10行;日志中任何「预取:」开头的行=发生回退,原样贴回", flush=True)
 
     # 断点续训:last.pt 存在且未禁用 → 全状态恢复(所在 epoch 从头重放,至多重复
     # save_every-1 步的样本 —— 每 epoch 采样确定,重复无害,远好于从 step 0 重来)
@@ -694,7 +750,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     opt.zero_grad()
     accum_sec = 0.0
     for epoch in range(start_epoch, cfg.get("max_epochs", 1000)):
-        for batch in prefetch_batches(datamodule.train_batches(epoch),
+        for batch in prefetch_batches(datamodule, epoch,
                                       depth=int(cfg.get("prefetch_batches", 3))):
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,

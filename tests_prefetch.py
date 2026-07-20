@@ -1,84 +1,160 @@
 """
-prefetch_batches 的判决性测试:预取只许改变"何时装批",不许改变"装什么"。
-(它包在训练主循环外面,错了会毒化每一步 —— 五个场景钉死。)
+进程级 prefetch_batches 的判决性测试(D40)。
+铁则:预取只许改变"何时装批",不许改变"装什么";任何故障必须自动退回串行,绝不停训。
+子进程用 spawn(与执行端 Windows 同语义);故障注入靠"子进程会设 CUDA_VISIBLE_DEVICES=''"
+这一事实区分父子环境。
 """
+import os
 import time
+
+import torch
 
 from rubato.model.train import prefetch_batches
 
 
+def _in_child() -> bool:
+    return os.environ.get("CUDA_VISIBLE_DEVICES") == ""
+
+
+class FakeDM:
+    """可 pickle 的最小数据模块:12 批,每批含张量+字符串(走真实的跨进程张量传输)。"""
+    def __init__(self, n=12):
+        self.n = n
+
+    def train_batches(self, epoch: int):
+        for i in range(self.n):
+            yield {"i": torch.tensor([epoch, i]),
+                   "audio": torch.full((100,), float(i)),
+                   "utt": f"u{i:03d}"}
+
+
+class CrashDM(FakeDM):
+    """只在子进程里第 3 批抛异常(父进程串行重放时正常)——模拟 pickle 后环境类故障。"""
+    def train_batches(self, epoch: int):
+        for i in range(self.n):
+            if _in_child() and i == 3:
+                raise RuntimeError("子进程专属炸弹")
+            yield {"i": torch.tensor([epoch, i]),
+                   "audio": torch.full((100,), float(i)),
+                   "utt": f"u{i:03d}"}
+
+
+class ExitDM(FakeDM):
+    """只在子进程里第 2 批直接 os._exit —— 模拟静默死亡(无异常可传回)。"""
+    def train_batches(self, epoch: int):
+        for i in range(self.n):
+            if _in_child() and i == 2:
+                os._exit(3)
+            yield {"i": torch.tensor([epoch, i]),
+                   "audio": torch.full((100,), float(i)),
+                   "utt": f"u{i:03d}"}
+
+
+def _collect(gen):
+    return list(gen)
+
+
+def _key(b):
+    return (tuple(b["i"].tolist()), float(b["audio"][0]), b["utt"])
+
+
 def test_identical_stream():
-    src = [{"i": i, "x": [i] * 3} for i in range(50)]
-    got = list(prefetch_batches(iter(src), depth=3))
-    assert got == src                      # 逐元素、逐序相同
-    assert got[7] is src[7]                # 同一对象,零拷贝
+    dm = FakeDM()
+    want = [_key(b) for b in dm.train_batches(7)]
+    got = [_key(b) for b in _collect(prefetch_batches(dm, 7, depth=3))]
+    assert got == want, f"预取流与串行不同:{got[:3]} vs {want[:3]}"
 
 
-def test_depth_zero_is_passthrough():
-    src = [1, 2, 3]
-    g = prefetch_batches(iter(src), depth=0)
-    assert list(g) == src
+def test_depth_zero_is_serial():
+    dm = FakeDM()
+    got = [_key(b) for b in _collect(prefetch_batches(dm, 0, depth=0))]
+    assert got == [_key(b) for b in dm.train_batches(0)]
 
 
-def test_empty_generator():
-    assert list(prefetch_batches(iter([]), depth=3)) == []
+def test_child_exception_falls_back_to_serial():
+    dm = CrashDM()
+    got = [_key(b) for b in _collect(prefetch_batches(dm, 1, depth=2))]
+    want = [_key(b) for b in dm.train_batches(1)]        # 父进程环境:完整 12 批
+    # 回退语义 = 前缀(子进程产出的 0-3 批)+ 完整串行重放;结尾必是完整流
+    assert got[-len(want):] == want, "回退后未完整重放"
+    assert len(got) <= len(want) + 3, "重复批数超出子进程可能产出的上限"
 
 
-def test_producer_exception_propagates():
-    def bad():
-        yield 1
-        yield 2
-        raise RuntimeError("装批炸了")
-    got = []
-    try:
-        for b in prefetch_batches(bad(), depth=2):
-            got.append(b)
-    except RuntimeError as e:
-        assert "装批炸了" in str(e)
-        assert got == [1, 2]               # 炸之前的批一个不丢
-    else:
-        raise AssertionError("生产者异常被吞了")
-
-
-def test_slow_consumer_bounded_queue():
-    # 消费者比生产者慢:队列有界不爆内存,数据仍完整有序
-    produced = []
-    def src():
-        for i in range(20):
-            produced.append(i)
-            yield i
-    out = []
-    for b in prefetch_batches(src(), depth=2):
-        time.sleep(0.005)                  # 慢消费
-        out.append(b)
-        # 有界队列:生产者最多领先 depth+1(队列 depth + put 在手 1)
-        assert len(produced) - len(out) <= 2 + 1 + 1
-    assert out == list(range(20))
-
-
-def test_overlap_actually_happens():
-    # 生产一批 20ms、消费一批 20ms × 10 批:串行 ≈400ms,重叠后应明显更快
-    def src():
-        for i in range(10):
-            time.sleep(0.02)
-            yield i
+def test_silent_child_death_falls_back_fast():
+    dm = ExitDM()
     t0 = time.time()
-    n = 0
-    for _ in prefetch_batches(src(), depth=3):
-        time.sleep(0.02)
-        n += 1
+    got = [_key(b) for b in _collect(prefetch_batches(dm, 2, depth=2))]
     wall = time.time() - t0
-    assert n == 10
-    assert wall < 0.34, f"无重叠迹象:{wall:.3f}s(串行 ≈0.40s,重叠应 ≈0.22s)"
+    want = [_key(b) for b in dm.train_batches(2)]
+    assert got[-len(want):] == want
+    assert wall < 90, f"静默死亡检测太慢:{wall:.0f}s(应秒级,不许等到超时)"
+
+
+class UnpicklableDM(FakeDM):
+    def __init__(self):
+        super().__init__()
+        self.bad = lambda: 1                              # lambda 不可 pickle → 启动期失败
+
+
+def test_unpicklable_dm_falls_back():
+    dm = UnpicklableDM()
+    got = [_key(b) for b in _collect(prefetch_batches(dm, 3, depth=2))]
+    assert got == [_key(b) for b in FakeDM().train_batches(3)]
+
+
+class TinyTok:
+    """顶层可 pickle 的最小分词器(encode/piece_to_id 即 encode_target 的全部依赖)。
+    id 用 crc32:hash() 每进程随机盐,跨进程必须用确定性映射,否则父子两边编码不同。"""
+    def encode(self, text, out_type=str, **kw):
+        return text.split()
+
+    def piece_to_id(self, p):
+        import zlib
+        return zlib.crc32(p.encode("utf-8")) % 5000
+
+
+def test_real_classes_end_to_end():
+    """真 RubatoDataset + RubatoDataModule + 真 flac 文件过 spawn 子进程:流与串行逐字节同。"""
+    import tempfile
+    import numpy as np
+    import soundfile as sf
+    from rubato.data.dataset import RubatoDataset, RubatoDataModule
+
+    tmp = tempfile.mkdtemp(prefix="prefetch_e2e_")
+    utts, labels = [], {}
+    for i in range(3):
+        path = os.path.join(tmp, f"u{i}.flac")
+        t = np.linspace(0, 1.5, int(1.5 * 16000), dtype=np.float32)
+        sf.write(path, 0.1 * np.sin(2 * np.pi * (220 + 110 * i) * t), 16000)
+        uid = f"e2e_{i:03d}"
+        utts.append({"utt_id": uid, "audio_path": path, "dur_s": 1.5,
+                     "dialects": ["TAST"], "kind": "pdmx", "split": "train",
+                     "domain": "synth"})
+        labels[uid] = {"TAST": f"|4/4k0 PL:C4 <|0.5{i}|> 1/4PL:d4 <|1.0{i}|>"}
+    ds = RubatoDataset(utts, labels, TinyTok(), train=True, augment=False,
+                       max_target_len=None)
+    dm = RubatoDataModule(ds, nasap_val=[], maestro_val=[], labels=labels,
+                          max_batch_sec=4.0)
+    want = list(dm.train_batches(0))
+    got = list(prefetch_batches(dm, 0, depth=2))
+    assert len(got) == len(want) and len(want) > 0
+    for gb, wb in zip(got, want):
+        assert sorted(gb.keys()) == sorted(wb.keys())
+        for k in wb:
+            if torch.is_tensor(wb[k]):
+                assert torch.equal(gb[k], wb[k]), f"批字段 {k} 不同"
+            else:
+                assert gb[k] == wb[k], f"批字段 {k} 不同"
 
 
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
+            t0 = time.time()
             try:
                 fn()
-                print(f"  ok {name}")
+                print(f"  ok {name} ({time.time() - t0:.1f}s)")
             except Exception as e:
                 fails += 1
                 print(f"  FAIL {name}: {type(e).__name__}: {e}")

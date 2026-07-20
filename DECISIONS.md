@@ -63,6 +63,8 @@
 
 | D39 | **训练慢根因定案 + 预取修复**:用户实测 GPU 利用率仅 ~55%(43-72% 波动)戳穿规划端"≈190×实时≈算力吃满"的估算(实为 ~350× 带宽近半空转,估算≠测量,规划端记误);代码根因 = train_batches 纯串行生成器(dataset.py:389),装批/算批零重叠。修复 = prefetch_batches 后台线程预取(深 3,同一生成器同一顺序,批内容逐字节不变 → O4/61000 判据与 resume 语义零影响;tests_prefetch 六项含实测重叠性;--prefetch 0 一旗回滚)。判据预登记 EXPERIMENT_SPEED.md:基线 10.5-10.6 秒/步(eval 时间戳),成功 ≤9.0,预期区 6.5-8.0;VRAM 贴顶+共享内存(WDDM 静默降速嫌疑)挂账待共享内存具体数,候选杆 --max-batch-sec 50,一次一变量 | 2026-07-20 | 用户 nvidia-smi 实测(对话贴回)+ dataset.py 代码事实;accum 2000s 不动(步数≠学习量,动它作废全部步进制基线),eval_every 1000 判决期不动 | train.prefetch_batches + 回显 prefetch= 字段;build_dataset --prefetch;tests_prefetch.py;EXPERIMENT_SPEED.md |
 
+| D40 | **D39 线程预取判决:有害,召回并改进程版**。用户实测线程版 GPU ~50%→~20%、显存同降(采纳;规划端设计失误:装批线程与主线程抢 GIL/CPU 线程池,kernel 发射被卡——官方 DataLoader 用进程正为此理)。v2:同一 train_batches 生成器搬进 spawn 子进程,批按值序列化传回(张量共享内存引用随子进程死亡失效,实测两种崩法后改按值);全故障自动兜底链(起不来/静默死/异常/超时/主侧接收错 → 打「预取:」现场行 → 退串行,绝不停训),最坏=修复前速度,27h 无人值守也过 61000。SentencePiece pickle 往返实测通过;tests_prefetch 六项含真类+真 flac 过 spawn 的端到端。判据沿用 D39 不放宽(≤9.0 秒/步成功)。执行端"只 pull 不读指令"问题:贴回清单改由训练日志自动打印(指令随产物走),EXECUTOR.md 加版本核对线(回显 prefetch=proc:3 才是新版) | 2026-07-20 | 用户实测(对话贴回)+ 沙盒故障注入五种全部走通兜底;用户要求"一次改好,跑 27h 再回来" | train._mp_producer/prefetch_batches(进程版);tests_prefetch.py 重写;EXPERIMENT_SPEED v2 节;EXECUTOR.md D40 节 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
