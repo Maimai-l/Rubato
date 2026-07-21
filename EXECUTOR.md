@@ -38,6 +38,20 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
+## 当前阶段追加(2026-07-22,D47:声学审计,与训练并行)
+
+D44 的三步照旧(abtest 已收,谢;**若训练还没按第 3 步重启,现在重启**)。新增一件
+不停训的 CPU 活,今天任意时间跑:
+
+```bat
+git pull --rebase --autostash
+python scripts/audit_render_qc.py
+git add reports/render_qc.md && git commit -m "render qc audit" && git push
+```
+
+产出三节:时长对账(疑似截断计数)/ 音色分布 / maestro 整曲库存。约 20-30 分钟,只读。
+这是声学补救计划(EXPERIMENT_ACOUSTIC)的第一步;C2 切窗生成器规划端在建,数日内到。
+
 ## 当前阶段(2026-07-21 深夜,D44:一停一测一重启;此节为唯一现行指令)
 
 你的审查是好工作:**训推前缀不一致经代码核实成立**,判定实验已按你 §1.4 的设计实现;
