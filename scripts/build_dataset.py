@@ -42,6 +42,11 @@ SOURCES = [
 _O10 = WORK / "maestro_amt_windows_o10.jsonl"
 if _O10.exists():
     SOURCES.append({"path": str(_O10), "kind": "maestro", "domain": "real"})
+# C3 音色副本(D50):生成器只写 .staging 名;把 staging 改成本名 = 进池武装,
+# 只按 EXECUTOR.md 的书面指令执行(单变量纪律)。行全 train、utt_id 带 _s2。
+_S2 = WORK / "pdmx_a2s_labels_s2.jsonl"
+if _S2.exists():
+    SOURCES.append({"path": str(_S2), "kind": "pdmx", "domain": "synth"})
 
 # ---------------------------------------------------------------- 音频时长缓存
 _DUR_CACHE: dict[str, float] = {}
