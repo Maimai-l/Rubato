@@ -221,6 +221,12 @@ def main():
     ap.add_argument("--smoke-steps", type=int, default=800,
                     help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
                          "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
+    ap.add_argument("--prompt-abtest", action="store_true",
+                    help="D44 判定实验:同 ckpt/同样本/同解码,仅 prompt 变 —— G0 无域(现状)/"
+                         "G1 real(与训练一致)/G2 synth(反向对照)。不训练,结果进 autolog。"
+                         "判据预登记 EXPERIMENT_PROMPT.md")
+    ap.add_argument("--abtest-n", type=int, default=48,
+                    help="prompt-abtest 每臂样本数(与 eval 同源的确定性 nasap 子集)")
     ap.add_argument("--prefetch", type=int, default=0,
                     help="【实验性,默认关】预取批深度。线程版/进程版两次实测均为负收益"
                          "(D40/D41:串行 10.5s/步 → 18s/步),默认 0=串行直迭代(已知好)。"
@@ -404,6 +410,75 @@ def main():
             fh.write(f"\n## probe-only 三源探针 @ step {step0} "
                      f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n" + "\n".join(lines) + "\n")
         print(f"完成,证据已落盘 {autolog} —— git add + commit + push;训练继续保持暂停。")
+        return
+
+    if args.prompt_abtest:
+        # D44 判定实验(EXPERIMENT_PROMPT):训练每条样本的前缀都带 <|real|>/<|synth|>,
+        # 自由解码从来不带(执行端发现,代码坐实)。同 ckpt、同确定性 nasap 子集、同解码,
+        # 只动 prompt:G0 无域(现状基线)/ G1 real(与训练一致)/ G2 synth(反向对照,
+        # 排除"随便多个 token 都变好"的前缀长度效应)。判据在卡里预登记,先于数据。
+        import time as _time
+        import torch
+        from rubato.intermo.core import text_to_units, validate_units
+        from rubato.model.evaluate import text_ned
+        import rubato.model.infer as _inf
+        from rubato.model.infer import infer_a2s, _EMPTY_A2S
+        from rubato.model.train import _eval_subset, _sample_audio, viol_tally
+        last = ROOT / "outputs" / "ckpt" / "last.pt"
+        step0 = 0
+        if last.exists():
+            snap = torch.load(str(last), map_location="cpu")
+            model.load_state_dict(snap["model"])
+            step0 = int(snap.get("step", 0))
+        else:
+            print(f"--prompt-abtest:⚠ {last} 不存在,热启动初始权重(仅验证管线,勿判读)")
+        print(f"--prompt-abtest @ step {step0}:G0 无域 / G1 real / G2 synth,"
+              f"每臂 {args.abtest_n} 条,约 {args.abtest_n}×3×10s", flush=True)
+        if torch.cuda.is_available():
+            model = model.cuda()
+        model.eval()
+        subset = _eval_subset(nasap_val, int(args.abtest_n))
+        lines = [f"三臂同 ckpt(step={step0})同子集 n={len(subset)},仅 prompt 不同"]
+        with torch.no_grad():
+            for arm, dom in (("G0", None), ("G1", "real"), ("G2", "synth")):
+                n_ok = n_fb = n_seen = 0
+                neds: list = []
+                shows: list = []
+                entries: list = []
+                for si, s in enumerate(subset):
+                    audio = _sample_audio(s)
+                    if audio is None:
+                        continue
+                    n_seen += 1
+                    pred = infer_a2s(model, audio, tok, domain=dom)
+                    tv = list(getattr(_inf, "LAST_VIOLS", []) or [])
+                    fb = pred == _EMPTY_A2S
+                    viol = validate_units(text_to_units(pred)) if pred else ["empty"]
+                    ok = (not fb) and not viol
+                    n_ok += int(ok)
+                    n_fb += int(fb)
+                    entries.append((fb and not tv, tv or viol))
+                    ref = (labels.get(s.get("utt_id"), {}) or {}).get("A2S") or ""
+                    if ok and ref:
+                        neds.append(text_ned(pred, ref))
+                    if si < 10:
+                        shows.append(f"    [{arm}#{si}] {pred[:100]!r}")
+                    if si % 8 == 0:
+                        print(f"  {arm} {si}/{len(subset)}", flush=True)
+                med = sorted(neds)[len(neds) // 2] if neds else None
+                t = viol_tally(entries)
+                lines.append(
+                    f"  {arm}(domain={dom}): parseable={n_ok}/{n_seen} 兜底={n_fb} "
+                    f"NED中位={'-' if med is None else f'{med:.3f}'}(n={len(neds)}) 拒因: "
+                    + " ".join(f"{k}={v}" for k, v in sorted(t.items(), key=lambda kv: (-kv[1], kv[0]))))
+                lines.extend(shows)
+        for ln in lines:
+            print(ln, flush=True)
+        autolog = Path(__file__).resolve().parent.parent / "reports" / "eval_autolog.md"
+        with open(autolog, "a", encoding="utf-8") as fh:
+            fh.write(f"\n## prompt-abtest @ step {step0} "
+                     f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n" + "\n".join(lines) + "\n")
+        print(f"完成,证据已落盘 {autolog} —— git add + commit + push 后即可重启训练。")
         return
 
     if args.smoke:

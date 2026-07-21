@@ -28,6 +28,7 @@ _EMPTY_A2S = "|4/4k0"           # 合法空谱(过 validate),stub 与兜底用
 # run_eval_hooks 在出现兜底时打印。只存最后一次,eval 开始时清零。
 LAST_INFER_ERROR: str | None = None     # infer_a2s 顶层异常(traceback 头)
 LAST_DECODE_DEBUG: dict | None = None   # 单窗解码:validate 拒绝的原始输出 / 解码异常
+LAST_VIOLS: list = []                   # 本次 infer_a2s/infer_amt 全窗累计的真实违规(D44 拒因直方图)
 
 
 # ---------------------------------------------------------------- 纯逻辑:分窗(R-S12.1.1)
@@ -56,9 +57,23 @@ def split_audio(audio, sr: int = 16000, window_s: float = 40.0, hop_s: float = 2
 
 # ---------------------------------------------------------------- 纯逻辑:prompt / 剥戳 / 截断
 
-def build_tast_prompt() -> list[str]:
+def build_prompt(dialect: str, domain: str | None = None) -> list[str]:
+    """
+    训练/推理共用的 prompt 生成(D44,执行端发现的训推前缀不一致):训练侧 encode_target
+    对每条样本都在方言 prompt 后追加 <|real|>/<|synth|>(dataset.py:74-77),而自由推理
+    此前只用方言 prompt —— 模型从未在"无域提示"前缀下训练过,却一直被要求这样生成。
+    修复 = 布局在此单点收口,推理显式传 domain。默认 None = 维持现状(G0):
+    在 EXPERIMENT_PROMPT 的 G0/G1/G2 对照判决之前,任何调用方不得擅改缺省。
+    """
+    p = list(DIALECT_PROMPT[dialect])
+    if domain in ("real", "synth"):
+        p.append(f"<|{domain}|>")
+    return p
+
+
+def build_tast_prompt(domain: str | None = None) -> list[str]:
     """R-S12.1:推理走 TAST prompt(与 build.py 的 DIALECT_PROMPT 一致)。"""
-    return list(DIALECT_PROMPT["TAST"])
+    return build_prompt("TAST", domain)
 
 
 _TS_RE = re.compile(r"\s*<\|\d+\.\d{2}\|>")           # 时间戳:秒·两位小数
@@ -254,12 +269,13 @@ def single_window_infer(model, audio_window, sr: int, tokenizer,
 
 
 def single_window_tast(model, audio_window, sr: int, tokenizer,
-                       beam_size: int = 4, truncate: bool = True) -> str:
+                       beam_size: int = 4, truncate: bool = True,
+                       domain: str | None = None) -> str:
     """
     单窗 TAST 解码,返回截断后的【带时间戳】TAST 文本(剥戳后过 validate 才采用);失败返回 ''。
     保留时间戳是自适应 hop 的关键——下一窗起点 = 本窗最后小节线的时间戳。
     """
-    prompt = build_tast_prompt()
+    prompt = build_tast_prompt(domain)
 
     def _decode(beam):
         # 真 NeMo 模型(有 preprocessor+forward)走自研解码 —— transcribe/generate 与换表后
@@ -291,6 +307,9 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
         # 模型真实输出在此被丢弃 —— 这正是"样本0永远=兜底"时最需要看到的现场
         LAST_DECODE_DEBUG = {"stage": "validate_reject", "viol": viol[:4],
                              "raw": raw[:160], "truncated": tast[:100]}
+        # 拒因直方图的证据源(D44):v1 只在 eval 层对兜底常量复验,真实违规从未传出 →
+        # 直方图退化成 empty 率。此处全量累积,infer_a2s/infer_amt 入口清零。
+        LAST_VIOLS.extend(viol)
     return ""                            # 两次都不合法 → 空(计入 n_fail)
 
 
@@ -308,15 +327,20 @@ def _last_barline_sec(tast_text: str, ts_ms: int = 10) -> float | None:
 
 # ---------------------------------------------------------------- 主入口
 
-def infer_a2s(model, audio, tokenizer, sr: int = 16000) -> str:
+def infer_a2s(model, audio, tokenizer, sr: int = 16000,
+              domain: str | None = None) -> str:
     """
     S12 主入口。train.py eval hook 调用:infer_a2s(model, audio, tokenizer) -> str。
     model=None 或推理失败 → 返回合法空谱,保证 hook 不崩(parseable=1.0 起步)。
+    domain:None=不加域提示(现状 G0);"real"/"synth" 与训练前缀一致(EXPERIMENT_PROMPT
+    判决前,eval/产品调用方不得擅改缺省)。
     """
+    global LAST_VIOLS
+    LAST_VIOLS = []
     if model is None:
         return _EMPTY_A2S
     try:
-        return _infer_impl(model, audio, tokenizer, sr)
+        return _infer_impl(model, audio, tokenizer, sr, domain=domain)
     except Exception as e:
         import traceback
         global LAST_INFER_ERROR
@@ -324,7 +348,7 @@ def infer_a2s(model, audio, tokenizer, sr: int = 16000) -> str:
         return _EMPTY_A2S
 
 
-def _infer_impl(model, audio, tokenizer, sr: int) -> str:
+def _infer_impl(model, audio, tokenizer, sr: int, domain: str | None = None) -> str:
     """
     R-S12.1/12.3 自适应 hop 推理(修复固定 20s hop 与"截断到最后小节线"互相拆台的架构问题):
     每窗 40s 编码(右侧看未来),解码 TAST 截断到 20s 前最后一条小节线;
@@ -349,7 +373,8 @@ def _infer_impl(model, audio, tokenizer, sr: int) -> str:
         guard += 1
         seg = audio[t_start:t_start + win]
         is_last = (t_start + win >= n)
-        tast = single_window_tast(model, seg, sr, tokenizer, truncate=not is_last)
+        tast = single_window_tast(model, seg, sr, tokenizer, truncate=not is_last,
+                                  domain=domain)
         if not tast:                     # 解码失败:按默认 hop 前进(计 n_fail),不静默错位/死循环
             n_fail += 1
             t_start += default_hop
@@ -378,18 +403,22 @@ def _infer_impl(model, audio, tokenizer, sr: int) -> str:
 
 # ---------------------------------------------------------------- AMT 推理(eval hook 用)
 
-def build_amt_prompt() -> list[str]:
-    return list(DIALECT_PROMPT["AMT"])
+def build_amt_prompt(domain: str | None = None) -> list[str]:
+    return build_prompt("AMT", domain)
 
 
-def infer_amt(model, audio, tokenizer, sr: int = 16000, beam_size: int = 4) -> str:
+def infer_amt(model, audio, tokenizer, sr: int = 16000, beam_size: int = 4,
+              domain: str | None = None) -> str:
     """
     AMT dialect 单窗推理(MAESTRO val 段 ≤25s,单窗覆盖)。
     返回 AMT 文本(含时间戳/力度/踏板);失败返回空串。
+    domain 语义同 infer_a2s(缺省 None=现状,判决前不得擅改)。
     """
+    global LAST_VIOLS
+    LAST_VIOLS = []
     if model is None:
         return ""
-    prompt = build_amt_prompt()
+    prompt = build_amt_prompt(domain)
     try:
         if hasattr(model, "preprocessor") and hasattr(model, "forward"):
             return autoregressive_decode(model, audio, tokenizer, prompt)

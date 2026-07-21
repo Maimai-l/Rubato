@@ -483,7 +483,11 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         if pred == _EMPTY_A2S:
             n_empty += 1
             viol = viol or ["empty_fallback"]
-        viol_entries.append((pred == _EMPTY_A2S, viol))
+        # 拒因直方图 v2(D44):v1 拿 pred 复验 —— 但校验拒绝发生在 infer 层内部,eval 只
+        # 见兜底常量,直方图退化成 empty 率(58000-61000 实测全是"兜底=4x")。真实违规
+        # 由 infer.LAST_VIOLS 带出:有真实违规 = 模型输出被校验拦下(按类计);无 = 异常/空路径。
+        _tv = list(getattr(_inf, "LAST_VIOLS", []) or [])
+        viol_entries.append((pred == _EMPTY_A2S and not _tv, _tv or viol))
         if not viol:
             n_ok += 1
             if ok_pred is None and pred != _EMPTY_A2S:

@@ -38,7 +38,25 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段(2026-07-21 晚,D43:一次重启 = 溢出试验 + 新仪表;此节为唯一现行指令)
+## 当前阶段(2026-07-21 深夜,D44:一停一测一重启;此节为唯一现行指令)
+
+你的审查是好工作:**训推前缀不一致经代码核实成立**,判定实验已按你 §1.4 的设计实现;
+两个试验(0.22 混比、batch=50)都按预登记判据判了**未达标**,本次重启一并回退。
+
+按顺序做,一共三步:
+1. **停训** → `git pull --rebase --autostash`;
+2. **跑判定实验**(GPU ~40 分钟):
+   `python scripts/build_dataset.py --prompt-abtest`
+   结束后 `git add reports/eval_autolog.md && git commit -m "prompt abtest" && git push`;
+3. **立即重启训练,不等规划端判决**(配置回退到:混比 D2 纸面、批 60):
+   `... build_dataset.py --clip-norm 25 --lr-dec 3e-4 >> train_full.log 2>&1`
+   (**不带** --amt-mix、**不带** --max-batch-sec —— 两案已判,少一个旗子都是对的)
+   贴回新文件 reports/RESTART_D44.txt:回显行(应含 mix=D2纸面 batch_sec=60.0 prefetch=关)
+   + 恢复行 + **补贴 60900-61100 的三行训练日志**(O4 判决存档,从你本地 train_full.log 搜)。
+之后照常逢 eval push autolog(拒因行从此有真实类别,不再恒"兜底=4x")。
+下次节点:abtest 数据到 = prompt 判决;例行复盘 71000。
+
+## 上一阶段存档(2026-07-21 晚,D43)【已被 D44 取代】
 
 你的两份材料都收了:显存数合格(共享 1,576MB → 溢出坐实,试验开庭);仪表提议采纳一半
 (拒因直方图 + 探针音高分型,已进代码),缓办一半(时间戳 MAE/逐方言 F1,可解析样本

@@ -72,6 +72,56 @@ def test_probe_acc_pitch_none_when_no_pitch_tokens():
     assert out["acc_pitch"] is None and out["n_pitch"] == 0
 
 
+
+def test_build_prompt_matches_training_layout():
+    """build_prompt 必须与训练侧 encode_target 的 prompt 布局逐 piece 相同(D44 单点收口)。"""
+    from rubato.model.build import DIALECT_PROMPT
+    from rubato.model.infer import build_prompt, build_tast_prompt, build_amt_prompt
+    for d in ("TAST", "A2S", "AMT"):
+        assert build_prompt(d, None) == list(DIALECT_PROMPT[d])
+        assert build_prompt(d, "real") == list(DIALECT_PROMPT[d]) + ["<|real|>"]
+        assert build_prompt(d, "synth") == list(DIALECT_PROMPT[d]) + ["<|synth|>"]
+        assert build_prompt(d, "bogus") == list(DIALECT_PROMPT[d])   # 未知域:不加,不炸
+    assert build_tast_prompt("real")[-1] == "<|real|>"
+    assert build_amt_prompt() == list(DIALECT_PROMPT["AMT"])
+
+
+class EchoStub:
+    """stub 解码器:generate() 记录收到的 prompt 并返回一段必被校验拒绝的文本。"""
+    def __init__(self):
+        self.prompts = []
+
+    def generate(self, audio, prompt=None, num_beams=1):
+        self.prompts.append(list(prompt))
+        return "|4/4k0PL:C4 1/1c4"     # DYCK 悬挂:有 onset 无 offset → validate 必拒
+
+
+def test_domain_threads_to_decoder_and_viols_captured():
+    import numpy as np
+    import rubato.model.infer as inf
+    stub = EchoStub()
+    audio = np.zeros(16000, dtype="float32")
+    out = inf.infer_a2s(stub, audio, tokenizer=None, domain="real")
+    assert out == inf._EMPTY_A2S                       # 全窗被拒 → 兜底
+    assert stub.prompts and all(p[-1] == "<|real|>" for p in stub.prompts), \
+        f"domain 未穿透到解码 prompt: {stub.prompts[:1]}"
+    assert inf.LAST_VIOLS, "真实违规未被捕获(拒因直方图断粮)"
+    # G0(不传 domain)不得改变 prompt —— 判决前的现状保护
+    stub2 = EchoStub()
+    inf.infer_a2s(stub2, audio, tokenizer=None)
+    assert all("<|real|>" not in p and "<|synth|>" not in p for p in stub2.prompts)
+
+
+def test_last_viols_reset_between_calls():
+    import numpy as np
+    import rubato.model.infer as inf
+    stub = EchoStub()
+    inf.infer_a2s(stub, np.zeros(16000, dtype="float32"), tokenizer=None)
+    assert inf.LAST_VIOLS
+    inf.infer_a2s(None, np.zeros(4, dtype="float32"), tokenizer=None)   # model=None 路径也须清零
+    assert inf.LAST_VIOLS == []
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

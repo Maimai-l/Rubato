@@ -71,7 +71,9 @@
 
 | D43 | **执行端仪表提议采纳(裁剪版)+ 溢出支线开庭**。提议(METRICS_PROPOSAL @3cd7603,合规:是提议非擅动)采纳两项:① eval 拒因直方图(viol_tally:兜底/DYCK/MEASURE/TERMINAL 各拦多少样本 —— parseable 30k 步平台"卡在哪类校验"从此一行可见);② 探针音高分型 acc_pitch/Δpitch(音高原子 piece 正则单列命中率,AMT 读音频的最锋利仪表,直供 61000 判读)。缓办两项:时间戳 MAE、逐方言自由解码 F1(parseable 4-10% → 可解析样本 2-5 个,统计量不支撑;parseable>0.5 或终评再议)。同轮:显存溢出坐实(Get-Counter 专用 15,305 + **共享 1,576MB**,≥1GB 预登记线命中)→ --max-batch-sec 50 试验开庭,基线 td=0.68/tc=8.42 钉死,判据见 SPEED 卡(学习语义中性,O4 判据不受影响)。执行端本轮报告合规(实测工具+日志原文+无时间估计),记为正面样本 | 2026-07-21 | reports/METRICS_PROPOSAL.md + SPEED_TIMING.txt @5d22a99;新仪表随本次重启生效,61000 复盘首批带拒因/Δpitch 的 eval 即到 | train.viol_tally + 拒因行;infer acc_pitch + 探针行 Δpitch;tests_metrics_v2.py 5 项;EXPERIMENT_SPEED 溢出支线节 |
 
+| D44 | **三案并判 + 执行端审查采信**。① O4 判决:未达标回 0.30(A2S 2.53@63000 未跑赢外推 2.505;成功线经摆幅论证排除;灰区条款起草缺陷自首,按保守方向=用户钦定 D2 处置;AMT Δpitch −0.02~−0.04 佐证上行假设未兑现;要求补贴 61000 原始行,若 ≤2.49 重开)。② 溢出试验:失败回 60(tc 9.12>8.6 预登记线;共享 920MB 未达标;eval 时间戳独立佐证 11.0s/步)。③ 执行端 A2S_TRAINING_REVIEW 逐条核实:**训推前缀不一致(域提示)= 代码事实成立**(训练带 <|real|>/<|synth|>,自由推理不带,探针恰好带所以探不到)→ 修复管线已铺(build_prompt 单点收口 + 全线 domain 参数,缺省不变)+ G0/G1/G2 判定实验预登记(EXPERIMENT_PROMPT,--prompt-abtest);online_room_augment 零调用点亦坐实(阶段 C 待议);其"86MB"与自家"920MB"矛盾记录在案。④ 拒因直方图 v1 规划端之误修复(违规在 infer 层被吞,v1 退化成 empty 率;v2 LAST_VIOLS 全窗累积)。⑤ eval_every 维持 1000(原计划 61000 切 2000 推迟:parseable 62000 冲 0.15 历史新高 + prompt 案在途,分辨率此刻值钱)。新仪表首批数据:AMT 真pitch 仅 0.15-0.19(0.72 的真sem 是 velocity/结构虚高) | 2026-07-21 | autolog 58000-63000 + MAXBATCH_50.txt + A2S_TRAINING_REVIEW.md + 代码核实(infer.py:59/311/385 vs dataset.py:74-77);执行端本轮两份材料质量合格,采信其"提议+代码引证"工作方式 | EXPERIMENT_PROMPT.md;infer.py build_prompt/domain 全线/LAST_VIOLS;train.py 拒因 v2;build_dataset --prompt-abtest;tests_metrics_v2 11 项 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
-| O4 | 【已裁决 → D38】AMT 混比 0.30→0.22,2026-07-20 用户批准 | 判决与回滚条款见 EXPERIMENT_O4_MIX.md;61000 步按预登记判据复查 |
+| O4 | 【已裁决 → D38→D44 终局】0.22 试验未达标,回 0.30(D2 纸面) | 全程见 EXPERIMENT_O4_MIX.md;此条关闭 |
