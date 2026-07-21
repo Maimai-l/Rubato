@@ -562,3 +562,39 @@ probe-only 联合仪器(对齐×Δsem)@ step 22000,每源 8 条
   eval 拒因(样本数): 兜底=43 通过=5 /共48
   eval 汇总: parseable=0.10 empty=0.8958333333333334 n=48 样本0='|4/4k0' 探针acc=0.67/前缀0.66 eotP0=0.0000
   eval 指标: parseable=0.10 amt_f1=0.0 omr_ned=0.8473367322863478 n_nasap=48 n_maestro=48
+
+## prompt-abtest @ step 63000 (2026-07-21 19:11:35)
+三臂同 ckpt(step=63000)同子集 n=48,仅 prompt 不同
+  G0(domain=None): parseable=5/48 兜底=43 NED中位=0.801(n=5) 拒因: DYCK=34 MEASURE=24 parse_error=22 TERMINAL=21 通过=3
+    [G0#0] '|4/4k0'
+    [G0#1] '|4/4k0'
+    [G0#2] '|4/4k0'
+    [G0#3] '|4/4k0'
+    [G0#4] '|4/4k0'
+    [G0#5] '|3/4k0PL:G2B2D3G3PR:D4F4D5 1/4PL:g2b2d3g3PR:d4f4d5 1/8PL:G3PR:D4F4B4 1/8PL:g3PR:d4f4b4 1/8G5 1/8g5 |'
+    [G0#6] '|4/4k0'
+    [G0#7] '|4/4k0'
+    [G0#8] '|4/4k0'
+    [G0#9] '|4/4k0'
+  G1(domain=real): parseable=5/48 兜底=43 NED中位=0.877(n=5) 拒因: DYCK=37 MEASURE=29 parse_error=23 TERMINAL=19 通过=1
+    [G1#0] '|4/4k0'
+    [G1#1] '|4/4k0'
+    [G1#2] '|4/4k0'
+    [G1#3] '|4/4k0'
+    [G1#4] '|4/4k0'
+    [G1#5] '|4/4k0'
+    [G1#6] '|4/4k0'
+    [G1#7] '|4/4k#2PR:A3 1/2a3 1/4A3 1/4a3 |4/4k#2G3 1/2g3 1/4A3 1/4a3 |4/4k#2G3 1/2g3 1/4A3 1/4a3 |4/4k#2G3 1/4'
+    [G1#8] '|4/4k0'
+    [G1#9] '|4/4k0'
+  G2(domain=synth): parseable=4/48 兜底=44 NED中位=0.941(n=4) 拒因: DYCK=35 MEASURE=35 TERMINAL=22 parse_error=17 通过=1
+    [G2#0] '|4/4k0'
+    [G2#1] '|4/4k0'
+    [G2#2] '|4/4k0'
+    [G2#3] '|4/4k0'
+    [G2#4] '|4/4k0'
+    [G2#5] '|4/4k0'
+    [G2#6] '|4/4k0'
+    [G2#7] '|4/4k#2PR:A3 1/2a3 1/4A3 1/4a3 |4/4k#2G3 1/4g3A3 1/4a3B3 1/4b3A3 1/4a3 |4/4k#2G3 1/4g3A3 1/4a3B3 1/4'
+    [G2#8] '|4/4k0'
+    [G2#9] '|4/4k0'
