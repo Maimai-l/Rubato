@@ -49,6 +49,42 @@ def test_leak_detected_precisely():
     assert "无法解析音频=1" in t
 
 
+def test_fix_quarantines_precisely_and_reversibly():
+    """修复脚本:只隔离 train×val/test 行,评测行不动,原值可逆,复审计归零。"""
+    from scripts.fix_split_leakage import QUARANTINE, build_vt_set, classify_rows
+    tmp = Path(tempfile.mkdtemp(prefix="fix_"))
+    for name in ("A.flac", "B.flac"):
+        _flac(tmp / name)
+    csv = tmp / "m.csv"
+    csv.write_text("audio_filename,split\n2004/A.wav,train\n2004/B.wav,test\n",
+                   encoding="utf-8")
+    vt = build_vt_set(str(csv))
+    assert vt == {"B.flac"}
+
+    def resolver(_u, _k, r):
+        p = r.get("audio_path")
+        return (p, 1.0) if p and Path(p).exists() else None
+
+    rows = [
+        {"utt_id": "n1", "split": "train", "audio_path": str(tmp / "A.flac")},
+        {"utt_id": "n2", "split": "train", "audio_path": str(tmp / "B.flac")},   # 隔离
+        {"utt_id": "n3", "split": "test",  "audio_path": str(tmp / "B.flac")},   # 评测行不动
+    ]
+    out, st = classify_rows(rows, vt, resolver)
+    assert st["quarantined"] == 1 and st["train_kept"] == 1 and st["untouched_test"] == 1
+    assert out[1]["split"] == QUARANTINE and out[1]["split_orig"] == "train"
+    assert out[0]["split"] == "train" and out[2]["split"] == "test"
+    # 复审计归零:隔离后的行不再是 train,不会二次命中
+    out2, st2 = classify_rows(out, vt, resolver)
+    assert st2.get("quarantined", 0) == 0
+    # partition 语义:隔离值落 other 桶,训练/评测两不进
+    from rubato.data.assemble import partition_by_split
+    part = partition_by_split(out)
+    assert [u["utt_id"] for u in part["train"]] == ["n1"]
+    assert [u["utt_id"] for u in part["test"]] == ["n3"]
+    assert [u["utt_id"] for u in part["other"]] == ["n2"]
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

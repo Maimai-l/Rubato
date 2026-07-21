@@ -99,8 +99,11 @@ def resolve_audio(utt_id: str, kind: str, row: dict):
         return (ref, d) if d is not None else None
     if kind == "pdmx":
         # 无 audio_path = 文本 s5 的行 → 找 S4 直排音频(仅 A2S/A2S_lite,该行 TAST 本就为 null)。
+        # C3 音色副本(_s2 行)在独立目录 pdmx_audio_s2(D51:与训练读取目录隔离,根治
+        # sfizz/训练 Windows 文件锁争抢);按后缀选目录,原名空间零污染。
+        _adir = "pdmx_audio_s2" if utt_id.endswith("_s2") else "pdmx_audio"
         for ext in (".opus", ".flac"):
-            p = WORK / "pdmx_audio" / f"{utt_id}{ext}"
+            p = WORK / _adir / f"{utt_id}{ext}"
             d = _flac_dur(str(p))
             if d is not None:
                 return (str(p), d)

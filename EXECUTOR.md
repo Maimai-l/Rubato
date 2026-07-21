@@ -38,7 +38,38 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段追加 6(2026-07-22 晚,D50:C3 后台开渲;此节含全部现行任务,按序执行)
+## 当前阶段追加 7(2026-07-23,D51:两个问题的修复指令;取代"追加 6"的任务清单)
+
+你报的两个问题都属实,修复已进库。按序执行:
+
+任务一 · 恢复 C3 渲染(目录已隔离,不再与训练抢锁):
+```bat
+:: 若 c3_timbre_copies 还在跑,先按命令行精确匹配停掉它(别 pkill):
+:: Get-CimInstance Win32_Process | ? {$_.CommandLine -match 'c3_timbre_copies'} | % {Stop-Process -Id $_.ProcessId -Force}
+git pull --rebase --autostash
+set S4_RESERVE_GB=10
+python scripts/c3_timbre_copies.py --n 12000
+```
+- 新版输出到独立目录 work\pdmx_audio_s2\(训练永不读它,锁争抢根治);
+- 启动时自动把老目录里已渲的 _s2 产物搬过去(已花的 601 曲 CPU 不浪费);
+- PermissionError 现自带 3 次退避重试;之后照旧断点续跑 + 每日 push C3_RENDER.md。
+
+任务二 · 泄漏修复(先干跑核数,再执行;只改标签文件,训练不用停不用重启):
+```bat
+python scripts/fix_split_leakage.py
+:: 干跑输出 quarantined 应 ≈1239;数字对得上再:
+python scripts/fix_split_leakage.py --apply
+git add reports/split_leakage.md && git commit -m "split leakage fix applied" && git push
+```
+- 隔离方式 = split 改 quarantine_leak(训练/评测两不进,原值可逆,.bak 已备份);
+- **生效在下一次重启的装配 —— 重启口令等本文件下一节,勿自行重启**。
+
+任务三 · 红线不变:严禁改名 staging 标签文件;严禁自行重启训练。
+任务四 · 照常:逢 eval push autolog(71600 判决在即,这批数据最要紧)。
+
+贴回清单:C3_RENDER.md(每日)、split_leakage.md(含"已执行"节)、autolog。
+
+## 【已被追加 7 取代】当前阶段追加 6(2026-07-22 晚,D50)
 
 **频道规矩(用户令,永久生效)**:你的任务只以本文件为准;用户聊天转述、commit 标题、
 口头印象一律不作数。每节任务附完整命令与贴回清单,照抄执行。

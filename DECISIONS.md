@@ -83,6 +83,8 @@
 
 | D50 | **C3 立项开渲(O5 裁决:M 档 12,000 曲)+ 备料/进池分离原则 + 频道规矩**。用户问"PDMX 渲染没消息?"成立——排队对进池是对的、对备料是错的(D49 教训的备料版:渲染有 2-4 天物理前置,与训练并行无冲突,召回战役验证)→ 原则成文:**单变量纪律管的是进池,不管备料;有前置耗时的备料在拍板后立即开工**。交付:c3_timbre_copies.py(确定性选曲 train-only、第二源哈希选于其余 4 源绝不重复、渲染/收尾镜像 s4 路径、切段复用 slice_piece_task(pid_s2 技法零改动)、标签落 **STAGING 名**——改名=武装,红线写进 EXECUTOR);build_dataset 认正式名条件挂载;tests_c3_copies 4 项 + 切割器回归绿。范围 v1 = S4 直渲线(A2S/lite),pdmxperf/TAST 不在本期(记档)。**频道规矩(用户令)**:执行端指令唯一来源 = EXECUTOR.md 书面章节,附完整命令与贴回清单;聊天不再承载指令,禁止事项显式列出 | 2026-07-22 | 用户拍板 M 档 + 频道规矩原话"板上钉钉,不留余地";进池顺序:C2 判决(71600)→ 视结果安排 s2 改名武装的重启 | scripts/c3_timbre_copies.py + tests_c3_copies.py;build_dataset _S2 挂载;EXECUTOR 追加 6(含红线节) |
 
+| D51 | **泄漏坐实并修复 + C3 争抢根治 + 重启分类原则**。①泄漏(用户"25% 浪费吗"一问挖出):78 场录音/1,239 行 nasap-train(占其 21%)在用 maestro val/test 音频训练 —— 跨方言评测污染坐实。修复 = fix_split_leakage:split→quarantine_leak(partition 落 other 桶,训练/评测两不进;评测池零变动保 eval 连续性;原值存 split_orig 可逆;.bak 备份;--apply 后复审计自证归零)。代价 −1,239 行(TAST 池 −4%),换 amt_f1/终评干净。附注:maestro 探针样本若在泄漏集,其 Δpitch=0 反而更重(见过的音频都不读),结论方向不变。②C3 争抢(执行端报,属实):渲染写训练读取目录 → Windows 锁 99/700 PermissionError。根治 = 独立目录 pdmx_audio_s2(resolve_audio 按 _s2 后缀选目录)+ 旧产物自动迁移(601 曲不浪费)+ PermissionError 3 次退避重试。③**重启分类原则成文**:正确性修复(如本泄漏)可搭任何重启;实验变量(C2/C3 进池)必须独占重启 —— 泄漏修复随 71600 判决后的重启生效,C3 武装另排 | 2026-07-23 | reports/split_leakage.md @357ef1b(78 场/1,239 行)+ C3_ISSUE.md @86a5706;tests_split_leakage 3 项(含 partition 语义)+ tests_c3 回归绿 | fix_split_leakage.py;c3 目录隔离+迁移+重试;resolve_audio _s2 分支;EXECUTOR 追加 7 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

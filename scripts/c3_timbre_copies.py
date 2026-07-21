@@ -92,17 +92,27 @@ def _render_s2_task(t) -> dict:
         return {"ok": True, "skipped": True}
     wav_path = str(Path(out_dir) / f"{utt}.wav")
     t0 = time.time()
-    try:
-        render_midi_to_wav44(midi_path, scfg["sources"][src2], scfg, wav_path, utt_id=utt,
-                             timeout_s=float(scfg["render"].get("timeout_s", 600)))
-        finalize(wav_path, pcfg["presets"][preset2], scfg, pcfg, utt, opus_path)
-        return {"ok": True, "elapsed_s": round(time.time() - t0, 1),
-                "source": src2, "preset": preset2}
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:120]}"}
-    finally:
-        if os.path.exists(wav_path):
-            os.unlink(wav_path)
+    last_err = None
+    for attempt in range(3):              # PermissionError(杀毒/索引器瞬时锁)退避重试
+        try:
+            render_midi_to_wav44(midi_path, scfg["sources"][src2], scfg, wav_path, utt_id=utt,
+                                 timeout_s=float(scfg["render"].get("timeout_s", 600)))
+            finalize(wav_path, pcfg["presets"][preset2], scfg, pcfg, utt, opus_path)
+            return {"ok": True, "elapsed_s": round(time.time() - t0, 1),
+                    "source": src2, "preset": preset2}
+        except PermissionError as e:
+            last_err = e
+            time.sleep(1.0 + attempt)
+        except Exception as e:
+            last_err = e
+            break
+        finally:
+            if os.path.exists(wav_path):
+                try:
+                    os.unlink(wav_path)
+                except OSError:
+                    pass
+    return {"ok": False, "error": f"{type(last_err).__name__}: {str(last_err)[:120]}"}
 
 
 def main() -> int:
@@ -111,7 +121,10 @@ def main() -> int:
     ap.add_argument("--n", type=int, default=12000, help="选曲数(O5 拍板 M 档 12000)")
     ap.add_argument("--labels", default=str(WORK / "pdmx_a2s_labels.jsonl"))
     ap.add_argument("--manifest", default=str(WORK / "manifest_pieces.jsonl"))
-    ap.add_argument("--audio-dir", default=str(WORK / "pdmx_audio"))
+    ap.add_argument("--audio-dir", default=str(WORK / "pdmx_audio"),
+                    help="原渲染目录(只读:查原整曲存在性)")
+    ap.add_argument("--audio-out", default=str(WORK / "pdmx_audio_s2"),
+                    help="C3 专属输出目录(D51:与训练读取目录隔离,根治 Windows 文件锁争抢)")
     ap.add_argument("--staging-out", default=str(WORK / "pdmx_a2s_labels_s2.staging.jsonl"))
     ap.add_argument("--min-sec", type=float, default=2.0)
     ap.add_argument("--max-sec", type=float, default=41.0)
@@ -124,6 +137,19 @@ def main() -> int:
     scfg = yaml.safe_load(open(str(ROOT / "configs" / "sources.yaml"), encoding="utf-8"))
     pcfg = yaml.safe_load(open(str(ROOT / "configs" / "recording_presets.yaml"), encoding="utf-8"))
     audio_dir = Path(args.audio_dir)
+    out_dir = Path(args.audio_out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # 迁移:早期版本(D50 首发)把 _s2 产物写进了训练读取目录,与训练争抢(99/700 PermissionError,
+    # @86a5706)。把已渲的搬进专属目录,已花的 CPU 不浪费;搬完老目录零 _s2 残留。
+    n_mig = 0
+    for f in list(audio_dir.glob("*_s2.*")):
+        try:
+            f.rename(out_dir / f.name)
+            n_mig += 1
+        except OSError:
+            pass                          # 被占用的留待下轮(训练重启后自然可搬)
+    if n_mig:
+        print(f"C3: 迁移旧产物 {n_mig} 个 → {out_dir}")
 
     # 曲 → 标签行 / midi
     pieces_rows: dict = defaultdict(list)
@@ -151,7 +177,7 @@ def main() -> int:
         except Exception:
             st["choose_fail"] += 1
             continue
-        tasks.append((mp, pid, str(audio_dir), src2, preset2))
+        tasks.append((mp, pid, str(out_dir), src2, preset2))
 
     def _on_render(_t, res):
         st["render_ok" if res.get("ok") else "render_fail"] += 1
@@ -170,7 +196,7 @@ def main() -> int:
         rows2 = transform_rows(pieces_rows[pid])
         mp = midi_of[pid]
         mp = mp if Path(mp).is_absolute() else str(WORK / mp)
-        r = slice_piece_task((f"{pid}_s2", rows2, mp, str(audio_dir), str(audio_dir),
+        r = slice_piece_task((f"{pid}_s2", rows2, mp, str(out_dir), str(out_dir),
                               args.min_sec, args.max_sec))
         for k, v in r.items():
             st[f"slice_{k}"] += v
