@@ -1,0 +1,1 @@
+C2 smoke: 501 windows, 501 labels, 0 fail, skip_nontrain=1
