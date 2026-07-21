@@ -1,0 +1,9 @@
+# RESTART_C2
+## 生成器
+windows=114588 labels=114571 win_fail=17 skip_nontrain=314
+## 装配
+  maestro  rows= 258658 kept= 258658 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+  TOTAL utts=384862 by_dialect={'A2S': 126204, 'A2S_lite': 126127, 'TAST': 29304, 'AMT': 258658}
+## 配置
+训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48 mix=D2纸面(.35/.15/.20/.30) prefetch=关
+【执行端贴回】① 上面的配置回显行(应含 prefetch=关) ② 续训:恢复… 行 ③ 跑 1 小时后:连续 5 行带 td=/tc= 的日志(不含 eval 的窗口) ④ 任务管理器→详细信息→python.exe 的「专用 GPU 内存」和「共享 GPU 内存」两个数(必贴)
