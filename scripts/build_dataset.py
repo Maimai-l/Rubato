@@ -457,7 +457,7 @@ def main():
                     ok = (not fb) and not viol
                     n_ok += int(ok)
                     n_fb += int(fb)
-                    entries.append((fb and not tv, tv or viol))
+                    entries.append((False, []) if ok else (fb and not tv, tv or viol))
                     ref = (labels.get(s.get("utt_id"), {}) or {}).get("A2S") or ""
                     if ok and ref:
                         neds.append(text_ned(pred, ref))

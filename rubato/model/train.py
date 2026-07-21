@@ -487,7 +487,12 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         # 见兜底常量,直方图退化成 empty 率(58000-61000 实测全是"兜底=4x")。真实违规
         # 由 infer.LAST_VIOLS 带出:有真实违规 = 模型输出被校验拦下(按类计);无 = 异常/空路径。
         _tv = list(getattr(_inf, "LAST_VIOLS", []) or [])
-        viol_entries.append((pred == _EMPTY_A2S and not _tv, _tv or viol))
+        # 通过样本无条件记「通过」:beam 首试失败、greedy 复活的样本,LAST_VIOLS 留有首试
+        # 残留,不清会把通过样本计进拒类(abtest 首跑实测 通过=3 vs parseable=5)
+        if not viol and pred != _EMPTY_A2S:
+            viol_entries.append((False, []))
+        else:
+            viol_entries.append((pred == _EMPTY_A2S and not _tv, _tv or viol))
         if not viol:
             n_ok += 1
             if ok_pred is None and pred != _EMPTY_A2S:
