@@ -38,7 +38,20 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段追加 4(2026-07-22,D49:C2 立即进池,取代"追加 3"的等待安排)
+## 当前阶段追加 5(2026-07-22,C2 已进池;三件小事)
+
+RESTART_C2 验收:生成/装配/回显全对(skip_nontrain=314 与官方名单分毫不差),但缺第④样
+**恢复行**(续训:恢复 step=…)—— 从你本地日志补贴进下一份报告。另:C2_EVAL1.txt 里只有
+eval 心跳行,commit 标题里的 Δpitch 数字无文件出处,**不算数**;eval 结束后 autolog 会
+自动写探针行,push autolog 即可,**不要手抄数字进标题**。
+
+1. 补贴恢复行(和下一样一起);
+2. **泄漏对账**(CPU 分钟级,不停训):
+   `python scripts/audit_split_leakage.py` → push reports/split_leakage.md
+   (查 nasap-train 是否引用了 maestro val/test 录音;应为 0);
+3. 照常逢 eval push autolog(C2 后首个完整 eval 块最要紧)。
+
+## 【已执行】当前阶段追加 4(2026-07-22,D49:C2 立即进池)
 
 时机改了:**不等 71000,现在就装**(理由见 D49:lr 在衰减,晚一步亏一步)。四步:
 
