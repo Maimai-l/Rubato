@@ -49,22 +49,28 @@ def _count_tokens_factory(spm_path: str):
 
 
 def _win_task(t):
-    """并行 worker:一场演奏 → MIDI 解析 → 切窗 + 逐窗真 tokenizer 实测 token 把关。
+    """并行 worker:一场演奏 → MIDI 解析 →(可选偏移)→ 切窗 + 逐窗真 tokenizer 实测把关。
     每场 ~0.5-2s 纯 CPU × 1276 场 —— 并行后分钟级。返回 (rows, n_windows, n_fail)。"""
-    zpath, member, midi_filename, split, lo, hi, max_notes, spm_path, budget = t
+    zpath, member, midi_filename, split, lo, hi, max_notes, spm_path, budget, offset = t
     import zipfile as _zip
     zf = _ZF.get(zpath)
     if zf is None:
         zf = _ZF[zpath] = _zip.ZipFile(zpath)
     notes, pedal = midi_to_events(zf.read(member))
+    if offset > 0:
+        # C2 偏移视角:同一录音、错开的第二组窗(EXPERIMENT_ACOUSTIC);
+        # 窗内容/标签由平移后事件产生,win 坐标写回时加回 offset(整曲 FLAC 坐标系不变)。
+        from rubato.data.segment import shift_events
+        notes, pedal = shift_events(notes, pedal, offset)
     base = _slug(midi_filename)
+    sfx = f"_o{offset:g}" if offset > 0 else ""
     wins, n_fail = amt_windows_token_budget(
         notes, pedal, _count_tokens_factory(spm_path), token_budget=budget,
         target_lo=lo, target_hi=hi, max_notes=max_notes)
     rows = []
     for wi, (win_notes, _wp, (w0, w1), text, n_tok) in enumerate(wins):
-        rows.append({"utt_id": f"maestro_{base}_{wi:03d}", "midi_file": midi_filename,
-                     "win": [round(w0, 3), round(w1, 3)], "AMT": text,
+        rows.append({"utt_id": f"maestro_{base}{sfx}_{wi:03d}", "midi_file": midi_filename,
+                     "win": [round(w0 + offset, 3), round(w1 + offset, 3)], "AMT": text,
                      "split": split, "n_notes": len(win_notes), "n_tok": n_tok})
     return rows, len(wins) + n_fail, n_fail
 
@@ -92,23 +98,32 @@ def main(argv=None):
                     help="每窗 token 上限(decoder 位置表 1024 − prompt/eot/采样余量)")
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 场演奏(冒烟)")
     ap.add_argument("--workers", type=int, default=0, help="0=自动(核数,≤16)")
+    ap.add_argument("--offset", type=float, default=0.0,
+                    help="C2 偏移视角(EXPERIMENT_ACOUSTIC):事件前移 N 秒切出错开的第二组窗。"
+                         "偏移模式【只产 train 切分】(val/test 评测集必须冻结),输出自动改名 "
+                         "…_oN.jsonl,utt_id 带 _oN 后缀。v1 用 10")
     args = ap.parse_args(argv)
+    if args.offset > 0 and args.out == str(ROOT / "work" / "maestro_amt_windows.jsonl"):
+        args.out = str(ROOT / "work" / f"maestro_amt_windows_o{args.offset:g}.jsonl")
 
     rows = load_csv_rows(args.csv)
     if args.limit:
         rows = rows[:args.limit]
     zf = zipfile.ZipFile(args.zip)       # 主进程只做 member 解析(namelist 查表,快)
     st = {"performances": 0, "windows": 0, "labels": 0, "win_fail": 0,
-          "not_found": 0, "parse_fail": 0}
+          "not_found": 0, "parse_fail": 0, "skip_nontrain": 0}
     tasks = []
     for row in rows:
+        if args.offset > 0 and (row.get("split") or "") != "train":
+            st["skip_nontrain"] += 1     # 偏移行绝不进 val/test:评测集冻结(D48)
+            continue
         member = resolve_zip_member(zf, row["midi_filename"])
         if member is None:
             st["not_found"] += 1
             continue
         tasks.append((args.zip, member, row["midi_filename"], row.get("split"),
                       args.target_lo, args.target_hi, args.max_notes,
-                      args.spm, args.token_budget))
+                      args.spm, args.token_budget, args.offset))
     zf.close()
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

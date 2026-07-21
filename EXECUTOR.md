@@ -38,6 +38,19 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
+## 当前阶段追加 3(2026-07-22,C2 已交付:一次冒烟,武装等 71000)
+
+C2 偏移窗生成器就绪。现在只做**冒烟验证**(1 分钟,不停训,注意必须带 --out 临时名):
+
+```bat
+git pull --rebase --autostash
+python scripts/s6_amt_windows.py --offset 10 --limit 5 --out D:\vscode_projects\ee_download\work\_c2_smoke.jsonl
+```
+
+贴回末行 DONE 统计(新文件 reports/C2_SMOKE.txt):windows/labels 应 >0,skip_nontrain ≥0。
+**不要在 71000 之前用默认输出名跑全量**——默认名文件一旦存在,下次任何重启都会自动进池,
+会污染 R1 的前后对照。全量生成的口令我在 71000 复盘时和重启指令一起下。
+
 ## 当前阶段追加 2(2026-07-22,收尾两件)
 
 RESTART_D44 验收通过,训练照跑不动。剩两件:

@@ -37,6 +37,11 @@ SOURCES = [
     # 1,276 条、AMT 全灭);切窗版 23,657 条 12-25s 窗,行带 win=[t0,t1] + split(来自 MAESTRO CSV)。
     {"path": str(WORK / "maestro_amt_windows.jsonl"), "kind": "maestro", "domain": "real"},
 ]
+# C2 偏移窗(EXPERIMENT_ACOUSTIC):同录音错开的第二组 AMT 窗,存在才挂载(生成前不碍事)。
+# 只含 train 行(生成器强制),utt_id 带 _o10 后缀不撞名;评测池(val/test)因此不变。
+_O10 = WORK / "maestro_amt_windows_o10.jsonl"
+if _O10.exists():
+    SOURCES.append({"path": str(_O10), "kind": "maestro", "domain": "real"})
 
 # ---------------------------------------------------------------- 音频时长缓存
 _DUR_CACHE: dict[str, float] = {}

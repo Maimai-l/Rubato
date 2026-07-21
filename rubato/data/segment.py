@@ -178,6 +178,23 @@ def _pedal_at(pedal, t: float) -> bool:
     return state
 
 
+def shift_events(notes: list[dict], pedal: list[tuple[float, bool]], offset: float):
+    """
+    C2 偏移视角(EXPERIMENT_ACOUSTIC):把整场演奏的事件流前移 offset 秒,喂给同一台
+    切窗机 → 切出与原窗系错开的第二组窗(论文"重叠切窗"乘数的保守版)。
+    - on < offset 的音符丢弃(与 segment_amt 窗界丢跨界音的既有口径一致);
+    - 踏板在 offset 时刻的保持状态合成为 t=0 的初始事件(否则前移会丢"踏板正踩着"这个事实)。
+    返回 (notes2, pedal2),原列表不动。offset<=0 原样返回。
+    """
+    if offset <= 0:
+        return notes, pedal
+    notes2 = [{"pitch": n["pitch"], "on": n["on"] - offset, "off": n["off"] - offset,
+               "vel": n["vel"]} for n in notes if n["on"] >= offset]
+    state0 = _pedal_at(pedal, offset)
+    pedal2 = [(0.0, state0)] + [(s - offset, d) for s, d in pedal if s > offset]
+    return notes2, pedal2
+
+
 # ---------------------------------------------------------------- AMT 切窗·token 实测把关
 
 def amt_windows_token_budget(notes: list[dict], pedal: list[tuple[float, bool]],

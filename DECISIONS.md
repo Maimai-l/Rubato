@@ -77,8 +77,10 @@
 
 | D47 | **声学多样性补救计划立项(用户拍板"现在做补救")**。总卡 EXPERIMENT_ACOUSTIC:C0 渲染质检+库存审计(已交付 scripts/audit_render_qc.py,顺带把 D45 的 duration_check 门补上,tests_render_qc 合成截断曲验证);C2 真实音频密集重叠切窗 = 头号杆(整曲 flac 已在盘、win= 窗读现成,只加标签行零音频磁盘;v1 保守 ×2,判据预登记 = R1+8k 看 maestro Δpitch 脱零);C1a 湿声安全增广(不含混响)R2 单变量启用;C3 免费音源副本待 C0 数字请用户定规模;C1b 干声重渲/C4 合成 AMT 挂账。原则:一重启一变量、D2 混比不动、防线全复用。另:用户指出早先"每曲一音色"疑问曾被搪塞 —— 无论出自何任,该疑问当时即成立,记为教训:用户的数据疑问一律入 OPEN 表跟踪,不许口头带过 | 2026-07-21 | REF_DATA_SCALE 对账 + 用户拍板;C2 机制与论文同源(Table 1 的 30h→214k/159h→804k 乘数) | EXPERIMENT_ACOUSTIC.md;scripts/audit_render_qc.py + tests_render_qc.py;C2 生成器在建 |
 
+| D48 | **C2 偏移窗交付**(用户点名"在建?为啥不建了?"后本轮交齐——规划端排期教训:三轮口称"在建"实为零进度,判送工作无限挤压建设工作;此后交付承诺当轮兑现或当轮改口)。实现:segment.shift_events(事件前移 + 踏板保持态合成初始事件 + 跨界音既有口径)+ s6 --offset(同一切窗机/同一 token 把关,win 回写 +offset,utt_id _o10)+ build_dataset 条件挂载。三道防线:①偏移模式强制 train-only(评测集冻结);②生成=武装,定在 71000 复盘重启执行(防计划外重启早进池污染对照);③冒烟必须 --out 临时名。预期 +~11 万 AMT train 行(池 ~×2,配额不变,过采样 0.43→0.21)。R1 判据沿用 ACOUSTIC 卡预登记(maestro Δpitch 脱零为主判)。C0 已于同日关案(3/38252 截断,噪声级) | 2026-07-22 | 用户催办;tests_c2_offset 4 项 + segment/amt_windows/assemble/cli 回归绿 | segment.shift_events;s6_amt_windows --offset;build_dataset _O10 挂载;tests_c2_offset.py |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
 | O4 | 【已裁决 → D38→D44 终局】0.22 试验未达标,回 0.30(D2 纸面) | 全程见 EXPERIMENT_O4_MIX.md;此条关闭 |
-| O5 | 【预告,待 C0 数字】C3 离线音色副本的规模(子集大小 × 副本数 = 磁盘/CPU 预算) | EXPERIMENT_ACOUSTIC C3;示例档位 30k 段 ×2 源 ≈ +24GB/数天 CPU,审计回来后给实价 |
+| O5 | 【预告,待 C2 判决】C3 离线音色副本的规模(子集大小 × 副本数 = 磁盘/CPU 预算) | EXPERIMENT_ACOUSTIC C3;示例档位 30k 段 ×2 源 ≈ +24GB/数天 CPU;C2 若成,先吃透免费乘数再谈花钱的 |

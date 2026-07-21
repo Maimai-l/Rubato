@@ -29,7 +29,24 @@ QmSYDrDRgzTQpgwdGkGHvU8Fe8CykKToz8Yp7e2uzTqdXo(-4.1s)/ QmUpns6nFmxZPifMYujCnHqjZ
 ③ maestro_audio 整曲库存(小时数)= C2 原料盘点。
 验收 = 报告三节齐全;截断计数与最重案例点名。
 
-### C2 真实音频密集重叠切窗【下一个交付,规划端在建;R1 重启进池】
+### C2 真实音频密集重叠切窗【已交付 2026-07-22(D48);R1(71000)进池】
+
+实现(tests_c2_offset 四项钉死):`segment.shift_events`(事件前移,踏板保持状态合成初始
+事件带入,跨界音按既有口径丢)+ `s6_amt_windows.py --offset 10`(同一台切窗机、同一 token
+实测把关;win 坐标回写 +offset,utt_id 带 `_o10`,输出 maestro_amt_windows_o10.jsonl)+
+build_dataset 条件挂载(文件存在即进池)。
+
+**评测冻结保证**:偏移模式强制只产 train 切分(skip_nontrain 计数),val/test 窗系一字不动,
+eval 的 48 样本与全部历史严格可比。
+
+**进池即武装**:挂载按文件存在判断 → **生成动作 = 武装动作,定在 71000 复盘重启时执行**
+(提前生成会在任何计划外重启时早进池,污染 R1 前后对照)。冒烟验证可提前,但必须用
+--out 临时名(见 EXECUTOR)。
+
+预期规模:train 演奏 ~962 场 → 偏移窗 ≈ +11 万行,AMT train 池 ~11.6 万 → ~23 万
+(混比 0.30 不变 → 配额不变,过采样 0.43→~0.21,每 epoch 独特 AMT 内容近翻倍)。
+判据(R1+8000,预登记不变):主看 maestro/AMT Δpitch 连续 3 eval ≥+0.03(首次脱零)
+与 amt_f1;护栏 = A2S 斜率不劣于外推、nasap/pdmx Δsem 不降带。失败回退 = 删 o10 文件重启。
 
 机制与论文同源(30h nASAP → 214k、159h MAESTRO → 804k 的那个乘数):整曲 flac 已全在盘
 (work/maestro_audio),装配器本就支持 win= 窗读 —— **只加标签行,不加音频字节**。
