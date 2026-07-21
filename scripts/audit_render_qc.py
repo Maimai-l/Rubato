@@ -26,7 +26,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rubato.platform import harden_stdout, read_jsonl          # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-WORK = Path(r"D:\vscode_projects\ee_download\work")
+# 三级解析:环境变量 > repo 邻居 work/ > 执行端固定路径(其 2026-07-21 hardcode 的兜底化)
+import os                                                       # noqa: E402
+WORK = Path(os.environ.get("RUBATO_WORK")
+            or (ROOT.parent / "work" if (ROOT.parent / "work").exists()
+                else r"D:\vscode_projects\ee_download\work"))
 
 
 def _find_whole(piece_id: str, whole_dir: Path):

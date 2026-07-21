@@ -12,7 +12,16 @@
 
 ## 分级计划
 
-### C0 渲染质检 + 库存审计【已交付,执行端今天可跑,不停训】
+### C0 渲染质检 + 库存审计【已关案,2026-07-21 @3b102d1】
+
+全量判定:38,252 曲全查,疑似截断 **3 曲(0.008%,噪声级,不重渲)**,曲号存档:
+QmSYDrDRgzTQpgwdGkGHvU8Fe8CykKToz8Yp7e2uzTqdXo(-4.1s)/ QmUpns6nFmxZPifMYujCnHqjZerZRfCzAoiAY6moV1ByHR(-3.1s)
+/ QmQMS66EnbPCt9mt9XJELBT1kfVGLhfXGhyF55sSGLggAH(-1.9s,327s 长曲,疑为尾音收尾约定差)。
+音色分布:每曲恰 1 组合坐实,96 种组合,Salamander 头部;**1,298 曲 bone_dry 干声
+= C1b 的天然零成本试点池**。maestro 整曲 199h 全在(C2 原料)。duration_check 质检门
+自 D45 揪出后首次真正行使职能,门后干净 —— 本节结案。
+
+### 【存档】C0 原始交付说明
 
 `python scripts/audit_render_qc.py` → reports/render_qc.md,三件事:
 ① 时长对账(补上从未接线的 duration_check 门,D45):疑似截断渲染计数,>0 则入重渲队列;
