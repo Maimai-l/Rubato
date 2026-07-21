@@ -26,3 +26,14 @@
     - MIDI-Unprocessed_18_R1_2008_01-04_ORIG_MID--AUDIO_18_R1_2008_wav--2.flac(test): 18 行
     …共 78 场,余略(全清单以本脚本重跑 + grep 提取)
   判定: 存在泄漏 —— 涉事行须移出训练,规划端出补丁前先贴回本报告
+
+## 泄漏修复(干跑) @ 2026-07-22 00:02:07
+  quarantined=1239 train_kept=4717 untouched_test=603 untouched_val=539
+  隔离口径: split→quarantine_leak(partition 落 other 桶,训练/评测两不进;原值存 split_orig,可逆)
+
+## 泄漏修复(已执行) @ 2026-07-22 00:02:56
+  quarantined=1239 train_kept=4717 untouched_test=603 untouched_val=539
+  隔离口径: split→quarantine_leak(partition 落 other 桶,训练/评测两不进;原值存 split_orig,可逆)
+  备份: D:\vscode_projects\ee_download\work\nasap_labels.jsonl.bak
+  复审计: 残余可隔离行=0(应为 0)
+  生效: 下一次训练重启的装配(时机由 EXECUTOR.md 指令决定,勿自行重启)
