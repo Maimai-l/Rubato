@@ -38,6 +38,16 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
+## 当前阶段追加 2(2026-07-22,收尾两件)
+
+RESTART_D44 验收通过,训练照跑不动。剩两件:
+1. **QC 全量跑**(你只跑了 --limit 5 冒烟;全量约 20-30 分钟,不停训):
+   `python scripts/audit_render_qc.py` → push render_qc.md。
+   报告标题请写实:冒烟是 "0/5",不是 "0 truncated renders"。
+2. Shr(python.exe 共享 GPU 内存)进入你的常态观察:哪天 ≥1GB,例行重启一次即可
+   (不改配置,SPEED 卡补遗)。
+之后就是 71000 复盘,照常 autolog。
+
 ## 当前阶段追加(2026-07-22,D47:声学审计,与训练并行)
 
 D44 的三步照旧(abtest 已收,谢;**若训练还没按第 3 步重启,现在重启**)。新增一件
