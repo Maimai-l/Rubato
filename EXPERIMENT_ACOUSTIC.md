@@ -29,7 +29,10 @@ QmSYDrDRgzTQpgwdGkGHvU8Fe8CykKToz8Yp7e2uzTqdXo(-4.1s)/ QmUpns6nFmxZPifMYujCnHqjZ
 ③ maestro_audio 整曲库存(小时数)= C2 原料盘点。
 验收 = 报告三节齐全;截断计数与最重案例点名。
 
-### C2 真实音频密集重叠切窗【已交付 2026-07-22(D48);R1(71000)进池】
+### C2 真实音频密集重叠切窗【已交付 + 冒烟通过;R1(71000)进池】
+
+冒烟验收(@e9afdbc):5 场限额 → 4 train 场产 501 窗/501 标签/0 失败,skip_nontrain=1
+(冻结守卫实锤),临时名输出未武装。外推全量 ≈12 万行,与预期账吻合。只待 71000 口令。
 
 实现(tests_c2_offset 四项钉死):`segment.shift_events`(事件前移,踏板保持状态合成初始
 事件带入,跨界音按既有口径丢)+ `s6_amt_windows.py --offset 10`(同一台切窗机、同一 token
