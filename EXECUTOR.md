@@ -38,7 +38,23 @@ python scripts/sop_next.py --go
 - Python:VN/VirtuosoNet 用 py312,其余用 nemo_test —— **SOP 内部自动选,你不用管**。
 - 控制台是 GBK:所有脚本已做 stdout 硬化;若见乱码属显示问题,不影响产物。
 
-## 当前阶段追加 3(2026-07-22,C2 已交付:一次冒烟,武装等 71000)
+## 当前阶段追加 4(2026-07-22,D49:C2 立即进池,取代"追加 3"的等待安排)
+
+时机改了:**不等 71000,现在就装**(理由见 D49:lr 在衰减,晚一步亏一步)。四步:
+
+```bat
+git pull --rebase --autostash
+:: 1. 全量生成(几分钟,训练可先不停):
+python scripts/s6_amt_windows.py --offset 10
+:: 2. 停训 → 原命令重启(与 D44 完全相同,不加新旗子):
+cmd /c "D:\ProgramData\envs\nemo_test\python.exe -u D:\vscode_projects\ee_download\Rubato\scripts\build_dataset.py --clip-norm 25 --lr-dec 3e-4 >> D:\vscode_projects\ee_download\reports\train_full.log 2>&1"
+```
+
+贴回(新文件 reports/RESTART_C2.txt,四样):① 生成器末行 DONE 统计;② 启动装配统计整块
+(maestro rows 应 144,087 → ~26 万,val/test 数不变);③ 配置回显行;④ 续训:恢复… 行。
+之后照常 autolog。判决窗 = 本次恢复步 +8000(主判据:maestro Δpitch 连续 3 eval ≥+0.03)。
+
+## 【作废】当前阶段追加 3(2026-07-22,C2 已交付:一次冒烟,武装等 71000)
 
 C2 偏移窗生成器就绪。现在只做**冒烟验证**(1 分钟,不停训,注意必须带 --out 临时名):
 
