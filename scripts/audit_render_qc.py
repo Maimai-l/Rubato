@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rubato.platform import harden_stdout, read_jsonl          # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-WORK = ROOT.parent / "work" if (ROOT.parent / "work").exists() else ROOT / "work"
+WORK = Path(r"D:\vscode_projects\ee_download\work")
 
 
 def _find_whole(piece_id: str, whole_dir: Path):
