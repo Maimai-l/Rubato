@@ -1,0 +1,8 @@
+step 63050 loss=36.6470 avg50=46.1909 sem=2.3085 ts=0.0000 gn=27.7/avg23.5 enc=15.8 dec=22.7 lrE=3.78e-05 lrD=1.13e-04 audio=38s td=0.5s tc=7.6s | A2S=2.51 A2S_lite=2.63 AMT=2.43 TAST=2.09
+step 63100 loss=33.1330 avg50=48.1050 sem=2.1898 ts=0.0000 gn=31.4/avg23.4 enc=16.3 dec=26.8 lrE=3.77e-05 lrD=1.13e-04 audio=58s td=0.5s tc=7.5s | A2S=2.52 A2S_lite=2.57 AMT=2.36 TAST=2.07
+step 63150 loss=50.7196 avg50=50.6940 sem=2.2355 ts=1.5034 gn=17.6/avg24.9 enc=13.0 dec=11.9 lrE=3.77e-05 lrD=1.13e-04 audio=55s td=0.5s tc=7.4s | A2S=2.54 A2S_lite=2.58 AMT=2.33 TAST=2.07
+step 63200 loss=62.0785 avg50=48.6353 sem=2.1403 ts=1.8472 gn=20.8/avg30.1 enc=13.4 dec=15.9 lrE=3.76e-05 lrD=1.13e-04 audio=38s td=0.5s tc=7.4s | A2S=2.51 A2S_lite=2.58 AMT=2.35 TAST=2.07
+---
+GPU: Ded=15128MB Shr=210MB Total=15338MB Pct=50%
+Config: mix=D2纸面 batch_sec=60.0 prefetch=关
+续训: step=63000
