@@ -1,5 +1,13 @@
 # 训练监控状态板(规划端维护;历史见 git log 本文件;指标怎么读见 METRICS.md)
 
+## 待核实(2026-07-22,用户问 maestro 切分引出):nasap-train × maestro val/test 交叉泄漏
+
+nasap TAST 行与 maestro 共用整曲录音库;需对账 nasap-train 引用的录音 ∩ maestro
+val/test 场次 = 空(非空 → 涉事 nasap 行移出训练,防跨方言音频泄漏污染 amt_f1/终评)。
+论文的"保守 ASAP 切分"即防此;我们的 nasap 16% 切分是否对齐过 maestro 名单无账可查。
+对账脚本随 C2 重启验收一起下发。maestro 官方切分本身不动(论文同预算:159h=官方 train,
+库存 199h 对得上;97.0 靶定义在官方 test)。
+
 ## D44 重启验收通过;溢出系"重启可清";QC 待全量(2026-07-21 深夜)
 
 回退三项全落位(D2/60/关),63000 续跑。意外收获:Shr 1,576→210MB、tc 7.4-7.6s 历史最快
