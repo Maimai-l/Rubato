@@ -59,7 +59,7 @@ def main() -> int:
     harden_stdout()
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default=str(WORK / "manifest_pieces.jsonl"))
-    ap.add_argument("--whole-dir", default=str(WORK / "pdmx_whole"))
+    ap.add_argument("--whole-dir", default=str(WORK / "pdmx_audio"))   # recall_explain 同约定(整曲池)
     ap.add_argument("--maestro-dir", default=str(WORK / "maestro_audio"))
     ap.add_argument("--sources", default=str(ROOT / "configs" / "sources.yaml"))
     ap.add_argument("--presets", default=str(ROOT / "configs" / "recording_presets.yaml"))
