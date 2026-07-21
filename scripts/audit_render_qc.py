@@ -58,7 +58,7 @@ def _midi_dur(path: Path):
 def main() -> int:
     harden_stdout()
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", default=str(WORK / "pdmx_manifest.jsonl"))
+    ap.add_argument("--manifest", default=str(WORK / "manifest_pieces.jsonl"))
     ap.add_argument("--whole-dir", default=str(WORK / "pdmx_whole"))
     ap.add_argument("--maestro-dir", default=str(WORK / "maestro_audio"))
     ap.add_argument("--sources", default=str(ROOT / "configs" / "sources.yaml"))
