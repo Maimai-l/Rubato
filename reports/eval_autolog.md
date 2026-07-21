@@ -598,3 +598,17 @@ probe-only 联合仪器(对齐×Δsem)@ step 22000,每源 8 条
     [G2#7] '|4/4k#2PR:A3 1/2a3 1/4A3 1/4a3 |4/4k#2G3 1/4g3A3 1/4a3B3 1/4b3A3 1/4a3 |4/4k#2G3 1/4g3A3 1/4a3B3 1/4'
     [G2#8] '|4/4k0'
     [G2#9] '|4/4k0'
+
+## eval @ step 64000 (2026-07-21 23:33:31)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.32 Δts=+0.26 Δpitch=+0.57 真sem=0.76 静sem=0.44 真pitch=0.70 acc=0.64 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.07 Δts=-0.06 Δpitch=+0.00 真sem=0.73 静sem=0.65 真pitch=0.18 acc=0.62 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.22 Δts=+0.06 Δpitch=+0.54 真sem=0.71 静sem=0.48 真pitch=0.59 acc=0.60 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.38 Δts=+0.25 Δpitch=+0.37 真sem=0.74 静sem=0.36 真pitch=0.79 acc=0.68 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 样本预测[首个通过 nasap_Gasanov08M_f9ac827c_000]: '|3/4k-4PL:A-3PR:C5 1/4PL:a-3C4PR:c5C5 1/4PL:c4D-4PR:c5C5 1/4PL:d-4PR:c5 |3/4k-4PL:C4PR:C5 1/4PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/4PL:c4PR:c5 |3/4k-4PL:A-3PR:C5 1'
+  eval 同样本参照:              '|6/8k-1PL:C4PR:C5 1/8PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/8PL:c4PR:c5 |6/8k-1PL:C4PR:C5 1/4PL:c4C4PR:c5C5 1/8PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/8PL:c4PR:c5 |6/8k-'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_UNCLOSED:[('PR', SPitch(step='G', alter=0, octave=5))]", 'MEASURE_SUM:0 got 9/8 want 1', 'MEASURE_SUM:1 got 9/8 want 1', 'MEASURE_SUM:2 got 17/16 want 1'], 'raw': '|4/4k0PL:E3PR:G5 <|0.00|> 1/16PL:e3G3 <|0.11|> 1/16g3E3 <|0.22|> 1/16e3G3 <|0.34|> 1/16g3E3 <|0.45|> 1/16e3G3 <|0.55|> 1/16g3E3 <|0.65|> 1/16e3C3 <|0.75|> 1/16c', 'truncated': '|4/4k0PL:E3PR:G5 <|0.00|> 1/16PL:e3G3 <|0.11|> 1/16g3E3 <|0.22|> 1/16e3G3 <|0.34|> 1/16g3E3 <|0.45|>'}
+  eval 拒因(样本数): DYCK=33 MEASURE=28 TERMINAL=19 parse_error=19 通过=5 /共48
+  eval 汇总: parseable=0.10 empty=0.8958333333333334 n=48 样本0='|4/4k0' 探针acc=0.64/前缀0.62 eotP0=0.0000
+  eval 指标: parseable=0.10 amt_f1=0.0 omr_ned=0.8754035183282646 n_nasap=48 n_maestro=48
