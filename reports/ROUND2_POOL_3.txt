@@ -1,0 +1,43 @@
+ROUND2 pool 3 — post-C3 full completion (2026-07-22)
+======================================================
+
+D53 data-construction checkpoint.  No training was started.
+
+Inputs confirmed present
+------------------------
+  D:\vscode_projects\ee_download\work\pdmx_a2s_labels_s2.jsonl
+  D:\vscode_projects\ee_download\work\maestro_amt_windows_o5.jsonl
+
+C3 completion and staging repair
+--------------------------------
+The full C3 renderer selected 34,465 deterministic pieces.  Its final render
+log recorded render_ok=34465.  During the post-completion audit, staging was
+found to include 19,170 repeated utt_id rows and 30,640 rows without a produced
+segment.  The generator was corrected to emit only audio-backed, unique C3
+labels, and staging was rebuilt without rendering again:
+
+  picked=34465 stage_only=1 staging_dup=19170
+  staging_no_audio=30640 staging_rows=83818
+
+The repaired staging file was promoted to the formal C3 label filename.  The
+previous unfiltered formal file is retained at
+work/pdmx_a2s_labels_s2.pre_label_filter.bak.
+
+Final dry-run (work/round2_c3_filtered_dryrun.log)
+---------------------------------------------------
+  [INFO] nASAP test work_keys (from TSV files): 1058
+  [INFO] ASAP-Beyer work_keys: 0
+  === 装配统计(每一步丢弃都计数,不静默)===
+    pdmx     rows= 255083 kept= 202924 no_audio=  37920 no_dialect=     0 bad_schema=    0 dup=14239
+    nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+    maestro  rows= 374084 kept= 374084 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+    TOTAL utts=584106 by_dialect={'A2S': 210022, 'A2S_lite': 209915, 'TAST': 29304, 'AMT': 374084}
+          by_kind={'pdmx': 202924, 'nasap': 7098, 'maestro': 374084} by_split={'train': 535351, 'test': 25254, 'val': 8932, 'quarantine_leak': 1239, 'validation': 13330}
+    train=535351 nasap_val=1142 maestro_val=28264 other=1239(隔离/未知split,两不进 —— 泄漏隔离生效应见 1239)
+
+Conclusion
+----------
+The effective pool contains 584,106 utterances.  The 1,239 quarantined rows
+remain outside both train and evaluation partitions.  This report documents
+the D53 post-C3 reconciliation only; it does not authorize or start round-two
+training.
