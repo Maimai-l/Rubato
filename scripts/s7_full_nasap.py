@@ -277,6 +277,10 @@ def main():
             _tag = _hl.sha256(f"{_perf_ref}|{_wk}".encode()).hexdigest()[:8]
             for lr in label_rows:
                 lr["perf_audio"] = _perf_ref
+                # 参考谱路径不仅供 S7 渲染时校验，也供后续 nASAP 校准
+                # (录音 → Transkun → M2ST) 与 ASAP 官方 MusicXML 配对。此前漏写，
+                # 会令所有已生成标签在 calib_pairs 中表现为 xml=''。
+                lr["xml_score"] = xml_rel
                 _si = lr["utt_id"].rsplit("_", 1)[1]
                 lr["utt_id"] = f"nasap_{_perf_stem}_{_tag}_{_si}"
                 lr["work_key"] = _wk

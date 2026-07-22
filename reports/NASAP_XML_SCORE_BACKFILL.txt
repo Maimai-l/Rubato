@@ -1,0 +1,37 @@
+# nASAP xml_score 回填修复（2026-07-22）
+
+## 根因
+
+`scripts/s7_full_nasap.py` 从 ASAP `metadata.csv` 读取 `xml_score` 并用其校验参考谱
+存在性，但在写 `nasap_labels.jsonl` 时遗漏了 `lr["xml_score"] = xml_rel`。因此历史标签
+7,098 行均没有该字段，D58 的配对器读到 `xml=''`，导致 34 个 test 单元零配对。
+
+原始 metadata 并不缺数据：1,066/1,066 行有 `xml_score`，519 行同时有 MAESTRO 音频。
+按稳定键 `(perf_audio, work_key)` 核验，现有 nASAP 的 483 个演奏—乐谱单元均唯一对应
+一个 metadata `xml_score`。
+
+## 修复
+
+1. S7 生成器现为每个标签行写入 `xml_score`，避免未来重生成再次漏字段。
+2. 新增 `scripts/backfill_nasap_xml_scores.py`：默认 dry-run，`--apply` 仅在全部映射唯一、
+   参考谱实际存在时才写入，并先创建备份。
+3. 已执行 `--apply`：
+
+```text
+rows=7098 already_present=0 recoverable=7098
+mapping_missing=0 mapping_ambiguous=0 xml_file_missing=0
+✓ 已回填 7098 行；备份:
+D:\vscode_projects\ee_download\work\nasap_labels.jsonl.pre_xml_backfill.bak
+```
+
+## 验证
+
+回填后重跑 `scripts/calib_pairs.py`：
+
+```text
+nASAP test:行 603 / 单元 34
+配对成功 34 | 缺整曲音频 0 | 缺参考谱 0
+```
+
+结论：参考谱路径现已恢复且全部存在；只修复标签元数据，没有重新渲染音频、修改训练池，
+也没有启动训练或后续批量评分。
