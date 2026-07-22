@@ -1,0 +1,39 @@
+# CALIB_SMOKE_5 — D55 M2ST 隔离环境安装记录（2026-07-22）
+
+按 D55 在 `D:\vscode_projects\ee_download\m2st` 执行。已新建
+`venv_m2st`；没有向 `nemo_test` 安装、升级或移除任何包。
+
+## 安装结果
+
+`pip` 从 25.2 成功升级至 26.1.2，随后 `requirements.txt` 在第一项作者 Git
+依赖 `muster` 停止。依 D55 红线，未自行更换依赖、镜像或环境。
+
+安装末尾及完整错误：
+
+```text
+Could not fetch URL https://pypi.org/simple/pip/: There was a problem confirming the ssl certificate: HTTPSConnectionPool(host='pypi.org', port=443): Max retries exceeded with url: /simple/pip/ (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1032))) - skipping
+Collecting muster @ git+https://github.com/TimFelixBeyer/amtevaluation.github.io (from -r requirements.txt (line 10))
+Cloning https://github.com/TimFelixBeyer/amtevaluation.github.io to C:\Users\Administrator\AppData\Local\Temp\pip-install-pf3qla_o\muster_8edf42e18dce4a6ca49c1d6e794f7b0d
+Running command git clone --filter=blob:none --quiet https://github.com/TimFelixBeyer/amtevaluation.github.io 'C:\Users\Administrator\AppData\Local\Temp\pip-install-pf3qla_o\muster_8edf42e18dce4a6ca49c1d6e794f7b0d'
+fatal: unable to access 'https://github.com/TimFelixBeyer/amtevaluation.github.io/': schannel: failed to receive handshake, SSL/TLS connection failed
+error: subprocess-exited-with-error
+× git clone --filter=blob:none --quiet https://github.com/TimFelixBeyer/amtevaluation.github.io ... did not run successfully.
+│ exit code: 128
+╰─> No available output.
+ERROR: Failed to build 'muster' when git clone --filter=blob:none --quiet https://github.com/timfelixbeyer/amtevaluation.github.io ...
+```
+
+## XML 清单
+
+下列文件已存在于 `work\calib_smoke`，但早于本次 D55 环境尝试；由于依赖安装失败，
+本次没有重新生成或验证它们，不能算作 D55 冒烟通过。
+
+```text
+rec1.xml  1,085,102 bytes  2026-07-22 13:02:08
+rec2.xml    960,472 bytes  2026-07-22 13:03:24
+rec3.xml    972,914 bytes  2026-07-22 13:04:18
+```
+
+## 状态
+
+阻塞在 D55 依赖安装门槛；未在 `venv_m2st` 执行 M2ST 转换命令，未尝试依赖绕过，未启动训练。
