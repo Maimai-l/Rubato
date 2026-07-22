@@ -7,7 +7,7 @@ logs/
 /data/
 environment/
 assets/
-third_party/
+# third_party/ —— D56 起入库(校准线离线依赖,钉版搬运)
 rubato-repl/
 _*
 reports/train_full.log
