@@ -39,10 +39,21 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--m2st-dir", required=True, help="MIDI2ScoreTransformer 仓库根目录")
     ap.add_argument("--ckpt", required=True, help="MIDI2ScoreTF.ckpt 路径")
-    ap.add_argument("--midi", nargs="+", required=True, help="输入 MIDI 文件名(相对 --in-dir)")
+    ap.add_argument("--midi", nargs="*", default=None, help="输入 MIDI 文件名(相对 --in-dir)")
+    ap.add_argument("--all-mids", action="store_true",
+                    help="取 --in-dir 下全部 *.mid(全量校准用;已存在的输出 xml 跳过=断点续跑)")
     ap.add_argument("--in-dir", required=True)
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
+
+    if args.all_mids:
+        args.midi = sorted(p.name for p in Path(args.in_dir).glob("*.mid"))
+        if not args.midi:
+            print(f"✗ {args.in_dir} 下没有 *.mid")
+            return 2
+    elif not args.midi:
+        print("✗ 需要 --midi 名单或 --all-mids 二选一")
+        return 2
 
     pkg = Path(args.m2st_dir) / "midi2scoretransformer"
     if not pkg.exists():
@@ -62,10 +73,14 @@ def main() -> int:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    n_ok = 0
+    n_ok = n_skip = 0
     for name in args.midi:
         src = Path(args.in_dir) / name
         dst = out_dir / (Path(name).stem + ".xml")
+        if args.all_mids and dst.exists() and dst.stat().st_size > 0:
+            n_skip += 1
+            n_ok += 1
+            continue
         try:
             score = quantize_path(str(src), model)
             score.write("musicxml", fp=str(dst), makeNotation=False)
@@ -75,7 +90,7 @@ def main() -> int:
             import traceback
             print(f"  ✗ {name}: {type(e).__name__}: {e}")
             traceback.print_exc(limit=6)
-    print(f"完成: {n_ok}/{len(args.midi)} 个 MusicXML")
+    print(f"完成: {n_ok}/{len(args.midi)} 个 MusicXML(其中续跑跳过 {n_skip})")
     return 0 if n_ok == len(args.midi) else 1
 
 
