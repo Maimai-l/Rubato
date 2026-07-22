@@ -1,0 +1,69 @@
+# CALIB_SMOKE_7 — D56/D57 M2ST 校准冒烟通过（2026-07-22）
+
+`CALIB_SMOKE_3.txt` 已为历史记录，故本次按“旧报告不覆盖”规则使用新的递增编号。
+全程在 `m2st/venv_m2st` 执行；`nemo_test` 未改动，未启动训练。
+
+## pip 安装末尾
+
+基础依赖与 vendored zip 的 D56 安装已在 `CALIB_SMOKE_6.txt` 记录。D57 绿区修复新增
+的本地 XML 解析依赖安装末尾：
+
+```text
+Installing collected packages: soupsieve, lxml, beautifulsoup4
+Successfully installed beautifulsoup4-4.15.0 lxml-6.1.1 soupsieve-2.9.1
+```
+
+为兼容旧 checkpoint 的加载默认值，venv-local Torch 固定为 2.5.1。安装末尾：
+
+```text
+Attempting uninstall: torch
+  Found existing installation: torch 2.12.0
+  Not uninstalling torch at D:\ProgramData\envs\midi2score\lib\site-packages,
+  outside environment D:\vscode_projects\ee_download\m2st\venv_m2st
+Successfully installed sympy-1.13.1 torch-2.5.1
+2.5.1+cpu
+```
+
+完整环境变更过程记录在 `reports/ENV_LOG.md`。
+
+## 包装脚本完整输出
+
+```text
+加载 ckpt(cpu): D:\vscode_projects\ee_download\m2st\MIDI2ScoreTF.ckpt
+Infer 0 / 3185
+Infer 448 / 3185
+Infer 896 / 3185
+Infer 1344 / 3185
+Infer 1792 / 3185
+Infer 2240 / 3185
+Infer 2688 / 3185
+  ✓ rec1.mid → rec1.xml(1078055 bytes)
+Infer 0 / 3280
+Infer 448 / 3280
+Infer 896 / 3280
+Infer 1344 / 3280
+Infer 1792 / 3280
+Infer 2240 / 3280
+Infer 2688 / 3280
+Infer 3136 / 3280
+  ✓ rec2.mid → rec2.xml(961990 bytes)
+Infer 0 / 3356
+Infer 448 / 3356
+Infer 896 / 3356
+Infer 1344 / 3356
+Infer 1792 / 3356
+Infer 2240 / 3356
+Infer 2688 / 3356
+Infer 3136 / 3356
+  ✓ rec3.mid → rec3.xml(957373 bytes)
+完成: 3/3 个 MusicXML
+```
+
+附带的 Lightning 提示说明本次加载使用了 Torch 2.5.1 的既有
+`weights_only=False` 默认值；checkpoint 为 D54 指定、用户下载的 M2ST 官方权重，且本轮
+没有关闭 TLS、伪造模块或修改模型/训练代码。
+
+## 结论
+
+三个 `✓` 均已出现，D56 校准冒烟通过。等待书面下发全量评分/LEGATO 比分流程；不自行启动
+该后续流程。
