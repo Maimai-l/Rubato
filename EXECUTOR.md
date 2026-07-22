@@ -65,6 +65,24 @@ transkun 录音1.flac out1.mid
 
 贴回清单:ROUND2_POOL.txt、C3_RENDER.md(每日)、o5 DONE 统计、CALIB_SMOKE.txt。
 
+## 当前阶段追加 9(2026-07-22 深夜):ROUND2_POOL 返工 —— 文件是旧账,标题无出处
+
+你贴的 ROUND2_POOL.txt 是转段前的旧统计(TOTAL=384862,无 s2/无 o5),而 commit 标题写
+"529827/pdmx 149k/maestro 374k/quarantine 1239" —— 这些数字在文件里不存在。
+**规矩重申:标题里的每个数字必须能在贴回文件里找到,否则不算数。** 返工步骤:
+
+```bat
+git pull --rebase --autostash
+:: 1. 自证任务二/三确实完成(两行目录列表,贴回):
+dir D:\vscode_projects\ee_download\work\pdmx_a2s_labels_s2.jsonl
+dir D:\vscode_projects\ee_download\work\maestro_amt_windows_o5.jsonl
+:: 2. 重跑对账(pull 后的新代码会打印 other= 桶,隔离 1239 从此可见):
+python scripts/build_dataset.py --dry-run
+```
+把 ①两行 dir 输出 ②装配统计整块(此次应含:pdmx kept>119106、maestro rows>258658、
+other=1239)写进**新文件 reports/ROUND2_POOL_2.txt**(旧文件不动),push。
+若 dir 显示文件缺失 = 任务二/三没做完,先补做再对账。
+
 ## 【已被追加 8 取代——第一轮已按 D53 终止】当前阶段追加 7(2026-07-23,D51)
 
 你是执行端。规划端(另一个 agent)通过 git 与你协作:代码和指令在 repo 里,

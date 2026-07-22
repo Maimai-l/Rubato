@@ -283,7 +283,8 @@ def main():
     train_utts = part["train"]
     nasap_val = [u for u in (part["val"] + part["test"]) if u["kind"] == "nasap"]
     maestro_val = [u for u in (part["val"] + part["test"]) if u["kind"] == "maestro"]
-    print(f"  train={len(train_utts)} nasap_val={len(nasap_val)} maestro_val={len(maestro_val)}")
+    print(f"  train={len(train_utts)} nasap_val={len(nasap_val)} maestro_val={len(maestro_val)} "
+          f"other={len(part.get('other', []))}(隔离/未知split,两不进 —— 泄漏隔离生效应见 1239)")
 
     if args.dry_run:
         print("\n--dry-run:装配 OK。确认上面 kept/no_audio 合理后去掉 --dry-run 开训。")
