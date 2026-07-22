@@ -1,0 +1,29 @@
+# CALIB_FULL_PAIRS_1 — D58 任务一零配对停止（2026-07-22）
+
+执行命令：
+
+```powershell
+& 'D:\ProgramData\envs\nemo_test\python.exe' -u 'D:\vscode_projects\ee_download\Rubato\scripts\calib_pairs.py'
+```
+
+完整 stdout：
+
+```text
+nASAP test:行 603 / 单元 34
+配对成功 0 | 缺整曲音频 0 | 缺参考谱 34
+  缺参考谱: nasap_BuiJL02M_7cf9fe18 (xml='')
+  缺参考谱: nasap_BuiJL06M_1bcb5f52 (xml='')
+  缺参考谱: nasap_Bult-ItoS03M_a8230d19 (xml='')
+  缺参考谱: nasap_CaoJ02M_8c43c486 (xml='')
+  缺参考谱: nasap_ChenGuang06M_8ec0e2e4 (xml='')
+  缺参考谱: nasap_GiacomelliN04M_861c59b0 (xml='')
+  缺参考谱: nasap_Hebert01M_1ba14164 (xml='')
+  缺参考谱: nasap_HuNY02M_ba15073f (xml='')
+  缺参考谱: nasap_KOLESO06M_95ab114f (xml='')
+  缺参考谱: nasap_KabuliL10M_714c58e2 (xml='')
+清单已写: D:\vscode_projects\ee_download\work\calib_pairs.jsonl
+✗ 零配对 —— 不要继续后续步骤,整段贴回
+```
+
+状态：D58 明确的零配对停止条件已触发。未运行任务二至任务五，未启动训练；等待规划端
+提供 nASAP test 单元到参考谱的映射/修复口令。
