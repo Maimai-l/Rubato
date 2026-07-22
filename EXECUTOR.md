@@ -48,7 +48,21 @@ python scripts/c3_timbre_copies.py --n 34503
 
 任务六 · 红线:除上述任务外不启动任何训练;开训口令在本文件下一节。
 
-贴回清单:ROUND2_POOL.txt、C3_RENDER.md(每日)、o5 生成器的 DONE 统计行(并入 ROUND2_POOL.txt)。
+任务七 · 【追加 9,D54】开源第二名校准冒烟(GPU 空闲期插队,判据见 REF_SYSTEM_CALIB.md):
+```bat
+pip install transkun
+git clone https://github.com/TimFelixBeyer/MIDI2ScoreTransformer D:\vscode_projects\ee_download\m2st
+:: 从该仓库 GitHub Releases 页下载 MIDI2ScoreTF.ckpt,放 D:\vscode_projects\ee_download\m2st\
+:: 冒烟:任选我们 nasap test 集的 3 首曲的【整曲真实录音 flac】:
+transkun 录音1.flac out1.mid
+:: 对每个 mid 按 m2st 仓库 README 的推理用法转 MusicXML(README 步骤照抄,产出 out1.xml …)
+```
+把三件事贴回新文件 reports/CALIB_SMOKE.txt:① transkun 三个 mid 是否生成(文件大小);
+② m2st 推理命令原文与三个 xml 是否生成;③ 任何报错整段原文。
+**不要自己解读/修复报错** —— 环境类问题(torch 版本冲突等)贴回后由规划端出补丁。
+冒烟通过后的全量口令与 LEGATO 比分流程,写在下一节。
+
+贴回清单:ROUND2_POOL.txt、C3_RENDER.md(每日)、o5 DONE 统计、CALIB_SMOKE.txt。
 
 ## 【已被追加 8 取代——第一轮已按 D53 终止】当前阶段追加 7(2026-07-23,D51)
 
