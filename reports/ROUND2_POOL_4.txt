@@ -1,0 +1,36 @@
+# ROUND2_POOL_4 — 封池前最终装配 dry-run
+
+日期：2026-07-22
+命令：`nemo_test/python scripts/build_dataset.py --dry-run`
+
+## 装配统计
+
+| 源 | rows | kept | no_audio | dup | filtered |
+|---|---:|---:|---:|---:|---:|
+| PDMX | 255,083 | 202,921 | 37,920 | 14,239 | 3 |
+| nASAP | 7,098 | 7,098 | 0 | 0 | 0 |
+| MAESTRO | 374,084 | 374,084 | 0 | 0 | 0 |
+| **总计** | — | **584,103** | — | — | **3** |
+
+方言：A2S 210,019；A2S_lite 209,912；TAST 29,304；AMT 374,084。
+
+切分：train 535,348；test 25,254；val 8,932；validation 13,330；
+quarantine_leak 1,239。训练集外的其它项为 1,239，说明隔离集未进入 train。
+
+验证池：nASAP 1,142；MAESTRO 28,264。
+
+## 封池审计结论
+
+- 跨方言音频泄漏：`nasap-train` 引用 MAESTRO val/test 的录音为 **0 场、0 行**
+  （`reports/split_leakage.md`）。
+- 渲染 QC：38,252 条 PDMX 整曲中 38,249 条时长在 ±1.5 秒内。逐段复核后确认 3 条
+  `pdmxperf` 的音频短于 MIDI 推导的片段时长，已由
+  `configs/pdmx_duration_quarantine.jsonl` 在装配层过滤（`filtered=3`）：
+  `pdmxperf_QmSYDrDRgzTQpgwdGkGHvU8Fe8CykKToz8Yp7e2uzTqdXo_000`、
+  `pdmxperf_QmSYDrDRgzTQpgwdGkGHvU8Fe8CykKToz8Yp7e2uzTqdXo_001`、
+  `pdmxperf_QmQMS66EnbPCt9mt9XJELBT1kfVGLhfXGhyF55sSGLggAH_002`。
+- 外部 Tkun→M2ST 校准：34/34 评分成功；人工复核 5 个分层 XML 对整体对应关系无异常
+  （`reports/CALIB_FULL.txt`、`reports/CALIB_MANUAL_REVIEW.md`）。
+
+结论：装配 dry-run 成功，泄漏隔离生效，确认的短截片段已隔离。**本报告不授权启动训练**；
+启动前仅需按二轮单变量方案决定是否启用 `--augment-acoustic`。

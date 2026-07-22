@@ -1,0 +1,3 @@
+{"utt_id":"pdmxperf_QmSYDrDRgzTQpgwdGkGHvU8Fe8CykKToz8Yp7e2uzTqdXo_000","reason":"audio shorter than MIDI-derived segment duration","expected_s":52.8,"actual_s":39.53,"source":"render_qc/segment_duration_audit","date":"2026-07-22"}
+{"utt_id":"pdmxperf_QmSYDrDRgzTQpgwdGkGHvU8Fe8CykKToz8Yp7e2uzTqdXo_001","reason":"audio shorter than MIDI-derived segment duration","expected_s":13.8,"actual_s":12.18,"source":"render_qc/segment_duration_audit","date":"2026-07-22"}
+{"utt_id":"pdmxperf_QmQMS66EnbPCt9mt9XJELBT1kfVGLhfXGhyF55sSGLggAH_002","reason":"audio shorter than MIDI-derived segment duration","expected_s":25.5,"actual_s":10.14,"source":"render_qc/segment_duration_audit","date":"2026-07-22"}

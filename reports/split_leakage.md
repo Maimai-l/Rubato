@@ -37,3 +37,10 @@
   备份: D:\vscode_projects\ee_download\work\nasap_labels.jsonl.bak
   复审计: 残余可隔离行=0(应为 0)
   生效: 下一次训练重启的装配(时机由 EXECUTOR.md 指令决定,勿自行重启)
+
+## nasap-train × maestro val/test 音频对账 @ 2026-07-22 20:26:12
+  maestro CSV: 场次=1276 其中 val/test=314
+  nasap 行按自身 split: quarantine_leak=1239 test=603 train=4717 val=539
+  nasap 行按所引录音的 maestro 切分: maestro-test=1043 maestro-train=5435 maestro-validation=620
+  【泄漏集】nasap-train 引用 maestro val/test 录音: 场次=0 涉及行=0
+  判定: 干净 —— 无跨方言泄漏,挂账关案

@@ -40,3 +40,13 @@
   音色分布(每曲恰 1 个确定性 源/预设 组合;组合种数=96): S1_salamander/p01_bone_dry=1298 S1_salamander/p02_close_mic=1269 S1_salamander/p07_concert_hall=1268 S1_salamander/p05_stairwell=967 S1_salamander/p09_church=962 S1_salamander/p04_medium_room=940 S1_salamander/p06_recital_hall=921 S1_salamander/p10_chapel=920 S1_salamander/p03_small_room=912 S1_salamander/p08_theatre=884
   · 与论文差距即在此:论文每曲 16 变体,我们每曲 1 个(C1/C3 的靶)
   maestro_audio 整曲库存: 1276 个 flac ≈ 199 小时(C2 密集切窗原料;论文用同池切出 804k AMT + 214k TAST)
+
+## render QC 审计 @ 2026-07-22 20:26:41
+  时长对账: 查=38252 无整曲=0 读不出=0 分布: <-1.5s=3 ±1.5s内=38249
+  疑似截断(音频短于 MIDI >1.5s): 3 曲 —— 最重 5 例:
+    - QmSYDrDRgzTQpgwdGkGHvU8Fe8CykKToz8Yp7e2uzTqdXo: MIDI=66.6s 音频=62.5s 差=-4.1s
+    - QmUpns6nFmxZPifMYujCnHqjZerZRfCzAoiAY6moV1ByHR: MIDI=64.0s 音频=60.9s 差=-3.1s
+    - QmQMS66EnbPCt9mt9XJELBT1kfVGLhfXGhyF55sSGLggAH: MIDI=327.3s 音频=325.4s 差=-1.9s
+  音色分布(每曲恰 1 个确定性 源/预设 组合;组合种数=96): S1_salamander/p01_bone_dry=1298 S1_salamander/p02_close_mic=1269 S1_salamander/p07_concert_hall=1268 S1_salamander/p05_stairwell=967 S1_salamander/p09_church=962 S1_salamander/p04_medium_room=940 S1_salamander/p06_recital_hall=921 S1_salamander/p10_chapel=920 S1_salamander/p03_small_room=912 S1_salamander/p08_theatre=884
+  · 与论文差距即在此:论文每曲 16 变体,我们每曲 1 个(C1/C3 的靶)
+  maestro_audio 整曲库存: 1276 个 flac ≈ 199 小时(C2 密集切窗原料;论文用同池切出 804k AMT + 214k TAST)

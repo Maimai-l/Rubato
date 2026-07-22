@@ -157,7 +157,8 @@ def resolve_audio(utt_id: str, kind: str, row: dict):
 
 def _pdmx_row_fn():
     """PDMX 行注入:manifest 的 split/work_key(标签行不带,P8 实测全体默认 train、val/test≈0);
-    命中 nASAP-test/Beyer 黑名单的工作【过滤出训练】(问题#14 的装配层强制,P4 曾以空名单跑过)。"""
+    命中 nASAP-test/Beyer 黑名单的工作【过滤出训练】(问题#14 的装配层强制,P4 曾以空名单跑过)；
+    以及审计确认的音频截断 utt(隔离清单在 configs/pdmx_duration_quarantine.jsonl)。"""
     import json as _json
     m = {}
     mani = WORK / "manifest_pieces.jsonl"
@@ -184,7 +185,26 @@ def _pdmx_row_fn():
     if not m:
         print("  ⚠ manifest 缺失,PDMX split/work_key 无法注入(全体将默认 train)")
 
+    duration_quarantine = set()
+    qpath = Path(__file__).resolve().parent.parent / "configs" / "pdmx_duration_quarantine.jsonl"
+    if qpath.exists():
+        with open(qpath, "r", encoding="utf-8") as f:
+            for n, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    uid = str(_json.loads(line)["utt_id"])
+                except Exception as e:
+                    print(f"  ⚠ 时长隔离清单第 {n} 行无效({type(e).__name__}),已忽略")
+                    continue
+                duration_quarantine.add(uid)
+        print(f"  [INFO] PDMX duration quarantine utt_ids: {len(duration_quarantine)}")
+
     def row_fn(row):
+        uid = str(row.get("utt_id") or "")
+        if uid in duration_quarantine:
+            return None                # 已证实音频被截断:计 filtered,不进入训练/评测
         info = m.get(row.get("piece_id"))
         if info:
             split, wk = info
@@ -271,7 +291,8 @@ def main():
     for kind, s in stats["per_source"].items():
         print(f"  {kind:8s} rows={s['rows']:>7} kept={s['kept']:>7} "
               f"no_audio={s['no_audio']:>7} no_dialect={s['no_dialect']:>6} "
-              f"bad_schema={s['bad_schema']:>5} dup={s['dup']:>5}")
+              f"bad_schema={s['bad_schema']:>5} dup={s['dup']:>5} "
+              f"filtered={s['filtered']:>5}")
     print(f"  TOTAL utts={stats['totals']['utts']} by_dialect={stats['totals']['by_dialect']}")
     print(f"        by_kind={stats['totals']['by_kind']} by_split={stats['totals']['by_split']}")
     if stats["dup_utt_ids"]:

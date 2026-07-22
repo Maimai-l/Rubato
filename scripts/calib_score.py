@@ -28,6 +28,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -104,6 +105,11 @@ def main(argv=None):
     ap.add_argument("--legato-script", default=None, help="compute_OMR-NED.py 路径(默认自动找)")
     ap.add_argument("--python", default=sys.executable, help="跑官方脚本用的 python")
     ap.add_argument("--timeout", type=int, default=1800, help="单对秒数上限")
+    ap.add_argument("--workers", type=int,
+                    default=min(2, os.cpu_count() or 1),
+                    help="并行评分数(默认最多 2，避免 MusicDiff 临时文件占满内存/磁盘；每对使用独立临时目录)")
+    ap.add_argument("--musicdiff-source", default=None,
+                    help="LEGATO 指定的 efficient-musicdiff 源码根目录；置入子进程 PYTHONPATH")
     ap.add_argument("--report", default=str(ROOT / "reports" / "CALIB_FULL.txt"))
     args = ap.parse_args(argv)
 
@@ -120,6 +126,19 @@ def main(argv=None):
     if not pairs:
         print(f"✗ 配对清单为空: {pp}")
         return 1
+    if args.workers < 1:
+        print("✗ --workers 必须 >= 1")
+        return 2
+    if args.musicdiff_source:
+        md_source = Path(args.musicdiff_source)
+        if not (md_source / "musicdiff").is_dir():
+            print(f"✗ --musicdiff-source 下没有 musicdiff/: {md_source}")
+            return 2
+        # LEGATO requirements 指向 guang-yng/efficient-musicdiff；不能误用 PyPI
+        # 上同名但实现不同的 musicdiff。run_one 的官方子进程继承此环境变量。
+        old_pythonpath = os.environ.get("PYTHONPATH", "")
+        os.environ["PYTHONPATH"] = str(md_source) + (os.pathsep + old_pythonpath if old_pythonpath else "")
+        print(f"MusicDiff 源码: {md_source}")
     est_dir = Path(args.est_dir)
 
     # ---- 自检:ref vs ref ≈ 0(调用形式与 U10 相同则必过)----
@@ -138,16 +157,36 @@ def main(argv=None):
     print(f"自检通过: ref vs ref = {s0}")
 
     # ---- 逐对打分 ----
-    rows, missing = [], []
+    # 每一对调用独立的 LEGATO 子进程，且 run_one 使用独立临时目录；可以安全并行。
+    # 结果按原 pairs 顺序重排，保证报告可复现、便于和枚举清单逐行对照。
+    rows_by_index, missing, jobs = {}, [], []
     for i, p in enumerate(pairs):
         est = est_dir / f"{p['perf_id']}.xml"
         if not est.exists() or est.stat().st_size == 0:
             missing.append(p["perf_id"])
             continue
-        sc, tail = run_one(args.python, script, str(est), p["ref_xml"], args.timeout)
-        rows.append({"perf_id": p["perf_id"], "score": sc, "note": "" if sc is not None else tail})
-        print(f"  [{i+1}/{len(pairs)}] {p['perf_id']}: "
-              f"{sc if sc is not None else '✗ ' + tail}")
+
+        jobs.append((i, p, est))
+
+    def _score_one(i, p, est):
+        try:
+            sc, tail = run_one(args.python, script, str(est), p["ref_xml"], args.timeout)
+            return i, {"perf_id": p["perf_id"], "score": sc,
+                       "note": "" if sc is not None else tail}
+        except Exception as exc:  # 单对意外错误也应写入报告，不能中断其余配对
+            return i, {"perf_id": p["perf_id"], "score": None,
+                       "note": f"意外异常: {type(exc).__name__}: {exc}"}
+
+    n_workers = min(args.workers, len(jobs)) if jobs else 1
+    print(f"并行评分: {len(jobs)} 对，workers={n_workers}")
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futures = [pool.submit(_score_one, i, p, est) for i, p, est in jobs]
+        for f in as_completed(futures):
+            i, row = f.result()
+            rows_by_index[i] = row
+            print(f"  [{i+1}/{len(pairs)}] {row['perf_id']}: "
+                  f"{row['score'] if row['score'] is not None else '✗ ' + row['note']}")
+    rows = [rows_by_index[i] for i, _p, _est in jobs]
 
     ok = [r for r in rows if r["score"] is not None]
     raw = [r["score"] for r in ok]
@@ -161,6 +200,8 @@ def main(argv=None):
     lines.append("# CALIB_FULL —— Tkun→M2ST 全量校准比分(本文件由 scripts/calib_score.py 代码生成,重跑覆盖)")
     lines.append(f"生成时间: {_dt.datetime.now().isoformat(timespec='seconds')}")
     lines.append(f"官方脚本: {script}")
+    if args.musicdiff_source:
+        lines.append(f"MusicDiff 源码: {Path(args.musicdiff_source)}")
     lines.append(f"自检 ref-vs-ref: {s0}(通过)")
     lines.append(f"配对总数 {len(pairs)} | est-xml 缺失 {len(missing)} | 打分成功 {len(ok)} | 打分失败 {len(rows)-len(ok)}")
     if missing:
@@ -168,7 +209,9 @@ def main(argv=None):
     lines.append("")
     lines.append("perf_id\tOMR-NED\t备注")
     for r in rows:
-        lines.append(f"{r['perf_id']}\t{r['score'] if r['score'] is not None else 'FAIL'}\t{r['note']}")
+        # 成功项没有备注时写 '-'，避免生成带尾部 Tab 的报告行。
+        note = r["note"] or "-"
+        lines.append(f"{r['perf_id']}\t{r['score'] if r['score'] is not None else 'FAIL'}\t{note}")
     lines.append("")
     if vals:
         mean = statistics.fmean(vals)
