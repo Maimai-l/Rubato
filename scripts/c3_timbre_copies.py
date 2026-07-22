@@ -126,6 +126,8 @@ def main() -> int:
     ap.add_argument("--audio-out", default=str(WORK / "pdmx_audio_s2"),
                     help="C3 专属输出目录(D51:与训练读取目录隔离,根治 Windows 文件锁争抢)")
     ap.add_argument("--staging-out", default=str(WORK / "pdmx_a2s_labels_s2.staging.jsonl"))
+    ap.add_argument("--stage-only", action="store_true",
+                    help="不渲染/切段，只按已有 C3 段音频重建安全的 staging 标签")
     ap.add_argument("--min-sec", type=float, default=2.0)
     ap.add_argument("--max-sec", type=float, default=41.0)
     ap.add_argument("--workers", type=int, default=4, help="渲染并行度(内存紧张降 2)")
@@ -167,46 +169,56 @@ def main() -> int:
     st: Counter = Counter(picked=len(picked))
     print(f"C3: 选曲 {len(picked)}(确定性名单,断点续跑同名单)")
 
-    # 阶段 1:渲染(断点续跑)
-    tasks = []
-    for pid in picked:
-        mp = midi_of[pid]
-        mp = mp if Path(mp).is_absolute() else str(WORK / mp)
-        try:
-            _, src2, preset2 = choose_second(pid, scfg, pcfg)
-        except Exception:
-            st["choose_fail"] += 1
-            continue
-        tasks.append((mp, pid, str(out_dir), src2, preset2))
+    if not args.stage_only:
+        # 阶段 1:渲染(断点续跑)
+        tasks = []
+        for pid in picked:
+            mp = midi_of[pid]
+            mp = mp if Path(mp).is_absolute() else str(WORK / mp)
+            try:
+                _, src2, preset2 = choose_second(pid, scfg, pcfg)
+            except Exception:
+                st["choose_fail"] += 1
+                continue
+            tasks.append((mp, pid, str(out_dir), src2, preset2))
 
-    def _on_render(_t, res):
-        st["render_ok" if res.get("ok") else "render_fail"] += 1
-        if res.get("skipped"):
-            st["render_skipped"] += 1
-        if not res.get("ok"):
-            st.setdefault  # noqa —— 失败样例最多记 5 条
-            if st["render_fail"] <= 5:
-                print(f"  渲染失败样例: {res.get('error')}", flush=True)
+        def _on_render(_t, res):
+            st["render_ok" if res.get("ok") else "render_fail"] += 1
+            if res.get("skipped"):
+                st["render_skipped"] += 1
+            if not res.get("ok"):
+                st.setdefault  # noqa —— 失败样例最多记 5 条
+                if st["render_fail"] <= 5:
+                    print(f"  渲染失败样例: {res.get('error')}", flush=True)
 
-    auto_map(tasks, _render_s2_task, workers=args.workers, on_result=_on_render, log_every=100)
+        auto_map(tasks, _render_s2_task, workers=args.workers, on_result=_on_render, log_every=100)
 
-    # 阶段 2:切段(复用 s4 切割器:pid 传 _s2 名,行传 _s2 后缀 → 找 _s2 整曲、写 _s2 段)
-    n_sliced = 0
-    for pid in picked:
-        rows2 = transform_rows(pieces_rows[pid])
-        mp = midi_of[pid]
-        mp = mp if Path(mp).is_absolute() else str(WORK / mp)
-        r = slice_piece_task((f"{pid}_s2", rows2, mp, str(out_dir), str(out_dir),
-                              args.min_sec, args.max_sec))
-        for k, v in r.items():
-            st[f"slice_{k}"] += v
-        n_sliced += r.get("sliced", 0)
+        # 阶段 2:切段(复用 s4 切割器:pid 传 _s2 名,行传 _s2 后缀 → 找 _s2 整曲、写 _s2 段)
+        for pid in picked:
+            rows2 = transform_rows(pieces_rows[pid])
+            mp = midi_of[pid]
+            mp = mp if Path(mp).is_absolute() else str(WORK / mp)
+            r = slice_piece_task((f"{pid}_s2", rows2, mp, str(out_dir), str(out_dir),
+                                  args.min_sec, args.max_sec))
+            for k, v in r.items():
+                st[f"slice_{k}"] += v
+    else:
+        st["stage_only"] = 1
 
     # 阶段 3:标签落 STAGING(改名=武装,严禁自行执行 —— 见 EXECUTOR.md)
     with open(args.staging_out, "w", encoding="utf-8") as fo:
         n_rows = 0
+        seen_utt_ids = set()
         for pid in picked:
             for r2 in transform_rows(pieces_rows[pid]):
+                uid = r2["utt_id"]
+                if uid in seen_utt_ids:
+                    st["staging_dup"] += 1
+                    continue
+                seen_utt_ids.add(uid)
+                if not any((out_dir / f"{uid}{ext}").is_file() for ext in (".opus", ".flac")):
+                    st["staging_no_audio"] += 1
+                    continue
                 fo.write(json.dumps(r2, ensure_ascii=False) + "\n")
                 n_rows += 1
     st["staging_rows"] = n_rows
@@ -214,11 +226,12 @@ def main() -> int:
     lines = [f"\n## C3 渲染 @ {time.strftime('%Y-%m-%d %H:%M:%S')} (n={args.n})",
              "  " + " ".join(f"{k}={v}" for k, v in sorted(st.items()))]
     out = ROOT / "reports" / "C3_RENDER.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "a", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
+    if not args.stage_only:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
     print("\n".join(lines))
-    print(f"\n已追加 {out};标签在 STAGING({args.staging_out}),改名武装只按 EXECUTOR.md 指令。")
+    print(f"\n标签在 STAGING({args.staging_out}),改名武装只按 EXECUTOR.md 指令。")
     return 0
 
 
