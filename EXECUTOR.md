@@ -50,7 +50,8 @@ python scripts/c3_timbre_copies.py --n 34503
 
 任务七 · 【追加 9,D54】开源第二名校准冒烟(GPU 空闲期插队,判据见 REF_SYSTEM_CALIB.md):
 ```bat
-pip install transkun
+:: Transkun 本地已有(用户确认)—— 直接用现有安装,勿重装;下面 pip 行仅在缺失时执行
+:: pip install transkun
 git clone https://github.com/TimFelixBeyer/MIDI2ScoreTransformer D:\vscode_projects\ee_download\m2st
 :: 从该仓库 GitHub Releases 页下载 MIDI2ScoreTF.ckpt,放 D:\vscode_projects\ee_download\m2st\
 :: 冒烟:任选我们 nasap test 集的 3 首曲的【整曲真实录音 flac】:
