@@ -368,10 +368,37 @@ def csv_to_tmap(csv_path: str, part):
     return tmap, diag
 
 
-def render_midi(midi_path: str, utt_id: str, sources_cfg, presets_cfg, out_path: str):
-    """VN 演奏 MIDI → 44.1k wav → 预设链 → 16k opus 落盘(复用 S4 渲染链)。"""
+def _choose_second_s5(pid: str, sources_cfg, presets_cfg):
+    """S5 线第二音色(pdmxperf ×2,ROUND2_DATA):其余源确定性加权选,预设独立重选,
+    绝不返回原源。与 c3_timbre_copies.choose_second 同构,但原源键 = 【裸 pid】——
+    这是 S5 线自己的哈希键(见 render_midi 调用处/音源亲和排序),C3 的 S4 线才是
+    f"pdmx_{pid}";盐 s5s2: 与 C3 的 c3: 独立,两线抽签互不干扰。"""
+    from rubato.render.core import _pick, _unit
+    orig_src, _ = assign_source_and_preset(pid, sources_cfg, presets_cfg)
+    weights = {sid: s["ratio"] for sid, s in sources_cfg["sources"].items()
+               if sid != orig_src}
+    if not weights:
+        raise ValueError("只有一个音源,无从选第二音色")
+    seed = presets_cfg.get("seed", 0)
+    src2 = _pick(weights, _unit(seed, f"s5s2:{pid}", "src"))
+    preset2 = _pick(presets_cfg["weights"], _unit(seed, f"s5s2:{pid}", "preset"))
+    return orig_src, src2, preset2
+
+
+def _s2_filter(pieces: list[dict], base_ids: set[str]) -> list[dict]:
+    """二音色入选圈:①一轮 s5 已产出标签的曲(副本语义 = 同内容 ×2 覆盖,失败曲不陪跑);
+    ②train(缺 split 按装配器同约定视为 train;val/test 冻结,与 C3 pick_subset 同红线)。"""
+    return [p for p in pieces
+            if p.get("piece_id") in base_ids
+            and str(p.get("split") or "train") == "train"]
+
+
+def render_midi(midi_path: str, utt_id: str, sources_cfg, presets_cfg, out_path: str,
+                pick: tuple[str, str] | None = None):
+    """VN 演奏 MIDI → 44.1k wav → 预设链 → 16k opus 落盘(复用 S4 渲染链)。
+    pick=(src_id, preset_id) 时跳过哈希分配,用指定音色(二音色模式)。"""
     import tempfile
-    src_id, preset_id = assign_source_and_preset(utt_id, sources_cfg, presets_cfg)
+    src_id, preset_id = pick if pick else assign_source_and_preset(utt_id, sources_cfg, presets_cfg)
     source = sources_cfg["sources"][src_id]
     preset = presets_cfg["presets"][preset_id] if "presets" in presets_cfg else {"id": preset_id}
     with tempfile.TemporaryDirectory() as td:
@@ -429,8 +456,9 @@ def _piece_meta(piece, i):
 _W: dict = {}
 
 
-def _cpu_init(sources_cfg, presets_cfg, out_audio_dir):
-    _W.update(sources=sources_cfg, presets=presets_cfg, out=Path(out_audio_dir))
+def _cpu_init(sources_cfg, presets_cfg, out_audio_dir, second_timbre=False):
+    _W.update(sources=sources_cfg, presets=presets_cfg, out=Path(out_audio_dir),
+              s2=second_timbre)
 
 
 def cpu_stage(mid: dict) -> dict:
@@ -469,7 +497,12 @@ def cpu_stage(mid: dict) -> dict:
         audio = None; sr = 0
         if perf_mid:
             try:
-                render_midi(perf_mid, pid, _W["sources"], _W["presets"], whole_audio)
+                pick = None
+                if _W.get("s2"):       # 二音色模式:换到第二源+独立预设(确定性,绝不撞原源)
+                    _, src2, preset2 = _choose_second_s5(pid, _W["sources"], _W["presets"])
+                    pick = (src2, preset2)
+                render_midi(perf_mid, pid, _W["sources"], _W["presets"], whole_audio,
+                            pick=pick)
             except Exception as e:
                 res["fail"] = f"render:{type(e).__name__}"
                 return res
@@ -496,9 +529,10 @@ def cpu_stage(mid: dict) -> dict:
         # 段参数【用户决定 2026-07-11,覆盖 SPEC R-S8.1 的 4–32】:小节数不设限,时间是唯一上限 ——
         # 段尽量长,≤40s 内装下尽可能多的完整小节;质量下限由 ≥2s 时长守卫把守(不是小节数)。
         # (nASAP 仍按论文明确的 4–32 重叠窗,不受此决定影响。)
+        _sfx = "_s2" if _W.get("s2") else ""   # 二音色行:utt_id 尾缀 _s2(C3 同约定,零解析器改动)
         for si, (sub_ir, (a, b)) in enumerate(
                 segment_score(ir, min_measures=1, max_measures=None, max_sec=40.0, tmap=tmap)):
-            utt_id = f"pdmxperf_{pid}_{si:03d}"
+            utt_id = f"pdmxperf_{pid}_{si:03d}{_sfx}"
             score_off = bounds[a] if a < len(bounds) else bounds[-1]
             t_lo = float(tmap(bounds[a])); t_hi = float(tmap(bounds[min(b, len(bounds) - 1)]))
             if t_hi - t_lo < min_sec:      # 真实时长过短的段(极快小曲)是退化样本,直接不产出
@@ -528,7 +562,8 @@ def cpu_stage(mid: dict) -> dict:
 
 
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
-        limit=None, offset=0, n_cpu=0, vn_checkpoint=None):
+        limit=None, offset=0, n_cpu=0, vn_checkpoint=None,
+        second_timbre=False, base_labels=None):
     """
     GPU/CPU 流水线:主进程顺序跑 VN 推理(GPU,~0.5s),非阻塞把渲染交给 CPU worker 池(~5s),
     GPU 不再干等 CPU —— CPU 渲染第 N 曲时,GPU 已在推理 N+1...(见 rubato.ops.pipeline_map)。
@@ -543,6 +578,17 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     if limit:
         gen = itertools.islice(gen, limit)
     pieces = list(gen)
+    if second_timbre:
+        # 入选圈 = 一轮已出标签 ∩ train(评测集冻结);VN 重推理产【新演绎+新音色】,
+        # 新行自带自己的 tmap 标签 —— 不复用旧段边界,天然无标签-音频错位。
+        base_ids = _labeled_piece_ids(base_labels) if base_labels else set()
+        if not base_ids:
+            print(f"✗ 二音色模式:基线标签为空/不存在({base_labels})—— 一轮 s5 标签是入选圈,必须先有")
+            return {"pieces": 0, "vn_ok": 0, "vn_fail": 0, "utts": 0, "tast": 0, "failures": []}
+        before = len(pieces)
+        pieces = _s2_filter(pieces, base_ids)
+        print(f"二音色模式:基线已标注 {len(base_ids)} 曲;入选 {len(pieces)}/{before}"
+              f"(仅一轮成功曲 × train)")
     out_audio_dir = Path(out_audio_dir); out_audio_dir.mkdir(parents=True, exist_ok=True)
     # 【续跑正确性】按"真有标签"判断做没做完,而不是 .done 标记。统计有多少 .done 是无标签空壳(旧 CLI
     # 遗留),这些会被重跑补回来 —— 明确打印出来,不让任何曲被静默跳过丢出训练集。
@@ -657,11 +703,17 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         p["_i"] = idx
     # 【音源亲和】按分配到的音源排序:同音源的曲连续渲染 → 页缓存热(大 FLAC 不必每曲重读)、
     # 同时段任务权重同质(准入并发稳定,不再大/小音源混排切碎预算)。hash 分配不变;续跑按标签,不受排序影响。
+    def _eff_source(pid: str) -> str:
+        """本次渲染实际会加载的音源:二音色模式下是第二源 —— 排序(页缓存)和
+        内存准入(权重)都必须按它算,按原源算会放错并发导致 OOM。"""
+        if second_timbre:
+            return _choose_second_s5(pid, sources_cfg, presets_cfg)[1]
+        return assign_source_and_preset(pid, sources_cfg, presets_cfg)[0]
+
     def _piece_source(p):
         try:
             pid, _, _ = _piece_meta(p, p.get("_i", 0))
-            sid, _ = assign_source_and_preset(pid, sources_cfg, presets_cfg)
-            return sid
+            return _eff_source(pid)
         except Exception:
             return "~"
     pieces.sort(key=lambda p: (_piece_source(p), p.get("piece_id", "")))
@@ -685,8 +737,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 
     def weight_fn(mid):
         try:
-            sid, _ = assign_source_and_preset(mid["pid"], sources_cfg, presets_cfg)
-            sf_gb = src_gb.get(sid, 2.0)
+            sf_gb = src_gb.get(_eff_source(mid["pid"]), 2.0)   # 二音色按第二源计权(实际加载的那个)
         except Exception:
             sf_gb = 2.0                       # 取不到音源 → 保守
         return sf_gb + overhead               # 音源 + 每次渲染的音频缓冲开销
@@ -701,7 +752,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
                          done_fn=done_fn, key_fn=lambda p: p.get("piece_id"),
                          weight_fn=weight_fn, budget_gb=budget,
                          initializer=_cpu_init, max_tasks_per_child=recycle or None,
-                         initargs=(sources_cfg, presets_cfg, str(out_audio_dir)))
+                         initargs=(sources_cfg, presets_cfg, str(out_audio_dir), second_timbre))
     if vn is not None:
         rep["vn_recycles"] = vn.recycles         # 子进程被回收几次(RSS 超 cap 的次数)
         vn.close()
@@ -718,7 +769,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     return rep
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default=str(ROOT / "work" / "manifest_pieces.jsonl"))
     ap.add_argument("--offset", type=int, default=0)
@@ -732,14 +783,35 @@ def main():
     ap.add_argument("--vn-checkpoint", default="",
                     help="通常【不用传】——脚本自动定位 virtuoso 标准权重(GUIDE §1)。"
                          "仅当你的 .pt 在非标准位置才指定。")
-    args = ap.parse_args()
+    ap.add_argument("--second-timbre", action="store_true",
+                    help="pdmxperf 二音色副本(ROUND2_DATA):仅一轮成功曲×train,VN 重推理,"
+                         "第二源渲染,utt_id 尾缀 _s2,标签写 .staging 名(改名=武装,红线同 C3)")
+    ap.add_argument("--base-labels", default=str(ROOT / "work" / "pdmx_perf_labels.jsonl"),
+                    help="二音色模式的入选圈来源(一轮 s5 标签)")
+    args = ap.parse_args(argv)
+    if args.second_timbre:
+        # 未显式覆盖的输出全部切到 s2 专属默认:标签 staging 名、独立音频目录(D51 锁争抢教训)、
+        # 语料不写(分词器已冻结,重复文本无意义)。
+        if args.out_labels == ap.get_default("out_labels"):
+            args.out_labels = str(ROOT / "work" / "pdmx_perf_labels_s2.staging.jsonl")
+        if args.out_audio_dir == ap.get_default("out_audio_dir"):
+            args.out_audio_dir = str(ROOT / "work" / "pdmx_audio_s2")
+        if args.out_corpus == ap.get_default("out_corpus"):
+            args.out_corpus = ""
+        if not args.out_labels.endswith(".staging.jsonl"):
+            print("✗ 二音色模式标签必须写 *.staging.jsonl(改名=进池武装,只认 EXECUTOR.md 口令)")
+            return 2
+        print(f"二音色输出:labels={args.out_labels} audio={args.out_audio_dir} corpus=(不写)")
     sources_cfg = yaml.safe_load(open(args.sources, encoding="utf-8"))
     presets_cfg = yaml.safe_load(open(args.presets, encoding="utf-8"))
     run(args.manifest, sources_cfg, presets_cfg, args.out_labels, args.out_corpus,
         args.out_audio_dir, offset=args.offset,
         limit=args.limit or None, n_cpu=args.workers,
-        vn_checkpoint=(args.vn_checkpoint or None))
+        vn_checkpoint=(args.vn_checkpoint or None),
+        second_timbre=args.second_timbre,
+        base_labels=(args.base_labels if args.second_timbre else None))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

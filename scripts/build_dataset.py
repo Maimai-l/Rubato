@@ -47,6 +47,11 @@ for _of in sorted(WORK.glob("maestro_amt_windows_o*.jsonl")):
 _S2 = WORK / "pdmx_a2s_labels_s2.jsonl"
 if _S2.exists():
     SOURCES.append({"path": str(_S2), "kind": "pdmx", "domain": "synth"})
+# pdmxperf 二音色副本(ROUND2_DATA,s5_vn_render --second-timbre):同 staging/武装纪律。
+# 行内带 audio_path(pdmx_audio_s2 下),utt_id 尾缀 _s2,仅一轮成功曲 × train。
+_PERF_S2 = WORK / "pdmx_perf_labels_s2.jsonl"
+if _PERF_S2.exists():
+    SOURCES.append({"path": str(_PERF_S2), "kind": "pdmx", "domain": "synth"})
 
 # ---------------------------------------------------------------- 音频时长缓存
 _DUR_CACHE: dict[str, float] = {}

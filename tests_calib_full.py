@@ -132,9 +132,28 @@ def _score_world(td: Path, stub_body: str):
     return work, td / "CALIB_FULL.txt", legato
 
 
-_STUB_100 = """import sys
-a, b = open(sys.argv[1],'rb').read(), open(sys.argv[2],'rb').read()
-print('OMR-NED:', 0.0 if a == b else 68.5)
+# 仿真 LEGATO 官方 compute_OMR-NED.py 的真实接口(执行端适配后的口径,D59 追认):
+# --prediction_file/--ground_truth 各是一个 JSON 列表(XML 文本内容),脚本把结果写到
+# <prediction_file 同目录>/ref_preds/<prediction_file 词干>/output/output.csv,
+# 列名精确为 "OMR-NED (OMR-ED / total numsyms)",汇总行首格 "Total:"。
+_STUB_100 = """import argparse, csv, json
+from pathlib import Path
+ap = argparse.ArgumentParser()
+ap.add_argument("--prediction_file", required=True)
+ap.add_argument("--ground_truth", required=True)
+ap.add_argument("--prediction_type", required=True)
+a = ap.parse_args()
+pred = json.loads(Path(a.prediction_file).read_text(encoding="utf-8"))
+ref = json.loads(Path(a.ground_truth).read_text(encoding="utf-8"))
+score = 0.0 if pred == ref else 68.5
+outdir = Path(a.prediction_file).parent / "ref_preds" / Path(a.prediction_file).stem / "output"
+outdir.mkdir(parents=True)
+with open(outdir / "output.csv", "w", newline="", encoding="utf-8") as fh:
+    w = csv.writer(fh)
+    w.writerow(["name", "OMR-NED (OMR-ED / total numsyms)"])
+    w.writerow(["item0", str(score)])
+    w.writerow(["Total:", str(score)])
+print("done")
 """
 _STUB_01 = _STUB_100.replace("68.5", "0.685")
 _STUB_BAD = "import sys; sys.exit(3)\n"

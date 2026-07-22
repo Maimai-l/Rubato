@@ -49,7 +49,7 @@ check("slice_under_2s_rejected",
 s5.part_to_ir = lambda part: FAKE_IR
 s5.vn_infer = lambda xml, comp, mid: mid + "_midi_notes.csv"      # 假装 VN 成功产 CSV
 s5.csv_to_tmap = lambda csv, part: (TimeMap([(F(0),0.0),(F(4),16.0)]), {})
-s5.render_midi = lambda mid, utt, sc, pr, out: open(out, "w").close() or out   # 假渲染:touch 文件
+s5.render_midi = lambda mid, utt, sc, pr, out, pick=None: open(out, "w").close() or out   # 假渲染:touch 文件(pick=二音色缝隙)
 s5._read_audio = lambda path: ([0.0] * (17 * 16000), 16000)                    # 假整曲17s(≥tmap末端,过截断校验)
 s5._slice_audio = lambda audio, sr, t0, t1, out, min_sec=2.0: (
     open(str(out).replace(".opus",".wav"),"w").close() or str(out).replace(".opus",".wav"))
