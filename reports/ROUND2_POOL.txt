@@ -1,0 +1,6 @@
+=== 装配统计(每一步丢弃都计数,不静默)===
+  pdmx     rows= 171265 kept= 119106 no_audio=  37920 no_dialect=     0 bad_schema=    0 dup=14239
+  nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+  maestro  rows= 258658 kept= 258658 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+  TOTAL utts=384862 by_dialect={'A2S': 126204, 'A2S_lite': 126127, 'TAST': 29304, 'AMT': 258658}
+  train=344847 nasap_val=1142 maestro_val=28264
