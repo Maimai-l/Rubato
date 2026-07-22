@@ -234,6 +234,9 @@ def main():
     ap.add_argument("--smoke-steps", type=int, default=800,
                     help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
                          "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
+    ap.add_argument("--augment-acoustic", action="store_true",
+                    help="C1a(D58):标签安全声学增广(增益/倾斜/噪声,无混响)。二轮启动配置开;"
+                         "生效自证看回显 aug_acoustic= 字段")
     ap.add_argument("--prompt-abtest", action="store_true",
                     help="D44 判定实验:同 ckpt/同样本/同解码,仅 prompt 变 —— G0 无域(现状)/"
                          "G1 real(与训练一致)/G2 synth(反向对照)。不训练,结果进 autolog。"
@@ -545,7 +548,8 @@ def main():
         dialect_mix = mix_with_amt(args.amt_mix)
         print("  混比(O4 调整): " + " ".join(f"{d}={v:.4f}" for d, v in sorted(dialect_mix.items())))
     train_ds = RubatoDataset(train_utts, labels, tok, train=True, max_target_len=max_tgt,
-                             augment=not args.smoke, dialect_mix=dialect_mix)
+                             augment=not args.smoke, dialect_mix=dialect_mix,
+                             acoustic_aug=args.augment_acoustic)
     lf = train_ds.len_filter_report
     print(f"  超长过滤: 保留 {lf.get('kept_pairs')} 对,丢弃 {lf.get('dropped_by_dialect') or 0}")
     _dropped = sum((lf.get("dropped_by_dialect") or {}).values())

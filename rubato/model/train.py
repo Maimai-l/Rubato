@@ -798,7 +798,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
           f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)} "
           + ("mix=D2纸面(.35/.15/.20/.30)" if not cfg.get("dialect_mix") else
              "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items())))
-          + f" prefetch={'proc:' + str(int(cfg.get('prefetch_batches', 0))) if int(cfg.get('prefetch_batches', 0)) > 0 else '关'}",
+          + f" prefetch={'proc:' + str(int(cfg.get('prefetch_batches', 0))) if int(cfg.get('prefetch_batches', 0)) > 0 else '关'}"
+          + f" aug_acoustic={'开' if getattr(getattr(datamodule, 'train_ds', None), 'acoustic_aug', False) else '关'}",
           flush=True)
     # 指令随日志走(执行端只看日志不看文档的现实约束):贴回要求印在产物里
     print("【执行端贴回】① 上面的配置回显行(应含 prefetch=关) ② 续训:恢复… 行 "

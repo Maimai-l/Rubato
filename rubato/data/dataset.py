@@ -142,6 +142,34 @@ def online_room_augment(audio, utt_id: str, epoch: int, presets_cfg: dict,
                         preset_id=chosen, irs_dir=irs_dir)
 
 
+def acoustic_augment(audio, utt_id: str, epoch: int, seed: int = 20260706):
+    """
+    C1a 标签安全在线增广(D58,二轮默认开):增益 ±6dB + 一阶谱倾斜 + 加性噪声(SNR 25-45dB)。
+    三者都不动音高/时间戳标签,湿声上可安全叠加;【不含混响】——房间维度被"烘焙预设"
+    卡死(C1b,D45 半成品考古),在此加混响 = 双重房间,禁止。
+    确定性:(utt_id, epoch) 哈希 → 同 epoch 同样本恒同,跨 epoch 变(与 tiling 同纪律)。
+    """
+    import hashlib
+    import numpy as np
+    h = hashlib.sha256(f"{seed}:{epoch}:{utt_id}:c1a".encode()).digest()
+    r = [int.from_bytes(h[i:i + 4], "big") / 2 ** 32 for i in (0, 4, 8)]
+    x = np.asarray(audio, dtype=np.float32).copy()
+    if x.size < 2:
+        return x
+    x *= np.float32(10 ** ((r[0] * 12.0 - 6.0) / 20.0))            # 增益 ±6dB
+    a = np.float32(r[1] * 0.6 - 0.3)                                # 倾斜 ∈[-0.3,0.3]
+    x = x - a * np.concatenate((np.zeros(1, dtype=np.float32), x[:-1]))
+    rms = float(np.sqrt(np.mean(np.square(x))))
+    if rms > 1e-5:                                                  # 静音段不加噪
+        snr_db = 25.0 + 20.0 * r[2]
+        rng = np.random.default_rng(int.from_bytes(h[16:24], "big"))
+        x = x + rng.standard_normal(x.size).astype(np.float32) * np.float32(rms / 10 ** (snr_db / 20.0))
+    peak = float(np.max(np.abs(x)))
+    if peak > 0.99:                                                 # 防削顶
+        x *= np.float32(0.99 / peak)
+    return x
+
+
 def load_audio(path: str, sr_target: int = 16000, tile_pad_s: float = 0.0,
                win: list | tuple | None = None):
     """
@@ -233,9 +261,11 @@ class RubatoDataset:
                  alpha: float = 0.25, train: bool = True,
                  dialect_mix: dict | None = None,
                  max_target_len: int | None = None,
-                 augment: bool | None = None):
+                 augment: bool | None = None,
+                 acoustic_aug: bool = False):
         self.utts = {u["utt_id"]: u for u in utts}
         self.labels = labels
+        self.acoustic_aug = bool(acoustic_aug)   # C1a(D58):声学增广旗,与 alpha/tiling 增广独立
         self.tok = tokenizer
         self.seed = seed
         self.sr = sr
@@ -341,6 +371,9 @@ class RubatoDataset:
                                  f"{len(enc['input_ids']) + 1} > {self.max_target_len}")
         enc["audio"] = load_audio(u["audio_path"], self.sr, tile_pad_s=t0_s,
                                   win=u.get("win"))  # LOCAL;win=窗内 utt 只读整曲的 [t0,t1]
+        if self.train and self.acoustic_aug:
+            # C1a(D58):标签安全声学增广,旗子门控(--augment-acoustic),二轮启动配置开
+            enc["audio"] = acoustic_augment(enc["audio"], uid, self.epoch, self.seed)
         enc["utt_id"] = uid
         enc["dialect"] = dialect
         return enc
