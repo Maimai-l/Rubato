@@ -37,11 +37,11 @@ SOURCES = [
     # 1,276 条、AMT 全灭);切窗版 23,657 条 12-25s 窗,行带 win=[t0,t1] + split(来自 MAESTRO CSV)。
     {"path": str(WORK / "maestro_amt_windows.jsonl"), "kind": "maestro", "domain": "real"},
 ]
-# C2 偏移窗(EXPERIMENT_ACOUSTIC):同录音错开的第二组 AMT 窗,存在才挂载(生成前不碍事)。
-# 只含 train 行(生成器强制),utt_id 带 _o10 后缀不撞名;评测池(val/test)因此不变。
-_O10 = WORK / "maestro_amt_windows_o10.jsonl"
-if _O10.exists():
-    SOURCES.append({"path": str(_O10), "kind": "maestro", "domain": "real"})
+# 偏移窗(C2 → 二轮数据方案 D53):同录音错开的多组 AMT 窗,按 glob 全量挂载
+# (o5/o10/o15…,存在即收编)。只含 train 行(生成器强制),utt_id 带 _oN 后缀不撞名;
+# 评测池(val/test)因此不变。
+for _of in sorted(WORK.glob("maestro_amt_windows_o*.jsonl")):
+    SOURCES.append({"path": str(_of), "kind": "maestro", "domain": "real"})
 # C3 音色副本(D50):生成器只写 .staging 名;把 staging 改成本名 = 进池武装,
 # 只按 EXECUTOR.md 的书面指令执行(单变量纪律)。行全 train、utt_id 带 _s2。
 _S2 = WORK / "pdmx_a2s_labels_s2.jsonl"

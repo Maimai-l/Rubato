@@ -4,12 +4,53 @@
 
 - **项目终点**:复现 Rubato 论文 —— 真实钢琴录音 → 可用乐谱(终评对标 OMR-NED 64.3 /
   AMT F1 97.0,在官方 test 集上)。
-- **当前阶段目标**:让模型学会"从真实音频读音高"(全项目最顽固的病灶,仪表 = maestro
-  探针的 Δpitch)。手段按序:C2 偏移窗已进池(**判决 71600 步**:Δpitch 连续 3 评 ≥+0.03
-  为成,败则回退);C3 音色副本你已备好料(staging,等武装口令);泄漏修复你已执行
-  (等重启生效)。
-- **你的角色**:训练不间断、逢 eval push autolog(判决全靠它)、按本文件章节执行/贴回;
-  任何数字只认文件不认记忆,任何重启/改名只认本文件口令。
+- **当前阶段目标(D53,用户拍板)**:**第一轮训练已终止,进入数据建设期** —— 把训练池
+  从论文的 ~1/8 建到 ~1/4,然后启动第二轮训练。你手里的活全是备料:渲副本、生成偏移窗、
+  对账。第二轮开训口令待规划端工具落地后下达(约 24-48h)。
+- **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
+  任何数字只认文件不认记忆。
+
+## 当前阶段追加 8(2026-07-22,D53:停训转数据建设;此节为唯一现行任务清单,按序执行)
+
+任务一 · 停训 + 归档一轮基线(权重是对照组,不许删):
+```bat
+powershell -Command "Get-CimInstance Win32_Process | ? {$_.CommandLine -match 'build_dataset'} | % {Stop-Process -Id $_.ProcessId -Force}"
+mkdir D:\vscode_projects\ee_download\outputs\round1_baseline
+copy D:\vscode_projects\ee_download\Rubato\outputs\ckpt\last.pt D:\vscode_projects\ee_download\outputs\round1_baseline\
+copy D:\vscode_projects\ee_download\Rubato\outputs\ckpt\best.pt D:\vscode_projects\ee_download\outputs\round1_baseline\
+```
+
+任务二 · 武装 C3(M 档)副本(本口令即红线解除,仅此一次):
+```bat
+git pull --rebase --autostash
+ren D:\vscode_projects\ee_download\work\pdmx_a2s_labels_s2.staging.jsonl pdmx_a2s_labels_s2.jsonl
+```
+
+任务三 · 生成第三组 AMT 偏移窗(分钟级):
+```bat
+python scripts/s6_amt_windows.py --offset 5
+```
+
+任务四 · 装配对账(不训练;这是二轮池的第一次点名):
+```bat
+python scripts/build_dataset.py --dry-run
+```
+把装配统计整块写进新文件 reports/ROUND2_POOL.txt 并 push。预期:pdmx kept ≈153,600、
+maestro rows ≈373k(o10+o5)、nasap train 比上轮少 1,239(隔离生效)。
+
+任务五 · C3 扩至全池(后台渲,~4-6 天,断点续跑,与一切并行):
+```bat
+set S4_RESERVE_GB=10
+python scripts/c3_timbre_copies.py --n 34503
+```
+每日 push reports/C3_RENDER.md。**注意:它完成时会重写 staging 文件——完成后把新 staging
+再次改名覆盖正式名(此项授权随本节生效,是任务二的延续),然后再跑一次任务四对账 push。**
+
+任务六 · 红线:除上述任务外不启动任何训练;开训口令在本文件下一节。
+
+贴回清单:ROUND2_POOL.txt、C3_RENDER.md(每日)、o5 生成器的 DONE 统计行(并入 ROUND2_POOL.txt)。
+
+## 【已被追加 8 取代——第一轮已按 D53 终止】当前阶段追加 7(2026-07-23,D51)
 
 你是执行端。规划端(另一个 agent)通过 git 与你协作:代码和指令在 repo 里,
 你的产出(状态、失败、报告)也通过 git 回去。**你不需要历史对话的任何上下文。**
