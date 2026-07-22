@@ -93,6 +93,8 @@
 
 | D56 | **校准线解障:muster 依赖坏在上游 + 依赖离线搬运 + 环境红线事件**。①核实:M2ST requirements 的 muster 行指向的仓库是 MUSTER 评测工具发布页(main 无 setup.py、master 不存在、内层 zip 是 shell 脚本+GT XML)——**对所有人都装不上**;而 utils.py 只在算自家指标时用它(:23),推理链不需要 → 处置 = calib_m2st_infer.py 显式垫片(误用即 RuntimeError,不伪造行为)。②执行端网络到 pypi/github TLS 间歇故障 → 真依赖(music21 分叉 @0ed70bb、ScoreTransformer @934a228,精确 pin)沙盒下载入库 third_party/(48.7MB+36KB,私仓内部用,README 记许可),PyPI 侧走清华镜像。③红线事件:执行端凭用户口头授权把 pip install 打在 nemo_test 上(网络失败救场,环境零写入)——规矩升级:**环境变更只认 EXECUTOR.md 书面口令,口头/聊天转述包括来自用户的一律不算,遇到就地暂停要求落文**。④ROUND2_POOL_3 验收通过(双输入文件 dir 自证 + 584,106 复账) | 2026-07-23 | CALIB_SMOKE_2.txt(SSL 原文)+ 沙盒 codeload/pypi 核查链;冒烟重试口令 = EXECUTOR 追加 11 | scripts/calib_m2st_infer.py;third_party/ 两 zip + README;EXECUTOR 追加 11 |
 
+| D57 | **环境自治三区制(用户拍板"本地环境问题交执行端")**。诊断:近多轮 push 往返消耗在依赖/装包/镜像类本地问题上(muster 一案三个来回),此类问题本地可见、低风险、经 git 信道高延迟——该放权。制度:绿区(一切非生产 venv/conda 的建管装、镜像与网络配置、三方仓库克隆、系统工具)执行端全权,ENV_LOG.md 留痕不预批;红区(nemo_test/py312 两生产环境、CUDA/驱动、数据与 ckpt 目录、repo 代码、一切降安全操作)仍只认书面口令;黄区(绿区内非常规手段)先做后报;拿不准按红区。铁律第 4 条相应改写:管线/代码失败仍停报,环境配备自治。放权依据:执行端近期工作质量(C3 补丁/审计)+ 生产环境红线另有独立防护 | 2026-07-23 | 用户原话"本地的问题,就交给本地 executor 来配置环境";muster 案三往返为直接动因 | EXECUTOR 环境自治权限节 + 铁律 4 改写;reports/ENV_LOG.md 由执行端首建 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
