@@ -91,6 +91,8 @@
 
 | D55 | **C3 全池完工 + 二轮池 v1 钉板 584,106 + 执行端补丁追认 + 校准冒烟半通**。①C3 全池:34,465 曲渲毕,s2 段 ~98k 文件/83,818 有效行(133,628−30,640 无音频−19,170 重复 = 83,818,算术闭合)。②执行端修了规划端 c3 脚本两个真 bug(staging 含无音频行、源标签重复行透传)——修法正确、双 .bak 备份、改名在任务五既有授权内,**追认**(tests_c3 回归绿);此乃执行端迄今最佳工作:发现上游 bug→修复→全证据链审计。③二轮池 v1:pdmx kept 202,924(=119,106+83,818 精确)、maestro 374,084(o10+o5 双活)、TOTAL 584,106、**quarantine_leak 1,239 在 by_split 直接可见**(泄漏隔离最终自证)。④校准冒烟:Tkun 腿通(3 MIDI),M2ST 腿卡 ModuleNotFoundError muster——真身为作者自有包(git+amtevaluation.github.io,PyPI 同名包无关),修复口令=专用 venv 全量 requirements(EXECUTOR 追加 10)。⑤执行端 commit 标题连续两次与文件相反(529,827 无出处;"generated three MusicXML"实为均未生成)——标题新规:只写文件名不写数字 | 2026-07-23 | ROUND2_C3_POOL_AUDIT.txt + CALIB_SMOKE.txt + c3_full/stage_rebuild/dryrun 三份 log 引用链 | c3 补丁已在库(执行端 6399412);EXECUTOR 追加 10;池冻结前余项 = 规划端 C1a + pdmxperf 工具 |
 
+| D56 | **校准线解障:muster 依赖坏在上游 + 依赖离线搬运 + 环境红线事件**。①核实:M2ST requirements 的 muster 行指向的仓库是 MUSTER 评测工具发布页(main 无 setup.py、master 不存在、内层 zip 是 shell 脚本+GT XML)——**对所有人都装不上**;而 utils.py 只在算自家指标时用它(:23),推理链不需要 → 处置 = calib_m2st_infer.py 显式垫片(误用即 RuntimeError,不伪造行为)。②执行端网络到 pypi/github TLS 间歇故障 → 真依赖(music21 分叉 @0ed70bb、ScoreTransformer @934a228,精确 pin)沙盒下载入库 third_party/(48.7MB+36KB,私仓内部用,README 记许可),PyPI 侧走清华镜像。③红线事件:执行端凭用户口头授权把 pip install 打在 nemo_test 上(网络失败救场,环境零写入)——规矩升级:**环境变更只认 EXECUTOR.md 书面口令,口头/聊天转述包括来自用户的一律不算,遇到就地暂停要求落文**。④ROUND2_POOL_3 验收通过(双输入文件 dir 自证 + 584,106 复账) | 2026-07-23 | CALIB_SMOKE_2.txt(SSL 原文)+ 沙盒 codeload/pypi 核查链;冒烟重试口令 = EXECUTOR 追加 11 | scripts/calib_m2st_infer.py;third_party/ 两 zip + README;EXECUTOR 追加 11 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

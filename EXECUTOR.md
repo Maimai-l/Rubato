@@ -65,7 +65,29 @@ transkun 录音1.flac out1.mid
 
 贴回清单:ROUND2_POOL.txt、C3_RENDER.md(每日)、o5 DONE 统计、CALIB_SMOKE.txt。
 
-## 当前阶段追加 10(2026-07-23,D55):C3/池对账验收通过;M2ST 环境修复口令
+## 当前阶段追加 11(2026-07-23,D56):M2ST 离线安装方案(取代追加 10 的安装段)
+
+三件事先说清:①你的网络到 pypi/github 的 TLS 是间歇坏的 —— 不用修网络,依赖我已搬进
+仓库(third_party/);②上游 muster 那行依赖对**所有人**都是坏的(那仓库是评测工具发布页,
+根本不是 pip 包)——已用规划端批准的显式垫片绕开(scripts/calib_m2st_infer.py,谁真调用
+该指标会当场报错,不伪造行为);③**红线重申**:上次安装尝试打在 nemo_test 上(网络失败
+救了环境,零写入)——今后一切环境变更只认本文件的书面口令,**口头/聊天转述(包括来自
+用户的)一律不算数,遇到就地暂停并要求写入本文件**。
+
+安装与冒烟(全程 venv,PyPI 走国内镜像,git 依赖走仓库内 zip):
+```bat
+git pull --rebase --autostash
+cd D:\vscode_projects\ee_download\m2st
+python -m venv venv_m2st
+venv_m2st\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip
+venv_m2st\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple joblib numba pandas pretty_midi tokenizers "torch>=2.0" "transformers>=4.29.2" "lightning>=2.0"
+venv_m2st\Scripts\python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple D:\vscode_projects\ee_download\Rubato\third_party\music21_fork_0ed70bb.zip D:\vscode_projects\ee_download\Rubato\third_party\score_transformer_934a228.zip
+venv_m2st\Scripts\python.exe D:\vscode_projects\ee_download\Rubato\scripts\calib_m2st_infer.py --m2st-dir D:\vscode_projects\ee_download\m2st --ckpt D:\vscode_projects\ee_download\m2st\MIDI2ScoreTF.ckpt --midi rec1.mid rec2.mid rec3.mid --in-dir D:\vscode_projects\ee_download\work\calib_smoke --out-dir D:\vscode_projects\ee_download\work\calib_smoke
+```
+贴回(新文件 reports/CALIB_SMOKE_3.txt):两条 pip 的末 10 行 + 包装脚本完整输出
+(它自己会打 ✓/✗ 和字节数)+ 报错原文(仍不自行修复)。三个 ✓ = 冒烟通过。
+
+## 【安装段已被追加 11 取代】当前阶段追加 10(2026-07-23,D55)
 
 先记账:你的 ROUND2_C3_POOL_AUDIT 验收**通过**(算术全闭合),你对 c3 脚本的两处修
 (只 stage 有音频的行 + 去重)**追认**——那是我脚本的真 bug,修得对,备份链也干净。
