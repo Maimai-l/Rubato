@@ -4,13 +4,75 @@
 
 - **项目终点**:复现 Rubato 论文 —— 真实钢琴录音 → 可用乐谱(终评对标 OMR-NED 64.3 /
   AMT F1 97.0,在官方 test 集上)。
-- **当前阶段目标(D53,用户拍板)**:**第一轮训练已终止,进入数据建设期** —— 把训练池
-  从论文的 ~1/8 建到 ~1/4,然后启动第二轮训练。你手里的活全是备料:渲副本、生成偏移窗、
-  对账。第二轮开训口令待规划端工具落地后下达(约 24-48h)。
+- **当前阶段目标(D53,用户拍板)**:**第一轮训练已终止,进入数据建设期**。二轮开训前
+  还剩两道闸:①校准比分(追加 12,本次主线)②封池(规划端 pdmxperf 工具 + 封池审计)。
+  你手里的活:全量校准评分 + C3 渲染续跑。
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 8(2026-07-22,D53:停训转数据建设;此节为唯一现行任务清单,按序执行)
+## 当前阶段追加 12(2026-07-23,D58):全量 M2ST/LEGATO 校准比分 —— 本次主线,按序执行
+
+先记账:①冒烟通过(CALIB_SMOKE_7 三个 ✓)验收**通过**;②你的绿区环境自治首战
+(ENV_LOG.md:bs4/lxml、venv 重建 py3.13→3.11 留 .bak、torch 钉 2.5.1 并写明理由)
+**验收通过,这就是 D57 三区制想要的样子,保持**;③三条并行建议批复:第 1 条=本节口令;
+第 2 条(151,439 去重审计)批准立项,**扫描工具由规划端在建,下一批下发,勿自行造轮子**;
+第 3 条(音频-标签 QC)批准为**封池审计**,排在本节评分完成之后(见任务五),按你自己
+写的资源边界:评分期间不并发大规模扫盘。
+
+另:C1a 声学增广已合入主干(`--augment-acoustic`,默认关,开训口令才会带上)——
+你现在**无需任何动作**,写在这里只为对齐信息。
+
+四步流水线,每步一个脚本,报错整段贴回、不自行修复。所有脚本已 push,先:
+```bat
+git pull --rebase --autostash
+```
+
+任务一 · 枚举配对(任意环境,秒级;nemo_test 的 python 即可):
+```bat
+python scripts/calib_pairs.py
+```
+它会打印:test 单元数 / 配对成功 / 缺音频 / 缺参考谱 + 逐对清单,并写
+work/calib_pairs.jsonl。**配对成功=0 或缺失占多数 → 停,整段贴回,后面不要跑。**
+
+任务二 · Transkun 批量转写(transkun 所在现有环境,即冒烟用的那个;断点续跑,GPU):
+```bat
+python scripts/calib_transkun.py
+```
+中断重跑即可续(已存在非空 .mid 自动跳过)。transkun 不在 PATH 就加
+`--transkun <它的完整路径>`。
+
+任务三 · M2ST 批量转谱(venv_m2st,与冒烟同 venv;断点续跑,CPU):
+```bat
+venv_m2st\Scripts\python.exe D:\vscode_projects\ee_download\Rubato\scripts\calib_m2st_infer.py --m2st-dir D:\vscode_projects\ee_download\m2st --ckpt D:\vscode_projects\ee_download\m2st\MIDI2ScoreTF.ckpt --all-mids --in-dir D:\vscode_projects\ee_download\work\calib_full --out-dir D:\vscode_projects\ee_download\work\calib_full_xml
+```
+(在 m2st 目录下执行;`--all-mids` 是新参数,已存在的输出 xml 自动跳过。)
+
+任务四 · LEGATO 官方脚本逐对打分(U10 验证 compute_OMR-NED.py 用的那个环境):
+```bat
+python scripts/calib_score.py
+```
+它先做**自检**(参考谱 vs 参考谱应 ≈0,与你 U10 的验证同款)——自检不过它会打印
+两条命令,把那两条的完整输出整段贴回,**勿自行改造调用方式**。自动找不到脚本就加
+`--legato-script <你 U10 用的 compute_OMR-NED.py 完整路径>`。
+通过后它逐对打分并**由代码写** reports/CALIB_FULL.txt(含均值与预登记判决,判据出自
+REF_SYSTEM_CALIB.md,不许手改该文件)。
+
+任务五 · 封池审计(批复建议第 3 条;**任务四完成后**再跑,均为既有只读工具):
+```bat
+python scripts/audit_render_qc.py
+python scripts/audit_split_leakage.py
+python scripts/build_dataset.py --dry-run
+```
+第三条的装配统计整块写 reports/ROUND2_POOL_4.txt。
+
+红线重申:本节全程**不启动任何训练**;环境预期零安装(四步全用现成环境),真缺包按
+D57 三区制走,绿区先斩后奏必须当轮写 ENV_LOG.md。
+
+贴回清单(全部要):①任务一 stdout 整段;②任务二末尾汇总行(新/跳过/失败+失败清单);
+③任务三末尾"完成: N/N"行;④reports/CALIB_FULL.txt(代码已写好,commit+push 即可,
+标题只写文件名)+ 任务四 stdout 末 6 行;⑤ROUND2_POOL_4.txt;⑥C3_RENDER.md 照常每日。
+
+## 【现行任务清单已移至追加 12;本节仅任务五(C3 渲染续跑+每日 push)仍然有效】追加 8(2026-07-22,D53)
 
 任务一 · 停训 + 归档一轮基线(权重是对照组,不许删):
 ```bat

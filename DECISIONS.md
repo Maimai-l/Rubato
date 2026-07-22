@@ -95,6 +95,8 @@
 
 | D57 | **环境自治三区制(用户拍板"本地环境问题交执行端")**。诊断:近多轮 push 往返消耗在依赖/装包/镜像类本地问题上(muster 一案三个来回),此类问题本地可见、低风险、经 git 信道高延迟——该放权。制度:绿区(一切非生产 venv/conda 的建管装、镜像与网络配置、三方仓库克隆、系统工具)执行端全权,ENV_LOG.md 留痕不预批;红区(nemo_test/py312 两生产环境、CUDA/驱动、数据与 ckpt 目录、repo 代码、一切降安全操作)仍只认书面口令;黄区(绿区内非常规手段)先做后报;拿不准按红区。铁律第 4 条相应改写:管线/代码失败仍停报,环境配备自治。放权依据:执行端近期工作质量(C3 补丁/审计)+ 生产环境红线另有独立防护 | 2026-07-23 | 用户原话"本地的问题,就交给本地 executor 来配置环境";muster 案三往返为直接动因 | EXECUTOR 环境自治权限节 + 铁律 4 改写;reports/ENV_LOG.md 由执行端首建 |
 
+| D58 | **冒烟通过验收 + C1a 交付 + 全量校准四件套下发 + 并行三线批复**。①CALIB_SMOKE_7 三个 ✓ 验收通过;执行端绿区自治首战(venv 重建 py3.13→3.11、torch 钉 2.5.1 因 weights_only 默认变更、ENV_LOG.md 全程留痕)= D57 制度即刻兑现,树为样板。②C1a 交付:dataset.acoustic_augment(utt_id+epoch 哈希确定性:增益 ±6dB / 一阶谱斜 / SNR 25-45dB 加噪;静音探针跳过;削波守卫)→ RubatoDataset(acoustic_aug=) → build_dataset --augment-acoustic(默认关,二轮开训单变量启用);tests_c1a 4 项绿(跨 epoch 变化/标签安全/无削波/旗标门控)。③全量比分改为**四步脚本流水线**(calib_pairs 枚举 test 配对(与训练同一 resolve 映射)→ calib_transkun 断点续转 → m2st_infer --all-mids 续跑 → calib_score:先 ref-vs-ref 自检≈0(U10 同款,自检不过即停贴回,杜绝接口猜错继续算)再逐对打分,报告由代码写 CALIB_FULL.txt 含预登记判决;0-1 口径 ×100 换算此处预登记);tests_calib_full 5 项绿(含判决/换算/自检门)。④并行建议批复:1=主线口令、2(151,439 去重审计)立项但扫描工具规划端在建、3=封池审计排评分后。规划端欠账余:pdmxperf 二音色工具 + 去重扫描器 | 2026-07-23 | CALIB_SMOKE_7.txt + ENV_LOG.md + PARALLEL_WORK_SUGGESTIONS.txt;判据出处 REF_SYSTEM_CALIB.md(先于数据) | rubato/data/dataset.py acoustic_augment;scripts/calib_{pairs,transkun,score}.py + m2st_infer --all-mids;tests_c1a_augment.py + tests_calib_full.py;EXECUTOR 追加 12 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

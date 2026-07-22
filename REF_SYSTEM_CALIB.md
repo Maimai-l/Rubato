@@ -19,10 +19,13 @@ github.com/TimFelixBeyer/MIDI2ScoreTransformer,Releases 有 MIDI2ScoreTF.ckpt),
 - 副产品(不判决):Tkun 在我们 maestro 评测段的 note F1(对照其公开 98.3);
   M2ST 输出 XML 存档 5 份(与我们 round1_baseline 输出并排,实物对照)。
 
-## 执行(冒烟先行,命令见 EXECUTOR 追加 9)
+## 执行(冒烟已通过 CALIB_SMOKE_7;全量命令见 EXECUTOR 追加 12)
 
-冒烟 3 曲全链路(Tkun 转写 → M2ST 转谱 → LEGATO OMR-NED)→ 贴回;通过后全量 test 曲集。
-GPU 正空闲(D53 停训窗口),与 C3 渲染(CPU)互不抢。
+冒烟 3 曲全链路 2026-07-23 通过(Tkun 转写 ✓ → M2ST 转谱 ✓×3)。全量 = 四步脚本流水线:
+calib_pairs(枚举 nasap test 配对)→ calib_transkun(断点续转)→ calib_m2st_infer
+--all-mids(续跑)→ calib_score(先 ref-vs-ref 自检 ≈0 再逐对打分,报告代码写
+reports/CALIB_FULL.txt,判决按本卡判据自动打印)。补充预登记:官方脚本若输出 0-1
+口径,×100 换算后对带(写在数据到来之前)。
 
 ## 不指望它给的(期望管理)
 
