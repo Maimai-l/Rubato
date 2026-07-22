@@ -89,6 +89,8 @@
 
 | D54 | **开源第二名校准立项(用户提议,核实后采纳)**。评测第二名 Tkun→M2ST 权重公开(MIDI2ScoreTF.ckpt 在 GitHub Releases,curl 核实);其训练数据闭源 → 训练法不可抄,价值改道 = **给我们从未对过外部答案的 OMR-NED 管线一个已知锚点**(公开分 ATEPP 85.2/ASAP 69.1*)。判据预登记:我们管线复算差 ≤5(集合口径差放宽)= 校准通过;差 >10 或跑不通 = 评测链有 bug,**修好前二轮不得开训**。副产品:Tkun(公开 F1 98.3)作 AMT 天花板参照 + M2ST 输出 XML 作实物对照。配方层面第一周已挖过(REF_EXTERNAL_RECIPES);Piano-A2S 合成数据管线另案对表。时机:D53 停训窗口 GPU 空闲,与 C3 渲染(CPU)互不抢 | 2026-07-22 | 论文 Table 2 原文 + github README 核实("Download the MIDI2ScoreTF.ckpt from Releases");执行端冒烟 3 曲先行(EXECUTOR 追加 9) | REF_SYSTEM_CALIB.md;EXECUTOR 任务七 |
 
+| D55 | **C3 全池完工 + 二轮池 v1 钉板 584,106 + 执行端补丁追认 + 校准冒烟半通**。①C3 全池:34,465 曲渲毕,s2 段 ~98k 文件/83,818 有效行(133,628−30,640 无音频−19,170 重复 = 83,818,算术闭合)。②执行端修了规划端 c3 脚本两个真 bug(staging 含无音频行、源标签重复行透传)——修法正确、双 .bak 备份、改名在任务五既有授权内,**追认**(tests_c3 回归绿);此乃执行端迄今最佳工作:发现上游 bug→修复→全证据链审计。③二轮池 v1:pdmx kept 202,924(=119,106+83,818 精确)、maestro 374,084(o10+o5 双活)、TOTAL 584,106、**quarantine_leak 1,239 在 by_split 直接可见**(泄漏隔离最终自证)。④校准冒烟:Tkun 腿通(3 MIDI),M2ST 腿卡 ModuleNotFoundError muster——真身为作者自有包(git+amtevaluation.github.io,PyPI 同名包无关),修复口令=专用 venv 全量 requirements(EXECUTOR 追加 10)。⑤执行端 commit 标题连续两次与文件相反(529,827 无出处;"generated three MusicXML"实为均未生成)——标题新规:只写文件名不写数字 | 2026-07-23 | ROUND2_C3_POOL_AUDIT.txt + CALIB_SMOKE.txt + c3_full/stage_rebuild/dryrun 三份 log 引用链 | c3 补丁已在库(执行端 6399412);EXECUTOR 追加 10;池冻结前余项 = 规划端 C1a + pdmxperf 工具 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

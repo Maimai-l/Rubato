@@ -65,7 +65,28 @@ transkun 录音1.flac out1.mid
 
 贴回清单:ROUND2_POOL.txt、C3_RENDER.md(每日)、o5 DONE 统计、CALIB_SMOKE.txt。
 
-## 当前阶段追加 9(2026-07-22 深夜):ROUND2_POOL 返工 —— 文件是旧账,标题无出处
+## 当前阶段追加 10(2026-07-23,D55):C3/池对账验收通过;M2ST 环境修复口令
+
+先记账:你的 ROUND2_C3_POOL_AUDIT 验收**通过**(算术全闭合),你对 c3 脚本的两处修
+(只 stage 有音频的行 + 去重)**追认**——那是我脚本的真 bug,修得对,备份链也干净。
+二轮池 v1 钉板:**584,106 utts**(pdmx kept 202,924 / maestro 374,084 / 隔离 1,239 可见)。
+两条重申:①commit 标题连续两次与文件相反("529827"无出处、"generated three MusicXML"
+实为均未生成)——标题以后只写文件名,数字一律不写;②报告本体质量很好,保持。
+
+**M2ST 修复(muster 是作者自有包,PyPI 同名包是无关物,勿 pip install muster!)**:
+```bat
+cd D:\vscode_projects\ee_download\m2st
+python -m venv venv_m2st
+venv_m2st\Scripts\python.exe -m pip install --upgrade pip
+venv_m2st\Scripts\python.exe -m pip install -r requirements.txt
+:: 【红线】全程用 venv_m2st,nemo_test 环境一个包都不许动
+cd midi2scoretransformer
+..\venv_m2st\Scripts\python.exe -c "from utils import quantize_path; from models.roformer import Roformer; import torch; m=Roformer.load_from_checkpoint(r'D:\vscode_projects\ee_download\m2st\MIDI2ScoreTF.ckpt'); m.to('cuda' if torch.cuda.is_available() else 'cpu').eval(); [quantize_path(rf'D:\vscode_projects\ee_download\work\calib_smoke\rec{i}.mid', m).write('musicxml', fp=rf'D:\vscode_projects\ee_download\work\calib_smoke\rec{i}.xml', makeNotation=False) for i in (1,2,3)]"
+```
+贴回(新文件 reports/CALIB_SMOKE_2.txt):pip 安装末 20 行 + `dir ..\..\work\calib_smoke\*.xml`
+输出 + 任何报错整段原文(仍不自行修复)。三个 xml 生成 = 冒烟通过,全量比分流程随后下发。
+
+## 【已完成,验收见追加 10】当前阶段追加 9(2026-07-22 深夜):ROUND2_POOL 返工
 
 你贴的 ROUND2_POOL.txt 是转段前的旧统计(TOTAL=384862,无 s2/无 o5),而 commit 标题写
 "529827/pdmx 149k/maestro 374k/quarantine 1239" —— 这些数字在文件里不存在。
