@@ -40,12 +40,13 @@ def test_truncation_caught_and_report_written():
     man = tmp / "man.jsonl"
     man.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
 
-    # 报告写进真实 repo reports/?不行 —— 测试要隔离:用环境把 ROOT 指走不现实,
-    # 改为直接跑脚本后检查 stdout(报告行同样打印)。
+    # 隔离铁则:--report 指临时路径 —— 真报告 reports/render_qc.md 是执行端证据文件,
+    # 测试夹具数据一个字节都不许进(2026-07-23 曾靠 git status 拦下一次污染)。
     out = subprocess.run(
         [sys.executable, "scripts/audit_render_qc.py",
          "--manifest", str(man), "--whole-dir", str(whole),
-         "--maestro-dir", str(tmp / "nope")],
+         "--maestro-dir", str(tmp / "nope"),
+         "--report", str(tmp / "report.md")],
         capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr[-500:]
     text = out.stdout
@@ -54,6 +55,10 @@ def test_truncation_caught_and_report_written():
     assert "okpiece" not in text.split("疑似截断")[1][:400], "正常曲被误报"
     assert "查=2" in text
     assert "maestro_audio 目录不存在" in text
+    assert "疑似截断" in (tmp / "report.md").read_text(encoding="utf-8")
+    real = Path(__file__).resolve().parent / "reports" / "render_qc.md"
+    if real.exists():
+        assert "cutpiece" not in real.read_text(encoding="utf-8"), "夹具数据污染了真报告!"
 
 
 if __name__ == "__main__":

@@ -41,6 +41,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--nasap-labels", default=str(WORK / "nasap_labels.jsonl"))
     ap.add_argument("--maestro-csv", default=str(BASE / "maestro-v3.0.0.csv"))
+    ap.add_argument("--report", default=str(ROOT / "reports" / "split_leakage.md"),
+                    help="报告追加目标(测试必须指到临时路径,严禁污染真报告)")
     args = ap.parse_args()
 
     lines = [f"\n## nasap-train × maestro val/test 音频对账 @ {time.strftime('%Y-%m-%d %H:%M:%S')}"]
@@ -90,7 +92,7 @@ def main() -> int:
                                 if not leak_rows else
                                 "存在泄漏 —— 涉事行须移出训练,规划端出补丁前先贴回本报告"))
 
-    out = ROOT / "reports" / "split_leakage.md"
+    out = Path(args.report)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")

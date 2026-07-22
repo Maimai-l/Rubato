@@ -69,6 +69,8 @@ def main() -> int:
     ap.add_argument("--presets", default=str(ROOT / "configs" / "recording_presets.yaml"))
     ap.add_argument("--limit", type=int, default=0, help="只查前 N 曲(冒烟);0=全量")
     ap.add_argument("--tol", type=float, default=1.5, help="时长差阈值秒(duration_check 同款)")
+    ap.add_argument("--report", default=str(ROOT / "reports" / "render_qc.md"),
+                    help="报告追加目标(测试必须指到临时路径,严禁污染真报告)")
     args = ap.parse_args()
 
     lines: list[str] = [f"\n## render QC 审计 @ {time.strftime('%Y-%m-%d %H:%M:%S')}"]
@@ -156,7 +158,7 @@ def main() -> int:
     else:
         lines.append(f"  maestro_audio 目录不存在: {mdir}")
 
-    out = ROOT / "reports" / "render_qc.md"
+    out = Path(args.report)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")

@@ -38,7 +38,8 @@ def test_leak_detected_precisely():
 
     out = subprocess.run(
         [sys.executable, "scripts/audit_split_leakage.py",
-         "--nasap-labels", str(lab), "--maestro-csv", str(csv)],
+         "--nasap-labels", str(lab), "--maestro-csv", str(csv),
+         "--report", str(tmp / "report.md")],   # 隔离:严禁写真报告(证据文件)
         capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr[-500:]
     t = out.stdout
@@ -47,6 +48,11 @@ def test_leak_detected_precisely():
     assert "B.flac(validation): 1 行" in t, t
     assert "存在泄漏" in t
     assert "无法解析音频=1" in t
+    assert "存在泄漏" in (tmp / "report.md").read_text(encoding="utf-8")
+    real = Path(__file__).resolve().parent / "reports" / "split_leakage.md"
+    if real.exists():
+        assert "场次=3 其中 val/test=2" not in real.read_text(encoding="utf-8"), \
+            "夹具数据污染了真报告!"
 
 
 def test_fix_quarantines_precisely_and_reversibly():
