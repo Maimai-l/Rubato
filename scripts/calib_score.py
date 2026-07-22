@@ -20,12 +20,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as _dt
+import json
 import os
-import re
 import statistics
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -37,39 +39,61 @@ WORK = Path(os.environ.get("RUBATO_WORK")
                 else r"D:\vscode_projects\ee_download\work"))
 
 PUB = 69.1          # Tkun→M2ST 公开 ASAP OMR-NED(REF_SYSTEM_CALIB.md,论文 Table 2)
-_FLOAT = re.compile(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 
 
 def find_legato_script() -> Path | None:
     env = os.environ.get("RUBATO_LEGATO_SCRIPT")
     if env and Path(env).exists():
         return Path(env)
-    base = WORK.parent / "legato"
-    if base.exists():
-        hits = sorted(base.rglob("compute_OMR-NED.py"))
-        if hits:
-            return hits[0]
+    # U10 的实际 checkout 名为 legato-main；保留旧 legato 路径兼容性。
+    for base in (WORK.parent / "legato", WORK.parent / "legato-main"):
+        if base.exists():
+            hits = sorted(base.rglob("compute_OMR-NED.py"))
+            if hits:
+                return hits[0]
     return None
 
 
 def run_one(py: str, script: Path, est: str, ref: str, timeout: int):
-    """返回 (score|None, 输出尾巴)。取输出里最后一个数值为分。"""
+    """经 LEGATO 官方 JSON 接口计算一对 XML 的 OMR-NED。
+
+    compute_OMR-NED.py 不是 ``script est.xml ref.xml`` 的 CLI；它接收两个
+    JSON 列表，内部用 musicdiff 的 ML-folder 模式写 ``output.csv``。每对采用
+    独立临时目录，避免官方脚本的 ``assert not exists(pred_folder)`` 重跑冲突。
+    """
     try:
-        r = subprocess.run([py, str(script), est, ref], capture_output=True,
-                           text=True, errors="backslashreplace", timeout=timeout,
-                           cwd=str(script.parent))
-    except subprocess.TimeoutExpired:
-        return None, f"TIMEOUT>{timeout}s"
-    out = (r.stdout or "") + "\n" + (r.stderr or "")
-    tail = " | ".join(ln.strip() for ln in out.strip().splitlines()[-3:])
-    if r.returncode != 0:
-        return None, f"rc={r.returncode} {tail}"
-    nums = _FLOAT.findall(r.stdout or "")
-    if not nums:
-        nums = _FLOAT.findall(out)
-    if not nums:
-        return None, f"无数值输出 {tail}"
-    return float(nums[-1]), tail
+        est_text = Path(est).read_text(encoding="utf-8")
+        ref_text = Path(ref).read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, f"读取 XML 失败: {type(exc).__name__}: {exc}"
+    with tempfile.TemporaryDirectory(prefix="rubato_calib_legato_") as td:
+        tmp = Path(td)
+        pred_json, ref_json = tmp / "pred_xml.json", tmp / "ref.json"
+        pred_json.write_text(json.dumps([est_text], ensure_ascii=False), encoding="utf-8")
+        ref_json.write_text(json.dumps([ref_text], ensure_ascii=False), encoding="utf-8")
+        try:
+            r = subprocess.run([py, str(script), "--prediction_file", str(pred_json),
+                                "--ground_truth", str(ref_json), "--prediction_type", "xml"],
+                               capture_output=True, text=True, errors="backslashreplace",
+                               timeout=timeout, cwd=str(script.parent))
+        except subprocess.TimeoutExpired:
+            return None, f"TIMEOUT>{timeout}s"
+        out = (r.stdout or "") + "\n" + (r.stderr or "")
+        tail = " | ".join(ln.strip() for ln in out.strip().splitlines()[-3:])
+        if r.returncode != 0:
+            return None, f"rc={r.returncode} {tail}"
+        csv_path = tmp / "ref_preds" / "pred_xml" / "output" / "output.csv"
+        if not csv_path.exists():
+            return None, f"官方脚本未写 output.csv: {tail}"
+        try:
+            with csv_path.open(encoding="utf-8", newline="") as fh:
+                table = list(csv.reader(fh))
+            header = [x.strip() for x in table[0]]
+            col = header.index("OMR-NED (OMR-ED / total numsyms)")
+            total = next(row for row in table[1:] if row and row[0].strip() == "Total:")
+            return float(total[col]), tail
+        except (IndexError, StopIteration, ValueError) as exc:
+            return None, f"无法解析官方 output.csv: {type(exc).__name__}: {exc}; {tail}"
 
 
 def main(argv=None):
