@@ -47,6 +47,11 @@ from rubato.render.core import (
 )
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
+VN_SUPPORTED_COMPOSERS = (
+    "Bach", "Balakirev", "Beethoven", "Brahms", "Chopin", "Debussy",
+    "Glinka", "Haydn", "Liszt", "Mozart", "Prokofiev", "Rachmaninoff",
+    "Ravel", "Schubert", "Schumann", "Scriabin",
+)
 
 
 # ---------------------------------------------------------------- VN 调用(GUIDE §2/§4)
@@ -447,7 +452,20 @@ def _piece_meta(piece, i):
     xml_path = None
     if xml_rel:
         xml_path = xml_rel if Path(xml_rel).is_absolute() else str(ROOT / "work" / "xml_norm" / xml_rel)
-    composer = piece.get("vn", {}).get("composer_used") or piece.get("composer") or "Beethoven"
+    # S3 stores raw attribution in composer_meta.  Virtuoso only accepts a
+    # fixed composer vocabulary plus its trained unknown bucket; canonicalize
+    # known names and put every other attribution in that bucket rather than
+    # silently rendering the whole long tail as Beethoven.
+    explicit = piece.get("vn", {}).get("composer_used")
+    raw_composer = explicit or piece.get("composer_meta") or piece.get("composer") or ""
+    if explicit:
+        composer = explicit
+    else:
+        folded = str(raw_composer).casefold()
+        composer = next(
+            (name for name in VN_SUPPORTED_COMPOSERS if name.casefold() in folded),
+            "unknown",
+        )
     return pid, xml_path, composer
 
 

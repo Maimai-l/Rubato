@@ -16,6 +16,7 @@ import json
 import hashlib
 import re
 import sys
+import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -128,17 +129,53 @@ def get_nasap_test_works(work_dir: Path) -> list[str]:
     return keys
 
 
-def load_pdmx_csv(csv_path: Path) -> list[dict]:
+def load_verified_restore_ids(path: Path | None) -> set[str]:
+    """Load only audit-confirmed nonduplicate PDMX IDs.
+
+    The upstream ``subset:deduplicated`` flag remains the default policy.  A
+    caller must explicitly provide the evidence JSONL from
+    ``audit_pdmx_dedup.py`` to restore entries, so ordinary S3 rebuilds cannot
+    silently broaden the corpus.
+    """
+    if path is None:
+        return set()
+    if not path.is_file():
+        raise FileNotFoundError(f"restore-candidates JSONL not found: {path}")
+    accepted = {"metadata_inconsistent", "semantic_different", "best_path_missing"}
+    ids: set[str] = set()
+    with path.open("r", encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("category") not in accepted:
+                continue
+            piece_id = Path(str(row.get("source_mid") or "")).stem
+            if not piece_id:
+                raise ValueError(f"missing source_mid at {path}:{line_no}")
+            ids.add(piece_id)
+    print(f"  [INFO] Audit-confirmed restore IDs: {len(ids)} from {path}")
+    return ids
+
+
+def load_pdmx_csv(csv_path: Path, restore_ids: set[str] | None = None) -> list[dict]:
     """Load PDMX.csv and return filtered rows with required fields."""
     rows = []
+    restored = 0
+    restore_ids = restore_ids or set()
     with open(csv_path, 'r', encoding='utf-8', newline='') as f:
         reader = csv.DictReader(f)
         for i, row in enumerate(reader):
             # Quick pre-filter: must be valid, deduplicated, no license conflict
             if row.get("subset:all_valid", "").strip().lower() != "true":
                 continue
-            if row.get("subset:deduplicated", "").strip().lower() != "true":
+            mid_path = row.get("mid", "").strip()
+            piece_id = Path(mid_path).stem
+            is_upstream_dedup = row.get("subset:deduplicated", "").strip().lower() == "true"
+            if not is_upstream_dedup and piece_id not in restore_ids:
                 continue
+            if not is_upstream_dedup:
+                restored += 1
             if row.get("subset:no_license_conflict", "").strip().lower() != "true":
                 continue
             # Additional filters
@@ -154,7 +191,6 @@ def load_pdmx_csv(csv_path: Path) -> list[dict]:
             if not license_ok(lic):
                 continue
             # Must have MIDI path
-            mid_path = row.get("mid", "").strip()
             if not mid_path or mid_path == "NA":
                 continue
             # Never drop valid piano pieces over missing metadata.
@@ -163,11 +199,13 @@ def load_pdmx_csv(csv_path: Path) -> list[dict]:
             if not title or title == "NA":
                 title = ""  # let work_key_or_fallback handle missing
             composer = row.get("composer_name", "").strip()
-            piece_id = Path(mid_path).stem
             wk = work_key_or_fallback(composer, title, piece_id)
 
             rows.append({
                 "piece_id": piece_id,
+                # Retained only while building a restoration manifest.  It is
+                # deliberately not emitted into the final training schema.
+                "restored_from_dedup_audit": not is_upstream_dedup,
                 "mid_rel": mid_path,
                 "mxl_rel": row.get("mxl", "").strip(),
                 "data_rel": row.get("path", "").strip(),
@@ -183,7 +221,7 @@ def load_pdmx_csv(csv_path: Path) -> list[dict]:
                 "pitch_class_entropy": _safe_float(row.get("pitch_class_entropy", "0")),
             })
 
-    print(f"  [INFO] Loaded {len(rows)} rows from PDMX.csv (after pre-filters)")
+    print(f"  [INFO] Loaded {len(rows)} rows from PDMX.csv (after pre-filters; restored={restored})")
     return rows
 
 
@@ -219,14 +257,28 @@ def resolve_paths(pieces: list[dict], pdmx_root: Path) -> list[dict]:
     return manifest
 
 
-def main():
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--restore-candidates", type=Path,
+        help="Evidence JSONL from audit_pdmx_dedup.py; restores only confirmed nonduplicates.",
+    )
+    ap.add_argument("--out-manifest", type=Path, default=OUT_MANIFEST)
+    ap.add_argument("--out-report", type=Path, default=OUT_REPORT)
+    ap.add_argument(
+        "--restore-only", action="store_true",
+        help="After assigning splits on the full union, emit only audit-restored pieces.",
+    )
+    ap.add_argument("--dry-run", action="store_true", help="Run every filter/split check but write no files.")
+    args = ap.parse_args(argv)
     print("=" * 60)
     print("Step 0a: S3 PDMX Full Filtering")
     print("=" * 60)
 
     # 1. Load and filter PDMX CSV
     print("\n[1/4] Loading PDMX.csv with pre-filters...")
-    rows = load_pdmx_csv(PDMX_CSV)
+    restore_ids = load_verified_restore_ids(args.restore_candidates)
+    rows = load_pdmx_csv(PDMX_CSV, restore_ids=restore_ids)
     print(f"  After pre-filters: {len(rows)} candidates")
 
     # 1b. 非钢琴黑名单(乐器审计 s3_instrument_audit 的产物)。
@@ -275,15 +327,16 @@ def main():
     n_before = len(rows)
     rows = [r for r in rows if r["work_key"] not in blacklist]
     print(f"  After blacklist filter: {len(rows)} (removed {n_before - len(rows)})")
+    if args.restore_only:
+        if not restore_ids:
+            raise ValueError("--restore-only requires --restore-candidates")
+        before = len(rows)
+        rows = [r for r in rows if r["restored_from_dedup_audit"]]
+        print(f"  Restore-only manifest: {len(rows)} (removed existing-pool {before - len(rows)})")
 
     # 4. Resolve paths and write manifest
     print("\n[4/4] Resolving paths and writing manifest...")
     manifest = resolve_paths(rows, PDMX_ROOT)
-
-    OUT_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT_MANIFEST, 'w', encoding='utf-8') as f:
-        for entry in manifest:
-            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
 
     # Report
     n_unique_works = len(set(m["work_key"] for m in manifest))
@@ -293,6 +346,9 @@ def main():
         "all_pieces_kept": len(manifest),
         "unique_work_keys": n_unique_works,
         "blacklist_size": len(blacklist),
+        "restore_candidates": str(args.restore_candidates) if args.restore_candidates else None,
+        "restore_ids_supplied": len(restore_ids),
+        "restore_only": args.restore_only,
         "splits": {
             "train": sum(1 for m in manifest if m["split"] == "train"),
             "val": sum(1 for m in manifest if m["split"] == "val"),
@@ -303,15 +359,21 @@ def main():
         }
     }
 
-    OUT_REPORT.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT_REPORT, 'w', encoding='utf-8') as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    if not args.dry_run:
+        args.out_manifest.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.out_manifest, 'w', encoding='utf-8') as f:
+            for entry in manifest:
+                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        args.out_report.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.out_report, 'w', encoding='utf-8') as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
 
     print(f"\n{'='*60}")
-    print(f"DONE: {len(manifest)} pieces in {OUT_MANIFEST}")
+    print(f"DONE: {len(manifest)} pieces" + (" (dry-run; no files written)" if args.dry_run else f" in {args.out_manifest}"))
     print(f"  Splits: {report['splits']}")
     print(f"  A-S3.4 target 12k-20k: {'PASS' if report['acceptance']['A-S3.4'] == 'pass' else 'FAIL'}")
-    print(f"  Report: {OUT_REPORT}")
+    if not args.dry_run:
+        print(f"  Report: {args.out_report}")
     print(f"{'='*60}")
 
     return report

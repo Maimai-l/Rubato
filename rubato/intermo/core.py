@@ -460,7 +460,7 @@ def stamp_units(units: list[Unit], tmap: TimeMap, ts_ms: int = 10, n_bins: int =
 
 
 def project(ir: ScoreIR, dialect: str, tmap: TimeMap | None = None,
-            beats: list | None = None) -> str:
+            beats: list | None = None, lenient_measures: bool = False) -> str:
     """
     InterMo → 方言文本。八方言分四族(每族 full/lite):
       A2S / A2S_lite   —— 乐谱结构,无戳(PDMX 大规模)。
@@ -470,11 +470,14 @@ def project(ir: ScoreIR, dialect: str, tmap: TimeMap | None = None,
     lite = 去拼写(MIDI 音高);AMT 的 lite = 去力度/踏板;DBD 见 ir_to_dbd_units。
     """
     if dialect in ("A2S", "A2S_lite"):
-        return units_to_text(ir_to_units(ir), midi_pitch=(dialect == "A2S_lite"))
+        return units_to_text(
+            ir_to_units(ir, lenient_measures=lenient_measures),
+            midi_pitch=(dialect == "A2S_lite"),
+        )
     if dialect in ("TAST", "TAST_lite"):
         if tmap is None:
             raise SerializeError(f"{dialect} 需要 TimeMap")
-        units = ir_to_units(ir)
+        units = ir_to_units(ir, lenient_measures=lenient_measures)
         stamp_units(units, tmap)
         return units_to_text(units, midi_pitch=(dialect == "TAST_lite"), with_ts=True)
     if dialect in ("DBD", "DBD_lite"):

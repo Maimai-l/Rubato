@@ -16,7 +16,7 @@ from __future__ import annotations
 from fractions import Fraction
 
 from rubato.intermo.core import (
-    Note, Measure, ScoreIR, TimeMap, project, perf_to_amt,
+    Note, Measure, ScoreIR, TimeMap, SerializeError, project, perf_to_amt,
     text_to_units, validate_units,
 )
 
@@ -297,6 +297,29 @@ def make_labels(ir: ScoreIR, kind: str, tmap: TimeMap | None = None,
                 fails.append({"dialect": d, "reason": f"validate:{viol[:2]}"})
                 continue
             labels[d] = text
+        except SerializeError as strict_error:
+            # PDMX contains legitimate scores with cadenza/extended measures
+            # whose actual interval length differs from the declared meter.
+            # Fall back only for this structural mismatch; the lenient mode
+            # still enforces positive self-contained measures, Dyck balance,
+            # and timestamp monotonicity.
+            if "长度" not in str(strict_error):
+                fails.append({"dialect": d, "reason": f"SerializeError:{str(strict_error)[:60]}"})
+                continue
+            try:
+                if d == "TAST":
+                    if local_tmap is None:
+                        continue
+                    text = project(ir, "TAST", local_tmap, lenient_measures=True)
+                else:
+                    text = project(ir, d, lenient_measures=True)
+                viol = validate_units(text_to_units(text), lenient_measures=True)
+                if viol:
+                    fails.append({"dialect": d, "reason": f"lenient_validate:{viol[:2]}"})
+                    continue
+                labels[d] = text
+            except Exception as lenient_error:
+                fails.append({"dialect": d, "reason": f"lenient_{type(lenient_error).__name__}:{str(lenient_error)[:60]}"})
         except Exception as e:
             fails.append({"dialect": d, "reason": f"{type(e).__name__}:{str(e)[:60]}"})
     return labels, fails
