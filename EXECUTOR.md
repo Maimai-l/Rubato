@@ -4,12 +4,48 @@
 
 - **项目终点**:复现 Rubato 论文 —— 真实钢琴录音 → 可用乐谱(终评对标 OMR-NED 64.3 /
   AMT F1 97.0,在官方 test 集上)。
-- **当前阶段目标(D53,用户拍板)**:**数据建设期收官**。校准闸已过(D59);封池前
-  最后一件事 = pdmxperf 二音色渲染(追加 13)。渲毕→武装→终 dry-run→O6 拍板→开训。
+- **当前阶段目标**:池 v2 = **614,710** 已 dry-run 自证,**O6(起跑点)/O8(去重回收
+  波次)等用户拍板,拍板即开训**。你手头:追加 14 的两个冒烟/盘点小任务,别的都别动。
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 13(2026-07-23,D59):追加 12 验收 + pdmxperf 二音色渲染(封池前最后一件)
+## 当前阶段追加 14(2026-07-23,D60):追加 13 验收 + 两项违规记账 + 开训前小任务
+
+验收:s2 渲染合格(30,607 行,账三向闭合,评测池不变),**池 v2 = 614,710 钉板**;
+去重审计是重大发现(98.56% 假去重),方法和证据链验收通过,lenient 接线追认
+(规划端已补 3 项判决测试)。干得好。但两笔账必须记:
+
+- **违规 #1(严重):擅自武装。** 追加 13 白纸黑字"staging 名,严禁改名,武装另有口令",
+  你引用的"武装授权"是追加 8 里 **C3 那个文件** 的授权——跨文件挪用授权无效。这次
+  实质零损害(没开训、可逆、评测池自证不变)所以池成分追认;**下不为例:武装授权
+  永远逐文件点名,今后再越此线,当轮所有产物按无效处理重做。**
+- **违规 #2:去重扫描器是追加 12 明文"勿自行造轮子"的活。** 你造了,造得好,追认;
+  但"追认制"三条件里的"阻塞真实"你不满足(当时无阻塞,是排队抢活)。追认制不是
+  抢活许可证 —— 空闲时想到高价值活,写进 PARALLEL_WORK_SUGGESTIONS 等批复,就像你
+  上次做的那样。那次的规矩这次忘了。
+
+新任务(都是分钟级,做完 push 即可,**别的一律不动**):
+
+任务一 · VN "unknown" 冒烟(你 composer 映射的前提主张,先验证再谈 restore):
+```bat
+D:\ProgramData\envs\py312\Scripts\virtuoso.exe D:\vscode_projects\ee_download\work\xml_norm\<任选一个现有 xml> -c unknown --pedal --no-plot --csv -o D:\vscode_projects\ee_download\work\vn_unknown_smoke.mid
+dir D:\vscode_projects\ee_download\work\vn_unknown_smoke.mid*
+```
+贴回(reports/VN_UNKNOWN_SMOKE.txt):命令原文(含你选的 xml)、退出码、dir 输出、
+任何报错整段。**若 VN 拒绝 unknown,你的 composer 映射需要返工——先贴回,勿自行改。**
+
+任务二 · 磁盘盘点(restore 渲染的 120GB 前置;只盘点,**一个字节都不删**):
+```bat
+powershell -Command "Get-PSDrive D | Select-Object Used,Free"
+powershell -Command "Get-ChildItem D:\vscode_projects\ee_download -Directory | ForEach-Object { '{0,12:N0} MB  {1}' -f ((Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1MB), $_.FullName }"
+```
+贴回(reports/DISK_INVENTORY.txt):两条输出原文 + 你认为**可以安全腾挪**的目录清单
+(只列名字和理由,等口令再动)。
+
+红线:restore 渲染没有口令不得启动;不开训;不再改任何 repo 代码(现在没有阻塞)。
+O6/O8 用户拍板后,开训口令随下一节下发。
+
+## 【已完成,验收见追加 14】追加 13(2026-07-23,D59):追加 12 验收 + pdmxperf 二音色渲染
 
 验收先记账,全部**通过**:
 - **校准闸过了。** 34/34 对、自检 0.0、均值 63.40 → 预登记灰区 → 用户亲自比对 5 对 XML
