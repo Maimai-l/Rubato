@@ -1,0 +1,26 @@
+# Virtuoso `unknown` composer smoke
+
+Date: 2026-07-23
+
+Command:
+
+```powershell
+& 'D:\ProgramData\envs\py312\Scripts\virtuoso.exe' `
+  'D:\vscode_projects\ee_download\pdmx\PDMX\mxl\1\11\QmbbhLwwmuKqA9MC1ULhojEMGxnxDobsZPJEo69N8nbgTw.mxl' `
+  -c unknown --pedal --no-plot --csv `
+  -o 'D:\vscode_projects\ee_download\work\vn_unknown_smoke.mid'
+```
+
+Exit code: `0`.
+
+Virtuoso loaded `checkpoint_best.pt` on CUDA, emitted a 16,485-byte MIDI and a
+57,761-byte note CSV. It printed its expected warning that `unknown` is outside
+the named-composer list; the local model maps such names to its dedicated
+unknown one-hot bucket and completed inference successfully.
+
+Artifacts:
+
+```text
+work/vn_unknown_smoke.mid
+work/vn_unknown_smoke.mid_midi_notes.csv
+```

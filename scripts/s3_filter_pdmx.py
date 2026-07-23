@@ -269,6 +269,10 @@ def main(argv=None):
         "--restore-only", action="store_true",
         help="After assigning splits on the full union, emit only audit-restored pieces.",
     )
+    ap.add_argument(
+        "--train-only", action="store_true",
+        help="After assigning splits on the full union, emit only train pieces (evaluation freeze).",
+    )
     ap.add_argument("--dry-run", action="store_true", help="Run every filter/split check but write no files.")
     args = ap.parse_args(argv)
     print("=" * 60)
@@ -333,6 +337,10 @@ def main(argv=None):
         before = len(rows)
         rows = [r for r in rows if r["restored_from_dedup_audit"]]
         print(f"  Restore-only manifest: {len(rows)} (removed existing-pool {before - len(rows)})")
+    if args.train_only:
+        before = len(rows)
+        rows = [r for r in rows if r["split"] == "train"]
+        print(f"  Train-only manifest: {len(rows)} (removed val/test {before - len(rows)})")
 
     # 4. Resolve paths and write manifest
     print("\n[4/4] Resolving paths and writing manifest...")
@@ -349,6 +357,7 @@ def main(argv=None):
         "restore_candidates": str(args.restore_candidates) if args.restore_candidates else None,
         "restore_ids_supplied": len(restore_ids),
         "restore_only": args.restore_only,
+        "train_only": args.train_only,
         "splits": {
             "train": sum(1 for m in manifest if m["split"] == "train"),
             "val": sum(1 for m in manifest if m["split"] == "val"),
