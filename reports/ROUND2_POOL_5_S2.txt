@@ -1,0 +1,31 @@
+# ROUND2_POOL_5_S2 — pdmxperf 二音色武装后的最终 dry-run
+
+日期：2026-07-23
+命令：`nemo_test/python scripts/build_dataset.py --dry-run`
+
+## 装配统计
+
+| 源 | rows | kept | no_audio | dup | filtered |
+|---|---:|---:|---:|---:|---:|
+| PDMX | 285,690 | 233,528 | 37,920 | 14,239 | 3 |
+| nASAP | 7,098 | 7,098 | 0 | 0 | 0 |
+| MAESTRO | 374,084 | 374,084 | 0 | 0 | 0 |
+| **总计** | — | **614,710** | — | — | **3** |
+
+相对 `ROUND2_POOL_4`（584,103）净增 **30,607** 条，全部来自武装的 pdmxperf 二音色
+副本；PDMX kept 和 train 也各精确增加 30,607。
+
+方言：A2S 240,626；A2S_lite 240,493；TAST 59,911；AMT 374,084。
+
+切分：train **565,955**；test 25,254；val 8,932；validation 13,330；
+quarantine_leak 1,239。评测集与泄漏隔离集均与武装前一致。
+
+## 验收结论
+
+- `pdmx_perf_labels_s2.jsonl` 已被装配器正式挂载；新增 30,607 条确实入 train。
+- 原有缺音频 37,920、重复 14,239、时长隔离 3 均未扩大；三条短截 PDMX 的 `filtered=3`
+  继续生效。
+- `nasap_val=1,142`、`maestro_val=28,264` 不变，二音色副本未污染验证/测试池。
+
+结论：二轮数据池最终冻结为 **614,710** 条。dry-run 成功；本报告不启动训练，下一步为
+O6（全新热启或从一轮 68k checkpoint 续训）拍板。
