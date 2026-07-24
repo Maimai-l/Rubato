@@ -929,6 +929,26 @@ def main(argv=None):
             print("✗ 二音色模式标签必须写 *.staging.jsonl(改名=进池武装,只认 EXECUTOR.md 口令)")
             return 2
         print(f"二音色输出:labels={args.out_labels} audio={args.out_audio_dir} corpus=(不写)")
+    if args.native_vn_root and not args.second_timbre:
+        # 【守卫,D67】官方产物消费 = r3(restore)波次:未显式覆盖的输出全部切到 r3
+        # staging 命名(直写 pdmx_perf_labels.jsonl = 绕过挂载闸静默进池,禁止);
+        # 消费清单必须显式给 r3 manifest —— 主 manifest 是现役池的注入源,不是它的清单。
+        if args.out_labels == ap.get_default("out_labels"):
+            args.out_labels = str(ROOT / "work" / "pdmx_perf_labels_r3.staging.jsonl")
+        if args.out_audio_dir == ap.get_default("out_audio_dir"):
+            args.out_audio_dir = str(ROOT / "work" / "pdmx_audio_r3")
+        if args.out_corpus == ap.get_default("out_corpus"):
+            args.out_corpus = ""
+        if not args.out_failures:
+            args.out_failures = str(ROOT / "work" / "s5_r3_failures.jsonl")
+        if not args.out_labels.endswith(".staging.jsonl"):
+            print("✗ 消费模式标签必须写 *.staging.jsonl(进池武装另有口令)")
+            return 2
+        if args.manifest == ap.get_default("manifest"):
+            print("✗ 消费模式必须显式 --manifest <r3 清单>(主 manifest 不许当 restore 消费清单)")
+            return 2
+        print(f"r3 消费输出:labels={args.out_labels} audio={args.out_audio_dir} "
+              f"failures={args.out_failures}")
     sources_cfg = yaml.safe_load(open(args.sources, encoding="utf-8"))
     presets_cfg = yaml.safe_load(open(args.presets, encoding="utf-8"))
     run(args.manifest, sources_cfg, presets_cfg, args.out_labels, args.out_corpus,

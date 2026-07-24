@@ -36,11 +36,11 @@ FAKE_IR = ScoreIR([Note("PR", SPitch("C",0,4), F(0), F(1))],
 print("[0] _slice_audio 真函数不再 NameError(注入假 soundfile)")
 _writes = []
 sys.modules["soundfile"] = types.SimpleNamespace(
-    write=lambda p, a, s: _writes.append(p),
+    write=lambda p, a, s, **kw: _writes.append(p),   # format=FLAC 等关键字随真代码演进
     read=lambda p, dtype=None: ([0.0], 16000))
 _tmp0 = tempfile.mkdtemp()
 _out = s5._slice_audio([0.0] * (4 * 16000), 16000, 0.0, 3.0, os.path.join(_tmp0, "seg.opus"))
-check("slice_audio_no_nameerror", _out is not None and _out.endswith(".wav"), _out)
+check("slice_audio_no_nameerror", _out is not None and _out.endswith(".flac"), _out)
 check("slice_audio_wrote", len(_writes) == 1, _writes)
 # 【2s 下限回归】用户定:<2s 即退化样本 —— 1 秒切片必须被拒(旧版 0.2s 保底是漏洞)
 check("slice_under_2s_rejected",

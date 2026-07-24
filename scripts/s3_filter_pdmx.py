@@ -275,6 +275,14 @@ def main(argv=None):
     )
     ap.add_argument("--dry-run", action="store_true", help="Run every filter/split check but write no files.")
     args = ap.parse_args(argv)
+    # 【守卫,D67】restore 流禁止写主 manifest:manifest_pieces.jsonl 是现役池全体的
+    # split/work_key 注入源(build_dataset._pdmx_row_fn),被 restore-only 清单覆写 =
+    # 现役 PDMX 全体丢切分注入(val/test 塌进 train)。restore 必须显式给独立文件名。
+    if args.restore_candidates and not args.dry_run \
+            and Path(args.out_manifest).resolve() == Path(OUT_MANIFEST).resolve():
+        print("✗ restore 模式不许写主 manifest —— 显式 --out-manifest "
+              "work/manifest_pieces_r3.jsonl(或其它非主名)")
+        return 2
     print("=" * 60)
     print("Step 0a: S3 PDMX Full Filtering")
     print("=" * 60)
@@ -389,4 +397,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
