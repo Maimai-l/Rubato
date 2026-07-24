@@ -427,7 +427,7 @@ def _s2_filter(pieces: list[dict], base_ids: set[str]) -> list[dict]:
 
 def render_midi(midi_path: str, utt_id: str, sources_cfg, presets_cfg, out_path: str,
                 pick: tuple[str, str] | None = None):
-    """VN 演奏 MIDI → 44.1k wav → 预设链 → 16k opus 落盘(复用 S4 渲染链)。
+    """VN 演奏 MIDI → 44.1k wav → 预设链 → 16k 临时音频(复用 S4 渲染链)。
     pick=(src_id, preset_id) 时跳过哈希分配,用指定音色(二音色模式)。"""
     import tempfile
     src_id, preset_id = pick if pick else assign_source_and_preset(utt_id, sources_cfg, presets_cfg)
@@ -459,10 +459,11 @@ def _slice_audio(audio, sr: int, t0: float, t1: float, out_path: str,
     if b - a < int(min_sec * sr):      # 【实际长度】保底与守卫同标准(旧版 0.2s 是漏洞:截断残段能溜过)
         return None
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    # soundfile 不支持 .opus 写;统一用 .wav 落盘(后续 build_dataset 的 resolve_audio 会搜 .wav)
-    wav_path = str(Path(out_path).with_suffix('.wav'))
-    sf.write(wav_path, audio[a:b], sr)
-    return wav_path
+    # 段音频长期保留：FLAC 与 WAV 同为无损，但显著节省紧张的工作盘空间。
+    # Opus 不能由 soundfile 写；标签行保存这个实际路径，装配器会优先读取它。
+    flac_path = str(Path(out_path).with_suffix('.flac'))
+    sf.write(flac_path, audio[a:b], sr, format="FLAC")
+    return flac_path
 
 
 def _safe_unlink(p):
