@@ -112,6 +112,22 @@ def _labeled_piece_ids(path) -> set:
     return ids
 
 
+def _failed_piece_ids(path) -> set:
+    """Read the explicit, auditable S5 quarantine list used for resume."""
+    ids = set()
+    if not path or not os.path.exists(path):
+        return ids
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                pid = json.loads(line).get("piece_id")
+            except Exception:
+                continue
+            if pid:
+                ids.add(pid)
+    return ids
+
+
 def _main_rss_gb() -> float:
     """主进程(VN 常驻)自身的 RSS(GB)。自诊断关键:worker 回收管不到主进程,
     若这个数随曲数一直涨 = 泄漏在【主进程 VN】,不在 worker —— 一眼看出到底谁在涨。"""
@@ -167,12 +183,14 @@ class VNEngine:
             new = sorted(set(self.out_dir.glob("*.mid")) - before, key=lambda p: p.stat().st_mtime)
             mid = new[-1] if new else None
         if not mid or not mid.exists():
-            return None, None
+            # Do not collapse this into a downstream "no tmap".  The caller
+            # needs to know whether VN itself failed or CSV mapping failed.
+            raise RuntimeError("missing_midi_output")
         for cand in (Path(str(mid) + "_midi_notes.csv"),                 # 执行端 CLI 实测的后缀
                      mid.parent / f"{mid.stem}_midi_notes.csv"):          # GUIDE §2.4 的另一种写法
             if cand.exists():
                 return str(mid), str(cand)
-        return str(mid), None
+        raise RuntimeError("missing_csv_output")
 
 
 # ---------------------------------------------------------------- VN 子进程(把泄漏关进可回收进程)
@@ -227,6 +245,7 @@ class VNSubprocess:
         self.recycles = 0; self.n_infer = 0
         self.gen = 0                     # 进程代号:每次 kill+重开 +1;在飞推理据此发现"子进程已被换掉"
         self._rss_warned = False
+        self.last_failure = None       # concrete child/queue reason for audit + retry
         self._start()
         self._stop = _threading.Event()
         self._mon = _threading.Thread(target=self._monitor, args=(monitor_sec,), daemon=True)
@@ -292,13 +311,15 @@ class VNSubprocess:
                               f"下曲 infer 时再试", flush=True)
 
     def infer(self, xml, composer):
+        self.last_failure = None
         with self._lock:                 # 只在收发瞬间握锁;等待期【不握】,让监控能随时回收
             if self.proc is None or not self.proc.is_alive():
                 self._start()
             gen0, resp_q = self.gen, self.resp_q
             try:
                 self.req_q.put((xml, composer))
-            except Exception:
+            except Exception as exc:
+                self.last_failure = f"request_queue:{type(exc).__name__}"
                 return None, None
         deadline = time.time() + self.infer_timeout
         while True:
@@ -308,21 +329,27 @@ class VNSubprocess:
             except _queue.Empty:
                 with self._lock:
                     if self.gen != gen0:         # 监控在推理中砍了超标子进程 → 本曲判失败,续跑重试
+                        self.last_failure = "recycled_during_infer"
                         return None, None
                 if time.time() >= deadline:      # 真卡死:自己动手杀重开
                     with self._lock:
                         if self.gen == gen0:
                             try: self._recycle()
                             except Exception: pass
+                    self.last_failure = "infer_timeout"
                     return None, None
-            except (EOFError, OSError, ValueError):   # 队列随子进程被杀而关闭/失效 → 同 gen 变化处理
+            except (EOFError, OSError, ValueError) as exc:   # 队列随子进程被杀而关闭/失效 → 同 gen 变化处理
+                self.last_failure = f"response_queue:{type(exc).__name__}"
                 return None, None
         with self._lock:
             self.n_infer += 1
             if self.gen == gen0 and self._rss_gb() >= self.rss_cap_gb:   # 推理后也查一次,及时回收
                 try: self._recycle()
                 except Exception: pass
-        return (mid, csv) if status == "ok" else (None, None)
+        if status == "ok" and mid and csv:
+            return mid, csv
+        self.last_failure = (str(mid) if status != "ok" else "child_ok_missing_output")
+        return None, None
 
     def close(self):
         try: self._stop.set()
@@ -452,21 +479,27 @@ def _piece_meta(piece, i):
     xml_path = None
     if xml_rel:
         xml_path = xml_rel if Path(xml_rel).is_absolute() else str(ROOT / "work" / "xml_norm" / xml_rel)
-    # S3 stores raw attribution in composer_meta.  Virtuoso only accepts a
-    # fixed composer vocabulary plus its trained unknown bucket; canonicalize
-    # known names and put every other attribution in that bucket rather than
-    # silently rendering the whole long tail as Beethoven.
+    # S3 stores raw attribution in composer_meta. Virtuoso only supports its
+    # fixed composer vocabulary. Its README explicitly recommends the heavily
+    # represented composers for unrelated pieces; Bach is our deterministic
+    # fallback rather than passing the unsupported literal "unknown".
     explicit = piece.get("vn", {}).get("composer_used")
     raw_composer = explicit or piece.get("composer_meta") or piece.get("composer") or ""
-    if explicit:
-        composer = explicit
-    else:
-        folded = str(raw_composer).casefold()
-        composer = next(
-            (name for name in VN_SUPPORTED_COMPOSERS if name.casefold() in folded),
-            "unknown",
-        )
+    folded = str(raw_composer).casefold()
+    composer = next(
+        (name for name in VN_SUPPORTED_COMPOSERS if name.casefold() in folded),
+        "Bach",
+    )
     return pid, xml_path, composer
+
+
+def _native_leaf_key(piece, i=0) -> str:
+    """Leaf key used by the official CLI output tree: ``shard/leaf``."""
+    _, xml_path, _ = _piece_meta(piece, i)
+    if not xml_path:
+        return ""
+    path = Path(xml_path)
+    return f"{path.parent.parent.name}/{path.parent.name}"
 
 
 # ---------------------------------------------------------------- CPU 阶段(worker 并行,慢)
@@ -488,7 +521,8 @@ def cpu_stage(mid: dict) -> dict:
     pid = mid["pid"]; xml_path = mid["xml_path"]
     perf_mid = mid["perf_mid"]; csv_path = mid["csv_path"]
     out = _W["out"]
-    res = {"pid": pid, "vn_ok": 0, "vn_fail": 0, "rows": [], "fail": None}
+    res = {"pid": pid, "vn_ok": 0, "vn_fail": 0, "rows": [], "fail": None,
+           "vn_detail": mid.get("vn_detail"), "vn_attempts": mid.get("vn_attempts", 1)}
     whole_audio = str(out / f"{pid}_whole.opus")
     try:   # 【清理】finally 兜底删所有中间产物 —— 旧版异常路径会把 _perf.mid/_whole.opus/csv 留在盘上
         try:
@@ -500,13 +534,22 @@ def cpu_stage(mid: dict) -> dict:
             return res
 
         tmap = None
+        tmap_diag = None
         if csv_path:
-            tmap, _ = csv_to_tmap(csv_path, part)
+            try:
+                tmap, tmap_diag = csv_to_tmap(csv_path, part)
+            except Exception as exc:
+                tmap_diag = {"exception": type(exc).__name__}
             _safe_unlink(csv_path)     # 【清理】CSV 用完即删 —— 旧版从不删,_vn/ 随曲数无限堆积
             csv_path = None
         if tmap is None:               # VN 是唯一路径:无 tmap = 该曲失败,续跑重试,不造假演奏
             res["vn_fail"] = 1
-            res["fail"] = "vn_no_tmap"
+            if not perf_mid:
+                res["fail"] = f"vn_infer:{res['vn_detail'] or 'missing_output'}"
+            elif not mid.get("csv_path"):
+                res["fail"] = f"vn_missing_csv:{res['vn_detail'] or 'missing_output'}"
+            else:
+                res["fail"] = "vn_tmap:" + json.dumps(tmap_diag or {}, sort_keys=True)
             return res
         res["vn_ok"] = 1
 
@@ -581,7 +624,8 @@ def cpu_stage(mid: dict) -> dict:
 
 def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_dir,
         limit=None, offset=0, n_cpu=0, vn_checkpoint=None,
-        second_timbre=False, base_labels=None):
+        second_timbre=False, base_labels=None, out_failures=None,
+        native_vn_root=None, native_ready_leaves=None):
     """
     GPU/CPU 流水线:主进程顺序跑 VN 推理(GPU,~0.5s),非阻塞把渲染交给 CPU worker 池(~5s),
     GPU 不再干等 CPU —— CPU 渲染第 N 曲时,GPU 已在推理 N+1...(见 rubato.ops.pipeline_map)。
@@ -596,6 +640,12 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     if limit:
         gen = itertools.islice(gen, limit)
     pieces = list(gen)
+    native_root = Path(native_vn_root) if native_vn_root else None
+    if native_ready_leaves:
+        ready = {x.strip().replace("\\", "/") for x in native_ready_leaves.split(",") if x.strip()}
+        before = len(pieces)
+        pieces = [p for i, p in enumerate(pieces) if _native_leaf_key(p, i) in ready]
+        print(f"官方 VN 消费:已完成叶目录 {len(ready)}; 本轮 {len(pieces)}/{before} 曲")
     if second_timbre:
         # 入选圈 = 一轮已出标签 ∩ train(评测集冻结);VN 重推理产【新演绎+新音色】,
         # 新行自带自己的 tmap 标签 —— 不复用旧段边界,天然无标签-音频错位。
@@ -611,11 +661,19 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     # 【续跑正确性】按"真有标签"判断做没做完,而不是 .done 标记。统计有多少 .done 是无标签空壳(旧 CLI
     # 遗留),这些会被重跑补回来 —— 明确打印出来,不让任何曲被静默跳过丢出训练集。
     labeled = _labeled_piece_ids(out_labels)
+    failed = _failed_piece_ids(out_failures)
     stale = sum(1 for dm in out_audio_dir.glob("*.done") if dm.stem not in labeled)
     if labeled or stale:
         print(f"续跑:{len(labeled)} 曲已有标签(跳过);{stale} 个 .done 无对应标签(旧 CLI 遗留,将重跑补回)")
+    if failed:
+        print(f"续跑:{len(failed)} 曲已在失败清单隔离(跳过;不静默丢弃)")
     label_fh = open(out_labels, "a", encoding="utf-8") if out_labels else None
     corpus_fh = open(out_corpus, "a", encoding="utf-8") if out_corpus else None
+    failure_fh = open(out_failures, "a", encoding="utf-8") if out_failures else None
+    xml_by_pid = {
+        p.get("piece_id"): p.get("xml_norm") or p.get("xml_raw")
+        for p in pieces if p.get("piece_id")
+    }
     rep = {"pieces": len(pieces), "vn_ok": 0, "vn_fail": 0,
            "utts": 0, "tast": 0, "failures": []}
 
@@ -623,7 +681,7 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     # ~1GB/5s 泄漏主机 RSS(RTX50/WDDM 驱动侧,Python 收不回),而 CLI(子进程)模式主进程恒平。
     # 子进程按 RSS 水位 kill+重开:主进程始终平坦、模型跨曲复用(比 CLI 每曲重载快)。
     # ckpt 不传就【自动定位】;S5_VN_INPROCESS=1 强制退回旧的主进程内联(仅调试/沙盒);都没有才退 CLI。
-    if not vn_checkpoint:
+    if not vn_checkpoint and native_root is None:
         vn_checkpoint = _find_vn_checkpoint()
     in_process = os.environ.get("S5_VN_INPROCESS", "0") == "1"
     rss_cap = float(os.environ.get("S5_VN_RSS_CAP_GB", "4.0"))     # 子进程 RSS 超此值即回收(重载~2s)
@@ -633,7 +691,9 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
     vn_recycle_n = int(os.environ.get("S5_VN_RECYCLE", "100"))
     vn = None                         # VNSubprocess(默认)
     eng = {"m": None, "seen": 0}      # 主进程内联 VNEngine(S5_VN_INPROCESS=1 / 测试用)
-    if vn_checkpoint and not in_process:
+    if native_root is not None:
+        print(f"VN: 官方 CLI 产物消费模式(root={native_root});不构造 Rubato VN 模型")
+    elif vn_checkpoint and not in_process:
         try:
             vn = VNSubprocess(vn_checkpoint, out_dir=str(out_audio_dir / "_vn"),
                               rss_cap_gb=rss_cap, infer_timeout=infer_to, monitor_sec=mon_sec)
@@ -673,9 +733,40 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         pid, xml_path, composer = _piece_meta(piece, piece.get("_i", 0))
         if not xml_path:
             return None
+        if native_root is not None:
+            xml = Path(xml_path)
+            leaf = xml.parent.name
+            out_dir = native_root / xml.parent.parent.name / leaf
+            mid = out_dir / f"{leaf}_{pid}_by_isgn_Bach.mid"
+            csv = Path(str(mid) + "_midi_notes.csv")
+            detail = None
+            if not mid.is_file():
+                detail = "native_missing_midi"
+            elif not csv.is_file():
+                detail = "native_missing_csv"
+            return {"pid": pid, "xml_path": xml_path,
+                    "perf_mid": str(mid) if detail is None else None,
+                    "csv_path": str(csv) if detail is None else None,
+                    "vn_detail": detail, "vn_attempts": 0}
         if vn is not None:
             mid, csv_path = vn.infer(xml_path, composer)     # 子进程推理,主进程恒平;超 cap 自动回收
-            return {"pid": pid, "xml_path": xml_path, "perf_mid": mid, "csv_path": csv_path}
+            detail, attempts = vn.last_failure, 1
+            if not (mid and csv_path):
+                # A queue/child handoff can fail transiently while WDDM tears
+                # down a recycled CUDA process.  Recreate once and retry the
+                # same piece; a second failure is kept with its real reason.
+                print(f"  [vn] {pid}: {detail or 'missing_output'} → 重开后重试一次", flush=True)
+                try:
+                    with vn._lock:
+                        vn._recycle()
+                except Exception as exc:
+                    detail = f"retry_recycle:{type(exc).__name__}"
+                else:
+                    mid, csv_path = vn.infer(xml_path, composer)
+                    detail = vn.last_failure
+                    attempts = 2
+            return {"pid": pid, "xml_path": xml_path, "perf_mid": mid, "csv_path": csv_path,
+                    "vn_detail": detail, "vn_attempts": attempts}
         e = eng["m"]
         if e is not None:
             mid, csv_path = e.infer(xml_path, composer)
@@ -691,7 +782,9 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
 
     def done_fn(piece):
         pid, _, _ = _piece_meta(piece, piece.get("_i", 0))
-        return pid in labeled     # 真有标签才算做完(不靠 .done,避免旧 CLI 遗留标记静默丢曲)
+        # Labeled pieces are complete; failures are a separate, explicit
+        # quarantine.  Never use a bare .done marker as evidence of either.
+        return pid in labeled or pid in failed
 
     def on_result(piece, res):
         rep["vn_ok"] += res["vn_ok"]; rep["vn_fail"] += res["vn_fail"]
@@ -700,6 +793,13 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         rep["seg_no_audio"] = rep.get("seg_no_audio", 0) + res.get("seg_no_audio", 0)
         if res.get("fail"):
             rep["failures"].append({"piece_id": res["pid"], "reason": res["fail"]})
+            if failure_fh:
+                failure_fh.write(json.dumps({
+                    "piece_id": res["pid"], "reason": res["fail"],
+                    "xml_path": xml_by_pid.get(res["pid"]),
+                    "vn_detail": res.get("vn_detail"), "vn_attempts": res.get("vn_attempts"),
+                }, ensure_ascii=False) + "\n")
+                failure_fh.flush()
         for row in res["rows"]:
             rep["utts"] += 1
             if row.get("TAST"):
@@ -778,6 +878,8 @@ def run(manifest, sources_cfg, presets_cfg, out_labels, out_corpus, out_audio_di
         label_fh.close()
     if corpus_fh:
         corpus_fh.close()
+    if failure_fh:
+        failure_fh.close()
     print(f"\nDONE: vn_ok={rep['vn_ok']} vn_fail={rep['vn_fail']} "
           f"skipped={stats['done_skipped']} dropped={stats['dropped']} "
           f"utts={rep['utts']} TAST={rep['tast']} cpu_fail={stats['failed']} "
@@ -797,10 +899,16 @@ def main(argv=None):
     ap.add_argument("--out-labels", default=str(ROOT / "work" / "pdmx_perf_labels.jsonl"))
     ap.add_argument("--out-corpus", default=str(ROOT / "work" / "a2s_corpus.txt"))
     ap.add_argument("--out-audio-dir", default=str(ROOT / "work" / "pdmx_audio"))
+    ap.add_argument("--out-failures", default="",
+                    help="Append-only, auditable quarantine JSONL; entries are skipped on resume.")
     ap.add_argument("--workers", type=int, default=0, help="CPU 渲染并发;0=按内存自动定")
     ap.add_argument("--vn-checkpoint", default="",
                     help="通常【不用传】——脚本自动定位 virtuoso 标准权重(GUIDE §1)。"
                          "仅当你的 .pt 在非标准位置才指定。")
+    ap.add_argument("--native-vn-root", default="",
+                    help="官方 virtuoso 目录批量已产出的 MIDI/CSV 根目录；只消费产物，不加载 VN 模型。")
+    ap.add_argument("--native-ready-leaves", default="",
+                    help="逗号分隔 shard/leaf；仅消费这些已完成官方批次，供 CPU 流水线使用。")
     ap.add_argument("--second-timbre", action="store_true",
                     help="pdmxperf 二音色副本(ROUND2_DATA):仅一轮成功曲×train,VN 重推理,"
                          "第二源渲染,utt_id 尾缀 _s2,标签写 .staging 名(改名=武装,红线同 C3)")
@@ -827,7 +935,10 @@ def main(argv=None):
         limit=args.limit or None, n_cpu=args.workers,
         vn_checkpoint=(args.vn_checkpoint or None),
         second_timbre=args.second_timbre,
-        base_labels=(args.base_labels if args.second_timbre else None))
+        base_labels=(args.base_labels if args.second_timbre else None),
+        out_failures=(args.out_failures or None),
+        native_vn_root=(args.native_vn_root or None),
+        native_ready_leaves=(args.native_ready_leaves or None))
     return 0
 
 
