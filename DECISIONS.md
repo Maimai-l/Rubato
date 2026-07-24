@@ -113,6 +113,8 @@
 
 | D66 | **finalize 确认"在" → 干声疑虑解除,restore 波次音频合规定案**(容器 flac + 预设链完整 = 与现池同分布,仅封装不同)。余欠仍两样:流水线代码 push(git push 几乎零 token,优先)+ 试验两行。**兜底预案(若 token 先竭)**:渲染产物照常存盘,进池由规划端挂载闸把守——届时对产物跑现成审计(audit_render_qc 时长对账 + dry-run 三向账),复制粘贴级命令,旧 agent 可执行;代码审计推迟到 29 号后不阻塞渲染,只阻塞进池 | 2026-07-23 | 执行端一字贴回"在"(用户转达) | 挂载闸为唯一剩余关口 |
 
+| D67 | **r3 流水线审计:通过(就是旧管线改造,非另起炉灶)+ 两道守卫补上 + 一处口径更正**。①审计结论:所谓"新流水线"= s5_vn_render 消费模式(--native-vn-root:官方 CLI 目录批产 MIDI/CSV,s5 只消费)+ 3 个只读预检门(MuseScore 归一化/含拍号门/ScoreData 解析门,均可续跑、拒收带审计单)。**对齐机器同一套**(tmap 出自实产 CSV、渲染同 render_midi+finalize、切片同 _slice_audio)→ 可比性保住。native 转向证据充分:首跑 vn_ok=705/vn_fail=114,502(根因=restore 原始 MXL 未归一化,主池当年过了 xml_norm),100 曲旧失败金丝雀经官方 CLI 100/100。失败隔离清单(append-only JSONL+续跑跳过)是仪表升级。②**高危洞已堵**(规划端补丁+测试 2/2):s3_filter restore 流默认写主 manifest('w' 直开无备份)→ 覆写即现役池全体丢 split/work_key 注入;现 restore 流禁写主名。s5 消费模式原可直写 pdmx_perf_labels.jsonl(绕挂载闸静默进池)→ 现强制 r3 staging 命名+显式 r3 清单。**主 manifest 是否已被覆写待执行端一条命令体检**。③composer:native 批统一 -c Bach(上游 README 建议重表征作曲家;与主线 Beethoven 缺省不一致,均为任意先验,记录接受;先前 unknown 冒烟结论被其自弃)。④**口径更正(规划端错误)**:D65 答用户"上次是 16kHz Opus"对 S4 线成立、对 s5 段音频错误 —— 07-10 起 s5 段=16kHz WAV(soundfile 写不了 opus,@109db50),行内 audio_path 使装配不受影响;用户的 wav→flac 指令对象正是它,完全正确。⑤FLAC 落盘合规(无损、装配器直读、省盘) | 2026-07-24 | VN_NATIVE_BATCH_DECISION.md + 三提交 diff + @109db50 考古;守卫=tests_r3_guards 2/2 + 全库回归绿 | r3 双守卫;EXECUTOR 追加 19(manifest 体检一条命令) |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|

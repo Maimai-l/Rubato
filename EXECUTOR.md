@@ -9,7 +9,24 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 18(2026-07-23,D65):【并入追加 17】趁 token 还有,只要三样,零解释
+## 当前阶段追加 19(2026-07-24,D67):流水线审计通过;一条体检命令;守卫已上
+
+审计结论:你的三个提交**全部验收通过**(native 转向证据充分、预检门干净、FLAC 合规、
+失败隔离清单是好仪表)。守卫补丁已推(pull 即得):restore 流禁写主 manifest;
+s5 消费模式强制 r3 staging 命名 + 显式 `--manifest`。
+
+只要一样(一条命令,输出两行,贴回即可):
+```bat
+powershell -Command "(Get-Item D:\vscode_projects\ee_download\work\manifest_pieces.jsonl).LastWriteTime; (Get-Content D:\vscode_projects\ee_download\work\manifest_pieces.jsonl | Measure-Object -Line).Lines"
+```
+(判读:行数≈38,371=主 manifest 完好;≈128,585=被 restore 覆写,需重生成——等口令。)
+
+可继续:官方 CLI 渲染批(只产 MIDI/CSV,不碰池文件)。
+等口令:s5 消费(--native-vn-root;新守卫会要求 `--manifest work/manifest_pieces_r3.jsonl`
+与 r3 staging 输出,届时口令给全)。
+仍欠(有余量再给):试验两行(首条训练行 + autolog 首评行)。
+
+## 【已并入追加 19】追加 18(2026-07-23,D65):三样零解释
 
 1. 新渲染流水线**代码 git push**(不写文档不解释,我自己读)。
 2. 贴两行:试验运行**第一条训练行** + autolog **首评整行**。
