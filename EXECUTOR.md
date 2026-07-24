@@ -9,7 +9,29 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 19(2026-07-24,D67):流水线审计通过;一条体检命令;守卫已上
+## 当前阶段追加 20(2026-07-24,D68):manifest 完好;r3 全链命令(按序,渲完就跑)
+
+体检通过(38,252 行/7-12 未动)。以下按序执行;凡"<你的…>"处填你本地实际路径,
+其余一字不改。
+
+1. `git pull --rebase --autostash`(守卫补丁)
+2. 生成 r3 清单(若已有 manifest_pieces_r3.jsonl 可跳过):
+```bat
+python scripts/s3_filter_pdmx.py --restore-candidates D:\vscode_projects\ee_download\work\pdmx_dedup_restore_candidates.jsonl --restore-only --train-only --out-manifest D:\vscode_projects\ee_download\work\manifest_pieces_r3.jsonl --out-report D:\vscode_projects\ee_download\Rubato\reports\s3_filter_r3_manifest.json
+```
+3. 归一化/两道预检/官方 CLI 渲染批:你自己的工具你自己调(D63 自治),照常续跑。
+4. 官方批出多少消费多少(可反复跑,断点续):
+```bat
+python scripts/s5_vn_render.py --native-vn-root <你的官方产物根目录> --manifest D:\vscode_projects\ee_download\work\manifest_pieces_r3.jsonl
+```
+(守卫自动落 r3 staging 标签/pdmx_audio_r3/失败清单;**产出是 staging 名,改名=进池,
+仍等我的挂载指令**——那是最后一道闸。)
+5. 消费完贴回两行:DONE 行原文 + staging 行数
+   (`find /c /v "" D:\vscode_projects\ee_download\work\pdmx_perf_labels_r3.staging.jsonl`)。
+
+红线不变:不开训、不改名。试验两行仍欠(有余量再给)。
+
+## 【已完成,验收通过;后续见追加 20】追加 19(2026-07-24,D67):流水线审计+体检命令
 
 审计结论:你的三个提交**全部验收通过**(native 转向证据充分、预检门干净、FLAC 合规、
 失败隔离清单是好仪表)。守卫补丁已推(pull 即得):restore 流禁写主 manifest;

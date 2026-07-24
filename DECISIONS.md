@@ -115,6 +115,8 @@
 
 | D67 | **r3 流水线审计:通过(就是旧管线改造,非另起炉灶)+ 两道守卫补上 + 一处口径更正**。①审计结论:所谓"新流水线"= s5_vn_render 消费模式(--native-vn-root:官方 CLI 目录批产 MIDI/CSV,s5 只消费)+ 3 个只读预检门(MuseScore 归一化/含拍号门/ScoreData 解析门,均可续跑、拒收带审计单)。**对齐机器同一套**(tmap 出自实产 CSV、渲染同 render_midi+finalize、切片同 _slice_audio)→ 可比性保住。native 转向证据充分:首跑 vn_ok=705/vn_fail=114,502(根因=restore 原始 MXL 未归一化,主池当年过了 xml_norm),100 曲旧失败金丝雀经官方 CLI 100/100。失败隔离清单(append-only JSONL+续跑跳过)是仪表升级。②**高危洞已堵**(规划端补丁+测试 2/2):s3_filter restore 流默认写主 manifest('w' 直开无备份)→ 覆写即现役池全体丢 split/work_key 注入;现 restore 流禁写主名。s5 消费模式原可直写 pdmx_perf_labels.jsonl(绕挂载闸静默进池)→ 现强制 r3 staging 命名+显式 r3 清单。**主 manifest 是否已被覆写待执行端一条命令体检**。③composer:native 批统一 -c Bach(上游 README 建议重表征作曲家;与主线 Beethoven 缺省不一致,均为任意先验,记录接受;先前 unknown 冒烟结论被其自弃)。④**口径更正(规划端错误)**:D65 答用户"上次是 16kHz Opus"对 S4 线成立、对 s5 段音频错误 —— 07-10 起 s5 段=16kHz WAV(soundfile 写不了 opus,@109db50),行内 audio_path 使装配不受影响;用户的 wav→flac 指令对象正是它,完全正确。⑤FLAC 落盘合规(无损、装配器直读、省盘) | 2026-07-24 | VN_NATIVE_BATCH_DECISION.md + 三提交 diff + @109db50 考古;守卫=tests_r3_guards 2/2 + 全库回归绿 | r3 双守卫;EXECUTOR 追加 19(manifest 体检一条命令) |
 
+| D68 | **主 manifest 体检通过 + r3 全链命令下发**。①体检(执行端贴回,用户转达):38,252 行 / 最后写入 7-12 —— 早于 restore 工程(7-22 起)全程,**未被覆写**;38,252 与 render_qc"查=38252"、S5_S2"入选 22501/38252"两份委员会报告分毫一致 = 盘上真基准。②规划端小勘误:追加 19 预告的"完好≈38,371"引了预检重算口径(现行过滤当下重跑的值),非盘上历史值,差 119 为过滤时点差 —— 判读以两报告交叉的 38,252 为准,预告口径记错。③追加 20 下发 r3 全链:生成 r3 清单(守卫强制独立文件名)→ 归一化/预检/官方批(执行端自治)→ s5 消费(守卫自动 r3 staging)→ 贴回 DONE+行数;**挂载(改名+dry-run)仍为规划端最后一道闸** | 2026-07-24 | 执行端两行贴回 + render_qc/S5_S2 交叉;guard=tests_r3_guards | EXECUTOR 追加 20;等消费产出后发挂载令 |
+
 ## 待用户拍板(OPEN)
 | # | 问题 | 背景 |
 |---|------|------|
