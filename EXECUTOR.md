@@ -15,10 +15,19 @@
 lr_dec=5e-4(应 3e-4)。clip 1.0 把每步更新压到一轮工作点的几十分之一,跑满也是假失败。
 两次试验启动都漏了旗标——根因是"例行命令"只存在于旧执行端记忆里,从未入库。今日钉死:
 
-**正典训练启动命令(此后一切重启只用这一条,一个字不改)**:
-```bat
-python scripts/build_dataset.py --clip-norm 25 --lr-dec 3e-4
+**正典训练启动命令(D76 用户版收编;此后一切重启只用这一块,一个字不改)**:
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r2_v3b.out.log" `
+  -RedirectStandardError  "$W\train_r2_v3b.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
 ```
+(下次重启只改日志文件名 v3b→v3c…;停进程 = `Stop-Process -Id <上面打印的PID> -Force`,
+PID 丢了再用旧的按命令行匹配扫杀。)
 
 执行:
 1. 停当前进程(停法同前)。
