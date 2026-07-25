@@ -9,7 +9,27 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 24(2026-07-25,D75):配置漂移叫停 → 用钉板命令重启(试验计时重置)
+## 当前阶段追加 25(2026-07-25,D77):双节奏评测上线;正典命令 v3(可选换装)
+
+v3b 启动验收全对(clip 25/lr_dec 3e-4/缓存 37.3 万条秒装)。**判决点 = 80,800**(70,800+10k)。
+应用户要求交付双节奏评测:探针(秒级,主判据)仍每 1000 步;解码腿(~25 分钟)改每
+5000 步一跑 —— 试验全程评测开销 ~5 小时 → ~1.5 小时。判据不受影响(主判据只用探针)。
+
+换装(可选,推荐;现在装配有缓存,重启只花几分钟):停当前 PID,pull,然后:
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r2_v3c.out.log" `
+  -RedirectStandardError  "$W\train_r2_v3c.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+核对:配置回显应含 `eval_decode_every=5000`。**判决点不变仍是 80,800**(评测节奏是仪表
+不是训练变量,v3b 已跑的步数照算)。不换装也行,就是每千步多等半小时评测。
+
+## 【v3b 启动验收通过;换装见追加 25】追加 24(2026-07-25,D75):配置漂移叫停
 
 抓到两处漂移(对照一轮存档 RESTART_C2.txt 的回显):本次跑成 clip_norm=1.0(应 25.0)
 lr_dec=5e-4(应 3e-4)。clip 1.0 把每步更新压到一轮工作点的几十分之一,跑满也是假失败。

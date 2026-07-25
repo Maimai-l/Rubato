@@ -323,7 +323,8 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
                    legato_omr_fn=None, eval_max: int = 128,
                    time_budget_s: float = 1200.0,
                    autolog: str | None = None, step: int | None = None,
-                   probe_utts: list | None = None) -> dict:
+                   probe_utts: list | None = None,
+                   decode_legs: bool = True) -> dict:
     """
     R-S11.5:nASAP val 跑 可解析率/OMR-NED;MAESTRO val 跑 AMT F1。
     样本 = assemble 的 utt dict(audio_path/win/dur_s)或预载 {audio, ...};音频按需窗读。
@@ -407,6 +408,27 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
             except Exception as e:
                 _p(f"  eval 多源探针 {u.get('kind')}[{u.get('utt_id')}] 失败: "
                    f"{type(e).__name__}: {e}")
+    # 【D77】双节奏评测:探针(教师强制,秒级)每次都跑 —— 试验主判据只靠它;
+    # 解码腿(48×逐 token 生成,~25 分钟)按 --eval-decode-every 稀疏跑。
+    # decode_legs=False 时到此为止:落盘探针证据,返回 probe_only 标记
+    # (调用侧据此跳过 stopper/best.pt,这不是一次"指标为 0 的坏 eval")。
+    if not decode_legs:
+        _p("  eval(仅探针;解码腿按 eval_decode_every 稀疏跑,本次跳过)")
+        if autolog and _lines:
+            try:
+                from pathlib import Path as _P
+                fp = _P(autolog)
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                with open(fp, "a", encoding="utf-8") as fh:
+                    fh.write(f"\n## eval @ step {step if step is not None else '?'} "
+                             f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n")
+                    fh.write("\n".join(_lines) + "\n")
+                print(f"  eval 证据已落盘 {fp}(git add + commit + push 即完成上报,勿编辑)",
+                      flush=True)
+            except Exception as e:
+                print(f"  ⚠ eval 证据落盘失败({type(e).__name__}: {e})—— 贴回本行", flush=True)
+        return {"probe_only": True, "probe": probe}
+
     subset = _eval_subset(nasap_val, eval_max)
     for si, sample in enumerate(subset):
         # 时限 + 心跳:eval 是逐 token 生成,慢是常态 —— 没有这两样,"慢"和"卡死"
@@ -800,6 +822,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
           f"batch_sec={getattr(datamodule, 'max_batch_sec', '?')} "
           f"precision={cfg.get('precision') or 'fp32'} max_steps={max_steps} "
           f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)} "
+          f"eval_decode_every={int(cfg.get('eval_decode_every') or 0) or eval_every_steps} "
           + ("mix=D2纸面(.35/.15/.20/.30)" if not cfg.get("dialect_mix") else
              "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items())))
           + f" prefetch={'proc:' + str(int(cfg.get('prefetch_batches', 0))) if int(cfg.get('prefetch_batches', 0)) > 0 else '关'}"
@@ -900,8 +923,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
             if step % save_every == 0:
                 save_snapshot(last_pt, model, opt, sched, step, epoch)
 
-            # 评测 + 止损
+            # 评测 + 止损(D77 双节奏:探针每 eval_every 跑;解码腿按 eval_decode_every 稀疏)
             if step % eval_every_steps == 0:
+                _dec_every = int(cfg.get("eval_decode_every") or 0) or eval_every_steps
+                _full = (step % _dec_every == 0)
                 model.eval()
                 with torch.no_grad():
                     m = run_eval_hooks(model, datamodule.nasap_val,
@@ -912,8 +937,14 @@ def train(model, datamodule, cfg: dict, tokenizer,
                                        eval_max=int(cfg.get("eval_max", 128)),
                                        time_budget_s=float(cfg.get("eval_time_budget_s", 1200)),
                                        autolog=cfg.get("eval_autolog"), step=step,
-                                       probe_utts=getattr(datamodule, "probe_utts", None))
+                                       probe_utts=getattr(datamodule, "probe_utts", None),
+                                       decode_legs=_full)
                 report["eval_history"].append({"step": step, **m})
+                if m.get("probe_only"):
+                    model.train()
+                    if step >= max_steps:              # continue 会跳过循环尾检查,此处补上
+                        return _finish("max_steps_reached")
+                    continue               # 仅探针:不进止损器/不评 best.pt(不是坏 eval)
 
                 action = stopper.update(
                     step, m["parseable_rate"], m.get("maestro_amt_f1"),

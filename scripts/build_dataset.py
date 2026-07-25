@@ -321,6 +321,9 @@ def main():
     ap.add_argument("--eval-every", type=int, default=1000,
                     help="每多少优化步跑一次 eval+存滚动 ckpt。这台卡 ~1600 步/epoch、"
                          "每步几十秒 —— 3000 步一评是两天一评,太稀;1000 步≈半天一评")
+    ap.add_argument("--eval-decode-every", type=int, default=0,
+                    help="解码腿(48×逐 token 生成,~25 分钟)的独立节奏;0=与 --eval-every 同步。"
+                         "探针(秒级,试验主判据)仍按 --eval-every 每次跑(D77 双节奏)")
     ap.add_argument("--smoke-steps", type=int, default=800,
                     help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
                          "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
@@ -678,6 +681,7 @@ def main():
         "precision": "bf16",                       # 5070 Ti 支持;fp32 想开就删这行
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
         "clip_norm": args.clip_norm,
+        "eval_decode_every": args.eval_decode_every,
         "dialect_mix": dialect_mix,                # None=D2 纸面;设了 --amt-mix 则为换算后的四元组(回显自证)
         "prefetch_batches": args.prefetch,         # 预取深度;0=串行直迭代(对照)
         "eval_max": args.eval_max,                 # 每次 eval 抽的 val 子集(逐 token 生成,大了小时级)
