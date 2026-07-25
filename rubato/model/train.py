@@ -536,7 +536,11 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     _pr = (f"探针acc={probe['acc']:.2f}/前缀{probe['acc_prefix']:.2f}"
            f" eotP0={probe['eot_p_first']:.4f}") if probe.get("n_scored") else \
           (f"探针err={probe.get('error', '无参照')}" if probe else "探针=未跑")
-    _p(f"  eval 汇总: parseable={metrics['parseable_rate']:.2f} "
+    # 【D72】n 太小的 parseable 没有统计力(n=2 全空的概率在真率 0.10 下高达 81%)——
+    # 印成 NA 防误判读;r2 试验就是被 n=2 的 0.00 错杀的。
+    _pv = (f"{metrics['parseable_rate']:.2f}" if n_total >= 12
+           else f"NA(n={n_total}<12勿判读)")
+    _p(f"  eval 汇总: parseable={_pv} "
           f"empty={metrics['empty_rate']} n={n_total} 样本0={_p0!r} {_pr}")
 
     # MAESTRO val:AMT note F1(mir_eval)。R-S11.7 的"步≥8000 且 AMT F1<70 → 停训"

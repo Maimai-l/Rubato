@@ -29,6 +29,7 @@ _EMPTY_A2S = "|4/4k0"           # 合法空谱(过 validate),stub 与兜底用
 LAST_INFER_ERROR: str | None = None     # infer_a2s 顶层异常(traceback 头)
 LAST_DECODE_DEBUG: dict | None = None   # 单窗解码:validate 拒绝的原始输出 / 解码异常
 LAST_VIOLS: list = []                   # 本次 infer_a2s/infer_amt 全窗累计的真实违规(D44 拒因直方图)
+LAST_GEN_STATS: dict | None = None      # 【D72】最近一次自研解码:n_new/停因(eot|cap|poslimit)/快慢路径
 
 
 # ---------------------------------------------------------------- 纯逻辑:分窗(R-S12.1.1)
@@ -243,13 +244,23 @@ def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
             print(f"⚠ 解码快路径不可用({reason})→ 退全量 forward 慢路径(正确但慢十倍;"
                   "把本行原文+NeMo 版本贴回规划端)", flush=True)
 
+        stop = "cap"                       # 循环跑满 = 撞 max_new 上限
         for _ in range(max_new):
             row = _apply_rep_penalty(lp[0, -1], ids, n_prompt, rep_penalty, rep_window)
             nxt = int(row.argmax())
-            if nxt == eot or len(ids) >= 1023:
+            if nxt == eot:
+                stop = "eot"
+                break
+            if len(ids) >= 1023:
+                stop = "poslimit"          # 解码器位置表 1024 硬顶(先于 max_new 生效)
                 break
             ids.append(nxt)
             lp = fast(ids) if fast is not None else resolve_log_probs(fwd(ids))
+        # 【D72 仪表】生成长度/停因/路径 —— "拒因四类是否同为截断伤口"要靠它判,
+        # 600s/样本的慢路径嫌疑也靠它自证(fast=False 即慢路径)。
+        global LAST_GEN_STATS
+        LAST_GEN_STATS = {"n_new": len(ids) - n_prompt, "stop": stop,
+                          "fast": fast is not None}
 
     return tokenizer.decode(ids[n_prompt:]).strip()
 
@@ -306,7 +317,10 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
             return tast
         # 模型真实输出在此被丢弃 —— 这正是"样本0永远=兜底"时最需要看到的现场
         LAST_DECODE_DEBUG = {"stage": "validate_reject", "viol": viol[:4],
-                             "raw": raw[:160], "truncated": tast[:100]}
+                             "raw": raw[:320], "truncated": tast[:100],
+                             # 【D72】gen 统计随行:截断假设(拒因=撞 cap 的伤口)一眼可判;
+                             # raw 是显示截断([:320]),别再拿它当"模型只写到这"的证据
+                             "gen": LAST_GEN_STATS}
         # 拒因直方图的证据源(D44):v1 只在 eval 层对兜底常量复验,真实违规从未传出 →
         # 直方图退化成 empty 率。此处全量累积,infer_a2s/infer_amt 入口清零。
         LAST_VIOLS.extend(viol)
