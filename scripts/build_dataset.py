@@ -52,6 +52,11 @@ if _S2.exists():
 _PERF_S2 = WORK / "pdmx_perf_labels_s2.jsonl"
 if _PERF_S2.exists():
     SOURCES.append({"path": str(_PERF_S2), "kind": "pdmx", "domain": "synth"})
+# r3 去重回收波次(D60/D68,官方 VN 批 + s5 消费):同 staging/武装纪律,全 train
+# (清单生成即 train-only),行内带 audio_path(pdmx_audio_r3_native 下,flac)。
+_PERF_R3 = WORK / "pdmx_perf_labels_r3_native.jsonl"
+if _PERF_R3.exists():
+    SOURCES.append({"path": str(_PERF_R3), "kind": "pdmx", "domain": "synth"})
 
 # ---------------------------------------------------------------- 音频时长缓存
 _DUR_CACHE: dict[str, float] = {}
