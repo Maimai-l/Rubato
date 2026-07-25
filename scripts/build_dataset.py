@@ -14,6 +14,7 @@ S8 装配 + 训练启动:把三份 labels.jsonl(+音频)合成 RubatoDataModule,
 """
 from __future__ import annotations
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -59,12 +60,69 @@ if _PERF_R3.exists():
     SOURCES.append({"path": str(_PERF_R3), "kind": "pdmx", "domain": "synth"})
 
 # ---------------------------------------------------------------- 音频时长缓存
+# 【D71,用户点名"竞赛早 TLE 了"】进程内 dict 之外加【持久化】层:75 万行逐个
+# sf.info 开文件 ≈ 半小时/次装配;持久层以 (size, mtime_ns) 做失效键,命中只花一次
+# os.stat(~0.1ms),重复装配从 IO 车祸变秒级读账。缓存是纯优化:任何 IO 失败静默
+# 降级为直接探测,绝不让缓存问题变装配问题。追加写(jsonl,后行覆盖前行),中断安全。
 _DUR_CACHE: dict[str, float] = {}
+_DUR_DB: dict[str, tuple[int, int, float]] = {}      # path -> (size, mtime_ns, dur)
+_DUR_DB_LOADED = False
+_DUR_DB_FH = None
+_DUR_DB_PENDING = 0
+
+
+def _dur_db_path() -> Path:
+    import os as _os
+    return Path(_os.environ.get("RUBATO_DUR_CACHE") or (WORK / "audio_dur_cache.jsonl"))
+
+
+def _dur_db_load() -> None:
+    global _DUR_DB_LOADED
+    if _DUR_DB_LOADED:
+        return
+    _DUR_DB_LOADED = True
+    p = _dur_db_path()
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    path, size, mt, d = json.loads(line)
+                    _DUR_DB[path] = (int(size), int(mt), float(d))
+                except Exception:
+                    continue                      # 坏行跳过(中断写残行属预期)
+        print(f"  [INFO] 时长缓存加载 {len(_DUR_DB)} 条({p.name})")
+    except OSError:
+        pass                                      # 无缓存文件 = 首次,静默
+
+
+def _dur_db_append(path: str, size: int, mt: int, d: float) -> None:
+    global _DUR_DB_FH, _DUR_DB_PENDING
+    try:
+        if _DUR_DB_FH is None:
+            _dur_db_path().parent.mkdir(parents=True, exist_ok=True)
+            _DUR_DB_FH = open(_dur_db_path(), "a", encoding="utf-8")
+        _DUR_DB_FH.write(json.dumps([path, size, mt, d]) + "\n")
+        _DUR_DB_PENDING += 1
+        if _DUR_DB_PENDING >= 500:                # 批量落盘:中断最多丢 500 条探测
+            _DUR_DB_FH.flush()
+            _DUR_DB_PENDING = 0
+    except OSError:
+        pass                                      # 缓存写失败不影响装配
 
 
 def _flac_dur(path: str) -> float | None:
     if path in _DUR_CACHE:
         return _DUR_CACHE[path]
+    _dur_db_load()
+    import os as _os
+    try:
+        st = _os.stat(path)
+    except OSError:
+        return None                               # 缺文件不缓存(可能后补)
+    rec = _DUR_DB.get(path)
+    if rec and rec[0] == st.st_size and rec[1] == st.st_mtime_ns:
+        _DUR_CACHE[path] = rec[2]
+        return rec[2]
     try:
         import soundfile as sf
         info = sf.info(path)
@@ -72,6 +130,8 @@ def _flac_dur(path: str) -> float | None:
     except Exception:
         return None
     _DUR_CACHE[path] = d
+    _DUR_DB[path] = (st.st_size, st.st_mtime_ns, d)
+    _dur_db_append(path, st.st_size, st.st_mtime_ns, d)
     return d
 
 
