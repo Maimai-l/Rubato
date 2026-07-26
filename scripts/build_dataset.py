@@ -327,6 +327,9 @@ def main():
     ap.add_argument("--smoke-steps", type=int, default=800,
                     help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
                          "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
+    ap.add_argument("--pitch-loss-weight", type=float, default=1.0,
+                    help="音高 piece 的 CE 权重(D82;均值归一,总量级不变只移内部占比;"
+                         "1.0=仅监控 pv= 列)")
     ap.add_argument("--augment-acoustic", action="store_true",
                     help="C1a(D58):标签安全声学增广(增益/倾斜/噪声,无混响)。二轮启动配置开;"
                          "生效自证看回显 aug_acoustic= 字段")
@@ -682,6 +685,7 @@ def main():
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
         "clip_norm": args.clip_norm,
         "eval_decode_every": args.eval_decode_every,
+        "pitch_loss_weight": args.pitch_loss_weight,
         "dialect_mix": dialect_mix,                # None=D2 纸面;设了 --amt-mix 则为换算后的四元组(回显自证)
         "prefetch_batches": args.prefetch,         # 预取深度;0=串行直迭代(对照)
         "eval_max": args.eval_max,                 # 每次 eval 抽的 val 子集(逐 token 生成,大了小时级)

@@ -143,11 +143,32 @@ def _per_token_ordinal_nll(logp: torch.Tensor, target_bins: torch.Tensor,
     return -(q * lp).sum(-1)
 
 
+import re as _re
+
+# 与 infer.py 探针 acc_pitch 同一正则(D43/D82:加权的"音高"定义必须与被测指标一字不差,
+# 否则打点和读表不在同一块肉上)。音高字形为原子 piece:AMT/TAST 的 N60/n60、A2S 的 C4/F##5/A-3。
+_PITCH_PIECE = _re.compile(r"^(?:[Nn]\d{1,3}|[a-gA-G](?:#{1,2}|-{1,2})?\d)$")
+
+
+def build_pitch_token_mask(tokenizer, vocab_size: int = 8000) -> torch.Tensor:
+    """全词表扫一遍 → BoolTensor[vocab],True=音高 piece。启动时建一次(8000 次查表,毫秒级)。"""
+    m = torch.zeros(vocab_size, dtype=torch.bool)
+    for i in range(vocab_size):
+        try:
+            if _PITCH_PIECE.match(tokenizer.id_to_piece(i) or ""):
+                m[i] = True
+        except Exception:
+            continue
+    return m
+
+
 def batch_sequence_loss(log_probs: torch.Tensor, labels: torch.Tensor,
                         token_types: torch.Tensor, loss_mask: torch.Tensor,
                         ts_bins: torch.Tensor, ts_token_ids: torch.Tensor,
                         label_smoothing: float = 0.1,
-                        p_center: float = 0.9, w: int = 5) -> dict:
+                        p_center: float = 0.9, w: int = 5,
+                        pitch_weight: float = 1.0,
+                        pitch_mask: torch.Tensor | None = None) -> dict:
     """
     论文精确训练 loss(R-S11.1 全三件套,进 backward)。
     log_probs: (B, L, V) —— 模型 forward 的 log 概率(teacher forcing,已右移对齐 labels)
@@ -175,21 +196,43 @@ def batch_sequence_loss(log_probs: torch.Tensor, labels: torch.Tensor,
         per_token[ts_sel] = _per_token_ordinal_nll(
             flat_lp[ts_sel], flat_bins[ts_sel], ts_token_ids, p_center, w)
 
+    # 【D82 音高加权】病灶算术:音高 token 只占 loss 小头,梯度走文本先验近路。
+    # 权重只移【内部占比】不改总量级(按掩码内均值归一)—— 一轮基线曲线保持可比,
+    # D81 护栏(合成侧轨迹对表)依赖这一点。pitch_weight=1.0 时本段数值恒等于原实现。
+    is_pitch_flat = None
+    per_token_mon = per_token                       # 监控口径 = 未加权(基线曲线可比性)
+    if pitch_mask is not None:
+        pm = pitch_mask.to(flat_labels.device)
+        is_pitch_flat = pm[flat_labels.clamp(min=0, max=pm.numel() - 1)] & sem_sel
+        if pitch_weight != 1.0 and is_pitch_flat.any():
+            per_token_mon = per_token.detach().clone()
+            w_vec = torch.ones_like(per_token)
+            w_vec[is_pitch_flat] = float(pitch_weight)
+            per_token = per_token * (w_vec / w_vec[flat_mask].mean().clamp(min=1e-6))
+
     per_token = per_token.reshape(B, L)
     seq_ce = per_token.sum(-1)                                         # (B,) Σ_t CE_t
     T = loss_mask.reshape(B, L).float().sum(-1).clamp(min=1.0)         # (B,) |T|
     loss = (seq_ce * T.pow(-0.5)).mean()                               # 论文 1/√|T|,batch 平均
 
     with torch.no_grad():
-        sem_mean = per_token.reshape(-1)[sem_sel].mean() if sem_sel.any() else log_probs.new_tensor(0.0)
-        ts_mean = per_token.reshape(-1)[ts_sel].mean() if ts_sel.any() else log_probs.new_tensor(0.0)
+        mon = per_token_mon.reshape(B, L)
+        mon_flat = per_token_mon.reshape(-1)
+        sem_mean = mon_flat[sem_sel].mean() if sem_sel.any() else log_probs.new_tensor(0.0)
+        ts_mean = mon_flat[ts_sel].mean() if ts_sel.any() else log_probs.new_tensor(0.0)
+        # 音高单列监控(未加权口径):二轮盯"听没听"的训练侧直读仪表
+        pitch_mean = (mon_flat[is_pitch_flat].mean()
+                      if is_pitch_flat is not None and is_pitch_flat.any()
+                      else log_probs.new_tensor(0.0))
+        n_pitch = int(is_pitch_flat.sum()) if is_pitch_flat is not None else 0
         # 逐序列均值(监控用,供上层按 dialect 聚合出各自学习曲线)
         sem_m = (loss_mask & (token_types == 0)).float()
         ts_m = (loss_mask & (token_types == 1)).float()
-        seq_sem = (per_token * sem_m).sum(-1) / sem_m.sum(-1).clamp(min=1.0)
-        seq_ts = (per_token * ts_m).sum(-1) / ts_m.sum(-1).clamp(min=1.0)
+        seq_sem = (mon * sem_m).sum(-1) / sem_m.sum(-1).clamp(min=1.0)
+        seq_ts = (mon * ts_m).sum(-1) / ts_m.sum(-1).clamp(min=1.0)
         has_ts = ts_m.sum(-1) > 0
     return {"loss": loss, "sem": sem_mean, "ts": ts_mean,
+            "pitch": pitch_mean, "n_pitch": n_pitch,
             "n_sem": int(sem_sel.sum()), "n_ts": int(ts_sel.sum()),
             "seq_sem": seq_sem, "seq_ts": seq_ts, "seq_has_ts": has_ts}
 

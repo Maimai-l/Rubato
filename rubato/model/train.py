@@ -227,6 +227,8 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         log_probs, labels, token_types, loss_mask, ts_bins, ts_token_ids,
         label_smoothing=cfg.get("sem_label_smooth", 0.1),
         p_center=cfg.get("p_center", 0.9), w=cfg.get("w", 5),
+        pitch_weight=float(cfg.get("pitch_weight", 1.0)),
+        pitch_mask=cfg.get("pitch_mask"),
     )
     loss = parts["loss"]
     assert loss.requires_grad, "loss 无梯度 —— forward 图断了(检查 no_grad/detach)"
@@ -248,6 +250,7 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         "semantic_loss": parts["sem"],
         "ordinal_loss": parts["ts"],
         "ts_loss": parts["ts"],
+        "pitch_loss": parts.get("pitch"), "n_pitch": parts.get("n_pitch", 0),
         "n_sem": parts["n_sem"], "n_ts": parts["n_ts"],
         "dialect_sem": {d: (sum(v) / len(v), len(v)) for d, v in dialect_sem.items()},
         "dialect_ts": {d: (sum(v) / len(v), len(v)) for d, v in dialect_ts.items()},
@@ -796,6 +799,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     ckpt_ring = []      # 滚动保留 6
     best_omr = float("inf")
     recent, recent_sem, recent_ts = [], [], []      # 近 50 步窗口(日志 + final_* 判据)
+    recent_pv: list = []                            # 音高 CE 滚动窗(D82,训练侧"听没听"直读)
     recent_gn: list = []                            # 裁剪前梯度范数(有效 lr 是否被裁剪吃掉)
     recent_dia: dict = {}                           # {dialect: [近 200 条 seq sem]}(各自学习曲线)
     report = {"stop_events": [], "eval_history": []}
@@ -850,7 +854,15 @@ def train(model, datamodule, cfg: dict, tokenizer,
     # 一次性预备:时间戳 id 映射 / 梯度累积额度 / bf16
     ts_token_ids = build_ts_token_ids(tokenizer)
     accum_target_sec = float(cfg.get("grad_accum_to_audio_sec", 2000))
-    loss_cfg = cfg.get("loss", {})
+    loss_cfg = dict(cfg.get("loss", {}))
+    # 【D82】音高掩码常建(毫秒级):weight=1 时仅点亮 pv= 监控列,数值路径恒等;
+    # weight≠1 时按 D82 加权(均值归一,总量级不变)。
+    from rubato.model.losses import build_pitch_token_mask
+    loss_cfg["pitch_weight"] = float(cfg.get("pitch_loss_weight", 1.0))
+    loss_cfg["pitch_mask"] = build_pitch_token_mask(
+        tokenizer, int(cfg.get("vocab_size", 8000)))
+    print(f"  音高 piece 掩码: {int(loss_cfg['pitch_mask'].sum())} 个 | "
+          f"加权 ×{loss_cfg['pitch_weight']:g}", flush=True)
     use_bf16 = (str(cfg.get("precision", "")).startswith("bf16")
                 and torch.cuda.is_available())
     autocast = (lambda: torch.autocast("cuda", dtype=torch.bfloat16)) if use_bf16 \
@@ -892,9 +904,13 @@ def train(model, datamodule, cfg: dict, tokenizer,
             step += 1
 
             # 训练可观测性:没有这几行,执行端只能对着黑屏猜收敛(冒烟判据也取自这窗口)
+            _pv = parts.get("pitch_loss")
             for buf, v in ((recent, float(parts["loss"])),
                            (recent_sem, float(parts["semantic_loss"])),
-                           (recent_ts, float(parts["ts_loss"]))):
+                           (recent_ts, float(parts["ts_loss"])),
+                           (recent_pv, float(_pv) if _pv is not None else None)):
+                if v is None:
+                    continue
                 buf.append(v)
                 if len(buf) > 50:
                     buf.pop(0)
@@ -915,6 +931,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 t_last_step = step
                 print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
+                      + (f"pv={sum(recent_pv)/len(recent_pv):.3f} " if recent_pv else "")
+                      +
                       f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
                       f"enc={gn_groups[0]:.1f} dec={gn_groups[1]:.1f} "
                       f"lrE={opt.param_groups[0]['lr']:.2e} lrD={opt.param_groups[-1]['lr']:.2e} "
