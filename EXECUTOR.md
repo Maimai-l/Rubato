@@ -9,7 +9,25 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 26(2026-07-26,D78):试验判败(判据数学死亡)→ 二轮正式全新热启
+## 当前阶段追加 27(2026-07-26,D80):二轮启动命令终版(用户令:增广自第 0 步开)
+
+用户裁决:C1a 声学增广进二轮基线,不再分段进场(理由成立:试验 9,000 步已是无增广实测;
+增广本属论文配方)。启动三步不变(停旧 PID → ckpt 目录改名归档 → pull),命令换终版:
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r2_v4.out.log" `
+  -RedirectStandardError  "$W\train_r2_v4.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+开局核对四样:clip_norm=25.0 / lr_dec=3.0e-04 / eval_decode_every=5000 / **aug_acoustic=开**,
+且无"续训:恢复"行(step 从小数字起)。发回回显行+头 3 条训练行,之后每 10k 一报。
+
+## 【命令被追加 27 终版取代】追加 26(2026-07-26,D78):试验判败 → 二轮全新热启
 
 判决:主判据(maestro Δpitch 三连正)与副判据在 80,800 前均已不可达 → 失败,按预注册
 转全新热启。试验遗产:合成侧被喂活(A2S 2.41→2.32/TAST 1.94),maestro 音高冻结
