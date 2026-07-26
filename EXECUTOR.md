@@ -9,7 +9,30 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 27(2026-07-26,D80):二轮启动命令终版(用户令:增广自第 0 步开)
+## 当前阶段追加 28(2026-07-26,D83):二轮启动·最终版(增广 + 音高加权 ×2.5)
+
+配方钉板:池 v3 + 从零 + C1a 现版 + 音高加权 ×2.5(加强版 C1a 已砍;遮上文 10k 再议)。
+四步照抄:
+1. 若有训练进程先停:`Stop-Process -Id <PID> -Force`
+2. `if (Test-Path "D:\vscode_projects\ee_download\Rubato\outputs\ckpt") { Rename-Item "D:\vscode_projects\ee_download\Rubato\outputs\ckpt" "ckpt_r2trial_79k" }`
+3. `git pull --rebase --autostash`(在 D:\vscode_projects\ee_download\Rubato 下)
+4. 启动:
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r2_v4.out.log" `
+  -RedirectStandardError  "$W\train_r2_v4.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+开局核对(发回这几行):配置回显行(clip_norm=25.0 / lr_dec=3.0e-04 / eval_decode_every=5000
+/ aug_acoustic=开)+ "音高 piece 掩码: … | 加权 ×2.5"行 + **无"续训:恢复"**、首条训练行
+step 为小数字。之后每 10k 发一次 autolog,训练期不渲染。训练行新列 pv= 即音高损失,
+它降 = 音高在学。
+
+## 【被追加 28 取代】追加 27(2026-07-26,D80):二轮启动命令终版
 
 用户裁决:C1a 声学增广进二轮基线,不再分段进场(理由成立:试验 9,000 步已是无增广实测;
 增广本属论文配方)。启动三步不变(停旧 PID → ckpt 目录改名归档 → pull),命令换终版:
