@@ -9,6 +9,7 @@ PASS = 0
 
 SCRIPTS = [
     "scripts/build_dataset.py",
+    "scripts/certify_pdmx_leakage.py",
     "scripts/sop_next.py",
     "scripts/s7_resilient.py",
     "scripts/s7_full_nasap.py",

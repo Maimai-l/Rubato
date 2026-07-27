@@ -47,6 +47,7 @@ from rubato.render.core import (
 )
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
+REPO_ROOT = Path(__file__).resolve().parent.parent
 VN_SUPPORTED_COMPOSERS = (
     "Bach", "Balakirev", "Beethoven", "Brahms", "Chopin", "Debussy",
     "Glinka", "Haydn", "Liszt", "Mozart", "Prokofiev", "Rachmaninoff",
@@ -572,6 +573,15 @@ def cpu_stage(mid: dict) -> dict:
             if audio is None:
                 res["fail"] = "read_audio"
                 return res
+            # R-S4.4 non-silence gate.  We already hold the decoded samples, so
+            # the peak check is equivalent to ffmpeg volumedetect without
+            # launching another process for every VN piece.
+            import numpy as np
+            peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
+            gate_db = float(_W["sources"]["render"].get("silence_gate_db", -60))
+            if peak <= 10.0 ** (gate_db / 20.0):
+                res["fail"] = f"render_silent:peak={peak:.3g}<gate_db={gate_db:g}"
+                return res
             # 【截断校验】渲染被超时杀/中途失败 → 音频比 tmap 预期短,后段会被夹成残段
             # (守卫只查"计划时长",管不住实际音频不够长)。差超容差 → 整曲判失败重跑,不出残段。
             expected_end = float(tmap(bounds_end)) if bounds_end is not None else 0.0
@@ -895,8 +905,8 @@ def main(argv=None):
     ap.add_argument("--manifest", default=str(ROOT / "work" / "manifest_pieces.jsonl"))
     ap.add_argument("--offset", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--sources", default="configs/sources.yaml")
-    ap.add_argument("--presets", default="configs/recording_presets.yaml")
+    ap.add_argument("--sources", default=str(REPO_ROOT / "configs" / "sources.yaml"))
+    ap.add_argument("--presets", default=str(REPO_ROOT / "configs" / "recording_presets.yaml"))
     ap.add_argument("--out-labels", default=str(ROOT / "work" / "pdmx_perf_labels.jsonl"))
     ap.add_argument("--out-corpus", default=str(ROOT / "work" / "a2s_corpus.txt"))
     ap.add_argument("--out-audio-dir", default=str(ROOT / "work" / "pdmx_audio"))

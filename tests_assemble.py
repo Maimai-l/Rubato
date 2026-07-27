@@ -120,4 +120,62 @@ _u, _l, _st = assemble([{"path": _lp, "kind": "pdmx", "domain": "synth", "row_fn
 check("rowfn_filtered", _st["per_source"]["pdmx"]["filtered"] == 1, _st)
 check("rowfn_split_injected", _u[0]["split"] == "val" and len(_u) == 1, _u)
 
+print("[7] 训练入口只可使用 val；test 必须完整保留给正式终评")
+from scripts.build_dataset import (
+    select_training_partitions, validate_assembly_for_training, validate_cli_args)
+_parts = {
+    "train": [{"utt_id": "tr", "kind": "pdmx"}],
+    "val": [{"utt_id": "nv", "kind": "nasap"},
+            {"utt_id": "mv", "kind": "maestro"}],
+    "test": [{"utt_id": "nt", "kind": "nasap"},
+             {"utt_id": "mt", "kind": "maestro"}],
+}
+_tr, _nv, _mv, _nt, _mt = select_training_partitions(_parts)
+check("val_test_not_merged",
+      [u["utt_id"] for u in _nv] == ["nv"]
+      and [u["utt_id"] for u in _mv] == ["mv"])
+check("test_reserved_for_final",
+      [u["utt_id"] for u in _nt] == ["nt"]
+      and [u["utt_id"] for u in _mt] == ["mt"])
+
+print("[8] 非空源 kept=0 是硬错误，不是打印后继续")
+try:
+    validate_assembly_for_training({
+        "per_source": {"nasap": {"rows": 10, "kept": 0, "no_audio": 10,
+                                  "no_dialect": 0, "filtered": 0}}})
+    _hard_gate = False
+except RuntimeError:
+    _hard_gate = True
+check("zero_kept_aborts", _hard_gate)
+validate_assembly_for_training({
+    "per_source": {"nasap": {"rows": 10, "kept": 9, "no_audio": 1}}})
+check("nonzero_kept_passes", True)
+try:
+    validate_assembly_for_training({
+        "per_source": {"pdmx": {"rows": 20, "kept": 10}},
+        "per_file": {
+            "good.jsonl": {"kind": "pdmx", "rows": 10, "kept": 10},
+            "dead.jsonl": {"kind": "pdmx", "rows": 10, "kept": 0,
+                           "no_audio": 10},
+        }})
+    _file_gate = False
+except RuntimeError:
+    _file_gate = True
+check("per_file_zero_not_hidden_by_same_kind", _file_gate)
+
+print("[9] CLI 数值参数启动前校验")
+from types import SimpleNamespace
+_cli = SimpleNamespace(
+    max_batch_sec=60, clip_norm=1, eval_max=48, eval_every=1000,
+    smoke_steps=800, probe_n=8, abtest_n=48, smoke=0, prefetch=0,
+    eval_decode_every=0, pitch_loss_weight=1, lr_enc=None, lr_dec=None)
+validate_cli_args(_cli)
+check("valid_cli_passes", True)
+try:
+    validate_cli_args(SimpleNamespace(**{**vars(_cli), "eval_every": 0}))
+    _cli_gate = False
+except ValueError:
+    _cli_gate = True
+check("zero_eval_every_rejected", _cli_gate)
+
 print(f"\n全部通过: {PASS} 项")

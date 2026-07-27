@@ -4,6 +4,7 @@ import sys
 import re
 import numpy as np
 sys.path.insert(0, ".")
+import rubato.data.dataset as dataset_mod
 from rubato.data.dataset import (
     encode_target, apply_tiling_text, collate_batch, N_BINS,
 )
@@ -100,6 +101,21 @@ enc_dom = encode_target(tok, "AMT", "N60<|vel:80|> <|0.03|>", sample=False, doma
 # domain 加在 prompt 末,loss_mask 仍 False;序列比无 domain 长 1
 enc_nodom = encode_target(tok, "AMT", "N60<|vel:80|> <|0.03|>", sample=False)
 check("domain_adds_token", len(enc_dom["input_ids"]) == len(enc_nodom["input_ids"]) + 1)
+
+print("[5b] encode_target 必须调用唯一目标序列构造器")
+_real_builder = dataset_mod.build_target_sequence
+_calls = []
+def _spy_builder(dialect, label_pieces, domain=None):
+    _calls.append((dialect, list(label_pieces), domain))
+    return _real_builder(dialect, label_pieces, domain)
+dataset_mod.build_target_sequence = _spy_builder
+try:
+    dataset_mod.encode_target(tok, "A2S", "C4 1/4", sample=False, domain="synth")
+finally:
+    dataset_mod.build_target_sequence = _real_builder
+check("production_builder_called",
+      len(_calls) == 1 and _calls[0][0] == "A2S" and _calls[0][2] == "synth",
+      _calls)
 
 print("[6] collate:padding + batch 契约键")
 def mk_item(L, S):

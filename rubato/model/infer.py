@@ -2,14 +2,14 @@
 S12 推理(A2S 主线产出形态)。规格见 SPEC.md R-S12.1~12.3 + 验收 A-S12.1。
 
 主线设计(R-S12.1):长音频走 TAST prompt,时间戳仅内部用作分窗信号,输出前剥离。
-  1. 40s 编码窗、20s hop;
+  1. 40s 编码窗，首窗以 20s 前最后一条小节线决定下一窗起点;
   2. 解码中首个时间戳 >20s 视作该窗 EOS;
-  3. 窗间在小节线合并(用 merge_ref 的 IR 层合并,Dyck 跨缝由结构保证);
+  3. 下一窗从该小节线开始，窗间零重叠地做 IR 拼接，Dyck 跨缝由结构保证;
   4. 合并后剥戳 → A2S → MusicXML。
 
 分层:
   纯逻辑(沙盒可测):split_audio 分窗、strip_timestamps 剥戳、truncate_after_20s 截断、
-    build_tast_prompt、窗合并(委托 merge_ref)。
+    build_tast_prompt、时间戳/结构校验。
   GPU 层(本地,带断言):single_window_infer 调 NeMo model.generate/transcribe,beam=4 重试。
 
 infer_a2s 是 train.py 的 eval hook 依赖项:model=None 或失败时返回合法空谱,保证 hook 不崩。
@@ -19,7 +19,6 @@ import re
 
 from rubato.intermo.core import text_to_units, validate_units
 from rubato.model.build import DIALECT_PROMPT
-from rubato.model.merge_ref import merge_windows_ref
 
 _EMPTY_A2S = "|4/4k0"           # 合法空谱(过 validate),stub 与兜底用
 
@@ -30,6 +29,7 @@ LAST_INFER_ERROR: str | None = None     # infer_a2s 顶层异常(traceback 头)
 LAST_DECODE_DEBUG: dict | None = None   # 单窗解码:validate 拒绝的原始输出 / 解码异常
 LAST_VIOLS: list = []                   # 本次 infer_a2s/infer_amt 全窗累计的真实违规(D44 拒因直方图)
 LAST_GEN_STATS: dict | None = None      # 【D72】最近一次自研解码:n_new/停因(eot|cap|poslimit)/快慢路径
+LAST_INFER_STATS: dict = {}             # 结构化状态；禁止再靠 "|4/4k0" 字符串猜兜底/局部丢窗
 
 
 # ---------------------------------------------------------------- 纯逻辑:分窗(R-S12.1.1)
@@ -146,22 +146,38 @@ def truncate_after_20s(tast_text: str, threshold_bin: int = 2000) -> str:
         return _regex_fallback()
 
 
-# ---------------------------------------------------------------- 纯逻辑:窗合并(R-S12.1.3)
-
-def merge_windows(window_a2s: list[str]) -> str:
-    """
-    委托 merge_ref 的 IR 层合并(在小节线合并,Dyck 跨缝由结构保证)。
-    window_a2s: 各窗【已剥戳】的 A2S 文本。
-    """
-    return merge_windows_ref(window_a2s)
-
-
 def validate_a2s(a2s_text: str) -> list[str]:
     """校验 A2S 合法性。返回违规列表(空=合法)。"""
     try:
         return validate_units(text_to_units(a2s_text))
     except Exception as e:
         return [f"parse_error:{type(e).__name__}"]
+
+
+def validate_tast_timestamps(tast_text: str, max_bin: int = 4000) -> list[str]:
+    """校验长音频自适应 hop 依赖的时间戳。
+
+    TAST 的最后一个终止小节线允许无戳；其余单元必须有戳、非递减且位于 0–40s。
+    只校验剥戳后的 A2S 会让乱序时间戳驱动窗口倒退/错跳。
+    """
+    try:
+        units = text_to_units(tast_text)
+    except Exception as e:
+        return [f"TS_PARSE:{type(e).__name__}"]
+    violations = []
+    stamped = []
+    for i, u in enumerate(units):
+        if u.ts_bin is None:
+            if not (i == len(units) - 1 and u.bar is not None):
+                violations.append(f"TS_MISSING:{i}")
+            continue
+        if u.ts_bin < 0 or u.ts_bin > max_bin:
+            violations.append(f"TS_RANGE:{i}:{u.ts_bin}")
+        stamped.append((i, u.ts_bin))
+    for (ia, a), (ib, b) in zip(stamped, stamped[1:]):
+        if b < a:
+            violations.append(f"TS_NONMONOTONE:{ia}->{ib}:{a}>{b}")
+    return violations
 
 
 # ---------------------------------------------------------------- 自研自回归解码(换表后唯一路径)
@@ -184,17 +200,13 @@ def _apply_rep_penalty(row, ids: list[int], n_prompt: int,
 
 
 def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
-                          max_new: int = 900, rep_penalty: float = 1.1,
-                          rep_window: int = 128) -> str:
+                           max_new: int = 900, rep_penalty: float = 1.1,
+                           rep_window: int = 128, beam_size: int = 1,
+                           length_penalty: float = 1.0) -> str:
     """
-    贪心解码,只依赖【训练验证过的同一个 forward】。为什么不用 NeMo transcribe/generate
-    (执行端 step1000 eval 实测 parseable=0):词表已换成自有 8000 spm、forward 直喂 id,
-    而 transcribe 走 NeMo 内部 aggregate tokenizer + canary prompt 表 —— 那套词表已不存在,
-    签名也不兼容。
-    路径:preprocessor+forward 跑一次(编码器只算一次,拿返回的 enc_states/enc_mask)→
-    每步下一 token 用内部模块快路径(transf_decoder+log_softmax);快路径首次用 forward
-    的 log_probs【自校验】,不一致自动退慢路径(每步全量 forward,正确但慢,打印警告)——
-    对 NeMo 内部签名零盲猜。
+    自回归解码。beam_size=1 是贪心，>1 是真实 beam search；两者都复用训练验证过的
+    forward 和同一份 encoder states。旧实现的“beam=4”参数从未进入自研解码，实际只是
+    把同一条 greedy 跑两次，本实现把该评测漏洞封死。
     """
     import torch
     from rubato.model.train import resolve_log_probs
@@ -206,61 +218,109 @@ def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
     len_t = torch.tensor([audio_t.shape[1]], device=device)
     processed, plen = model.preprocessor(input_signal=audio_t, length=len_t)
 
-    def fwd(cur_ids):
-        t = torch.tensor([cur_ids], dtype=torch.long, device=device)
-        tl = torch.tensor([len(cur_ids)], device=device)
-        return model.forward(processed_signal=processed, processed_signal_length=plen,
-                             transcript=t, transcript_length=tl)
+    def fwd_batch(seqs):
+        b = len(seqs)
+        t = torch.tensor(seqs, dtype=torch.long, device=device)
+        tl = torch.full((b,), len(seqs[0]), dtype=torch.long, device=device)
+        return model.forward(
+            processed_signal=processed.expand(b, *processed.shape[1:]),
+            processed_signal_length=plen.expand(b),
+            transcript=t, transcript_length=tl)
 
     with torch.no_grad():
-        out0 = fwd(ids)
-        lp = resolve_log_probs(out0)
+        out0 = fwd_batch([ids])
+        lp0 = resolve_log_probs(out0)
         enc_states = out0[2] if isinstance(out0, (tuple, list)) and len(out0) >= 4 else None
         enc_mask = out0[3] if enc_states is not None else None
 
         fast = None
         if enc_states is not None and hasattr(model, "transf_decoder") \
                 and hasattr(model, "log_softmax"):
-            def fast_lp(cur_ids):
-                t = torch.tensor([cur_ids], dtype=torch.long, device=device)
-                dec = model.transf_decoder(input_ids=t, decoder_mask=torch.ones_like(t),
-                                           encoder_embeddings=enc_states,
-                                           encoder_mask=enc_mask)
+            def fast_batch(seqs):
+                b = len(seqs)
+                t = torch.tensor(seqs, dtype=torch.long, device=device)
+                dec = model.transf_decoder(
+                    input_ids=t, decoder_mask=torch.ones_like(t),
+                    encoder_embeddings=enc_states.expand(b, *enc_states.shape[1:]),
+                    encoder_mask=enc_mask.expand(b, *enc_mask.shape[1:]))
                 o = model.log_softmax(hidden_states=dec)
                 return o[0] if isinstance(o, (tuple, list)) else o
             reason = ""
             try:
-                cand = fast_lp(ids)
-                if cand.shape == lp.shape and torch.allclose(cand, lp, atol=1e-3):
-                    fast = fast_lp          # 与训练 forward 逐位一致 → 采用
+                cand = fast_batch([ids])
+                if cand.shape == lp0.shape and torch.allclose(cand, lp0, atol=1e-3):
+                    fast = fast_batch
                 else:
-                    reason = f"数值不一致 shape={tuple(cand.shape)} vs {tuple(lp.shape)}"
+                    reason = f"数值不一致 shape={tuple(cand.shape)} vs {tuple(lp0.shape)}"
             except Exception as e:
                 reason = f"{type(e).__name__}: {e}"
         else:
             reason = "缺 transf_decoder/log_softmax 成员"
         if fast is None and not getattr(autoregressive_decode, "_warned", False):
-            autoregressive_decode._warned = True   # 每进程一次,别刷屏
+            autoregressive_decode._warned = True
             print(f"⚠ 解码快路径不可用({reason})→ 退全量 forward 慢路径(正确但慢十倍;"
                   "把本行原文+NeMo 版本贴回规划端)", flush=True)
 
-        stop = "cap"                       # 循环跑满 = 撞 max_new 上限
-        for _ in range(max_new):
-            row = _apply_rep_penalty(lp[0, -1], ids, n_prompt, rep_penalty, rep_window)
-            nxt = int(row.argmax())
-            if nxt == eot:
-                stop = "eot"
-                break
-            if len(ids) >= 1023:
-                stop = "poslimit"          # 解码器位置表 1024 硬顶(先于 max_new 生效)
-                break
-            ids.append(nxt)
-            lp = fast(ids) if fast is not None else resolve_log_probs(fwd(ids))
-        # 【D72 仪表】生成长度/停因/路径 —— "拒因四类是否同为截断伤口"要靠它判,
-        # 600s/样本的慢路径嫌疑也靠它自证(fast=False 即慢路径)。
+        def score_batch(seqs):
+            return fast(seqs) if fast is not None else resolve_log_probs(fwd_batch(seqs))
+
+        beam_size = max(1, int(beam_size))
+        stop = "cap"
+        if beam_size == 1:
+            lp = lp0
+            for _ in range(max_new):
+                row = _apply_rep_penalty(lp[0, -1], ids, n_prompt,
+                                         rep_penalty, rep_window)
+                nxt = int(row.argmax())
+                if nxt == eot:
+                    stop = "eot"
+                    break
+                if len(ids) >= 1023:
+                    stop = "poslimit"
+                    break
+                ids.append(nxt)
+                lp = score_batch([ids])
+        else:
+            # beam = (ids, cumulative_logp, done, stop_reason)
+            beams = [(list(ids), 0.0, False, None)]
+
+            def rank(b):
+                n_new = max(1, len(b[0]) - n_prompt)
+                return b[1] / (n_new ** length_penalty) if length_penalty else b[1]
+
+            for _ in range(max_new):
+                active = [b for b in beams if not b[2]]
+                if not active:
+                    break
+                rows = score_batch([b[0] for b in active])
+                candidates = [b for b in beams if b[2]]
+                for bi, (seq, score, _done, _why) in enumerate(active):
+                    row = _apply_rep_penalty(rows[bi, -1], seq, n_prompt,
+                                             rep_penalty, rep_window)
+                    vals, toks = torch.topk(row, k=min(beam_size, int(row.numel())))
+                    for val, tok in zip(vals.tolist(), toks.tolist()):
+                        tok = int(tok)
+                        if tok == eot:
+                            candidates.append((list(seq), score + float(val), True, "eot"))
+                        elif len(seq) >= 1023:
+                            candidates.append((list(seq), score + float(val),
+                                               True, "poslimit"))
+                        else:
+                            candidates.append((list(seq) + [tok], score + float(val),
+                                               False, None))
+                candidates.sort(key=rank, reverse=True)
+                beams = candidates[:beam_size]
+                if all(b[2] for b in beams):
+                    break
+            # cap/位置上限时活跃 beam 也必须参与最终比较；旧逻辑只要出现过任意
+            # 低概率早停 EOT，就会丢掉所有更优活跃序列，放大空输出偏置。
+            best = max(beams, key=rank)
+            ids = best[0]
+            stop = best[3] or stop
+
         global LAST_GEN_STATS
         LAST_GEN_STATS = {"n_new": len(ids) - n_prompt, "stop": stop,
-                          "fast": fast is not None}
+                          "fast": fast is not None, "beam_size": beam_size}
 
     return tokenizer.decode(ids[n_prompt:]).strip()
 
@@ -290,10 +350,11 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
 
     def _decode(beam):
         # 真 NeMo 模型(有 preprocessor+forward)走自研解码 —— transcribe/generate 与换表后
-        # 的模型不兼容(内部 tokenizer 已被绕开);beam 参数在 v1 忽略(贪心,监控够用,
-        # 论文终评的 beam=4 等自研 beam 实现)。stub 分支保留给沙盒测试。
+        # 的模型不兼容(内部 tokenizer 已被绕开)。这里的 beam_size 已接入真正的
+        # autoregressive beam search；stub 分支保留给沙盒测试。
         if hasattr(model, "preprocessor") and hasattr(model, "forward"):
-            return autoregressive_decode(model, audio_window, tokenizer, prompt)
+            return autoregressive_decode(model, audio_window, tokenizer, prompt,
+                                         beam_size=beam)
         if hasattr(model, "generate"):
             out = model.generate(audio_window, prompt=prompt, num_beams=beam)
             return out if isinstance(out, str) else tokenizer.decode(out)
@@ -302,7 +363,10 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
         return str(model(audio_window, prompt=prompt))
 
     global LAST_DECODE_DEBUG
-    for beam in (beam_size, 1):          # beam=4,失败退 greedy
+    attempts = [max(1, int(beam_size))]
+    if attempts[0] != 1:
+        attempts.append(1)               # 真 beam 失败后才退一次 greedy
+    for beam in attempts:
         try:
             raw = _decode(beam)
         except Exception as e:
@@ -312,7 +376,8 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
                                  "tb": traceback.format_exc(limit=4)}
             continue
         tast = truncate_after_20s(raw) if truncate else raw   # >20s = EOS(末窗除外)
-        viol = validate_a2s(strip_timestamps(tast))           # 剥戳后合法即采用
+        viol = (validate_a2s(strip_timestamps(tast))
+                + validate_tast_timestamps(tast))
         if not viol:
             return tast
         # 模型真实输出在此被丢弃 —— 这正是"样本0永远=兜底"时最需要看到的现场
@@ -342,27 +407,40 @@ def _last_barline_sec(tast_text: str, ts_ms: int = 10) -> float | None:
 # ---------------------------------------------------------------- 主入口
 
 def infer_a2s(model, audio, tokenizer, sr: int = 16000,
-              domain: str | None = None) -> str:
+              domain: str | None = None, beam_size: int = 1) -> str:
     """
     S12 主入口。train.py eval hook 调用:infer_a2s(model, audio, tokenizer) -> str。
-    model=None 或推理失败 → 返回合法空谱,保证 hook 不崩(parseable=1.0 起步)。
+    model=None 或推理失败 → 返回合法空谱以保证调用方不崩；同时 LAST_INFER_STATS
+    明确标记 fallback，评测端必须把它计为失败，不能算作“可解析”。
     domain:None=不加域提示(现状 G0);"real"/"synth" 与训练前缀一致(EXPERIMENT_PROMPT
     判决前,eval/产品调用方不得擅改缺省)。
     """
-    global LAST_VIOLS
+    global LAST_VIOLS, LAST_INFER_STATS, LAST_INFER_ERROR
+    global LAST_DECODE_DEBUG, LAST_GEN_STATS
     LAST_VIOLS = []
+    LAST_INFER_ERROR = None
+    LAST_DECODE_DEBUG = None
+    LAST_GEN_STATS = None
+    LAST_INFER_STATS = {"status": "starting", "fallback": False,
+                        "n_windows": 0, "n_failed_windows": 0}
     if model is None:
+        LAST_INFER_STATS = {"status": "no_model", "fallback": True,
+                            "n_windows": 0, "n_failed_windows": 0}
         return _EMPTY_A2S
     try:
-        return _infer_impl(model, audio, tokenizer, sr, domain=domain)
+        return _infer_impl(model, audio, tokenizer, sr, domain=domain,
+                           beam_size=beam_size)
     except Exception as e:
         import traceback
-        global LAST_INFER_ERROR
         LAST_INFER_ERROR = f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=4)}"
+        LAST_INFER_STATS = {"status": "exception", "fallback": True,
+                            "n_windows": 0, "n_failed_windows": 0,
+                            "error": f"{type(e).__name__}: {e}"}
         return _EMPTY_A2S
 
 
-def _infer_impl(model, audio, tokenizer, sr: int, domain: str | None = None) -> str:
+def _infer_impl(model, audio, tokenizer, sr: int, domain: str | None = None,
+                beam_size: int = 1) -> str:
     """
     R-S12.1/12.3 自适应 hop 推理(修复固定 20s hop 与"截断到最后小节线"互相拆台的架构问题):
     每窗 40s 编码(右侧看未来),解码 TAST 截断到 20s 前最后一条小节线;
@@ -373,6 +451,7 @@ def _infer_impl(model, audio, tokenizer, sr: int, domain: str | None = None) -> 
     import numpy as np
     from rubato.model.merge_ref import a2s_to_ir, _concat_ir
     from rubato.intermo.core import project
+    global LAST_INFER_STATS
 
     n = len(audio)
     win = int(40 * sr)
@@ -380,38 +459,69 @@ def _infer_impl(model, audio, tokenizer, sr: int, domain: str | None = None) -> 
     t_start = 0
     acc_ir = None
     n_fail = 0
+    window_failures = []
     guard = 0
+    reached_end = False
     max_windows = max(4, n // max(default_hop, 1) + 8)
 
     while t_start < n and guard < max_windows:
         guard += 1
+        LAST_INFER_STATS["n_windows"] = guard
         seg = audio[t_start:t_start + win]
         is_last = (t_start + win >= n)
         tast = single_window_tast(model, seg, sr, tokenizer, truncate=not is_last,
-                                  domain=domain)
+                                  domain=domain, beam_size=beam_size)
         if not tast:                     # 解码失败:按默认 hop 前进(计 n_fail),不静默错位/死循环
             n_fail += 1
+            if len(window_failures) < 3:
+                window_failures.append(
+                    {"window": guard - 1, "start_s": t_start / sr,
+                     "stage": "decode", "debug": LAST_DECODE_DEBUG})
+            LAST_INFER_STATS["n_failed_windows"] = n_fail
             t_start += default_hop
             continue
         a2s_w = strip_timestamps(tast)
         try:
             ir_w = a2s_to_ir(a2s_w)
-        except Exception:
+        except Exception as e:
             n_fail += 1
+            if len(window_failures) < 3:
+                window_failures.append(
+                    {"window": guard - 1, "start_s": t_start / sr,
+                     "stage": "a2s_to_ir",
+                     "error": f"{type(e).__name__}: {e}"})
+            LAST_INFER_STATS["n_failed_windows"] = n_fail
             t_start += default_hop
             continue
         # IR 层平凡拼接(无重叠)+ 接缝延音融合;不做脆弱的重叠/模糊匹配
         acc_ir = ir_w if acc_ir is None else _concat_ir(acc_ir, ir_w, overlap_hint=0)
         if is_last:
+            reached_end = True
             break
         last_sec = _last_barline_sec(tast)
         t_start += int(round(last_sec * sr)) if (last_sec and last_sec > 0) else default_hop
 
+    if not reached_end and t_start < n:
+        n_fail += 1
+        window_failures.append(
+            {"window": guard, "start_s": t_start / sr,
+             "stage": "window_guard_exhausted",
+             "error": f"max_windows={max_windows}, audio_s={n / sr:.3f}"})
     if acc_ir is None:
+        LAST_INFER_STATS.update(status="all_windows_failed", fallback=True,
+                                n_failed_windows=n_fail,
+                                window_failures=window_failures)
         return _EMPTY_A2S
     try:
-        return project(acc_ir, "A2S")    # IR 层拼接产物恒合法,不再有"退回第一窗"的丢内容兜底
-    except Exception:
+        text = project(acc_ir, "A2S")
+        LAST_INFER_STATS.update(status=("partial" if n_fail else "ok"),
+                                fallback=False, n_failed_windows=n_fail,
+                                window_failures=window_failures)
+        return text
+    except Exception as e:
+        LAST_INFER_STATS.update(status="project_failed", fallback=True,
+                                n_failed_windows=n_fail,
+                                error=f"{type(e).__name__}: {e}")
         return _EMPTY_A2S
 
 
@@ -428,39 +538,48 @@ def infer_amt(model, audio, tokenizer, sr: int = 16000, beam_size: int = 4,
     返回 AMT 文本(含时间戳/力度/踏板);失败返回空串。
     domain 语义同 infer_a2s(缺省 None=现状,判决前不得擅改)。
     """
-    global LAST_VIOLS
+    global LAST_VIOLS, LAST_INFER_STATS, LAST_INFER_ERROR
     LAST_VIOLS = []
+    LAST_INFER_ERROR = None
+    LAST_INFER_STATS = {"status": "starting", "fallback": False,
+                        "n_windows": 1, "n_failed_windows": 0}
     if model is None:
+        LAST_INFER_STATS.update(status="no_model", fallback=True,
+                                n_failed_windows=1)
         return ""
     prompt = build_amt_prompt(domain)
     try:
         if hasattr(model, "preprocessor") and hasattr(model, "forward"):
-            return autoregressive_decode(model, audio, tokenizer, prompt)
+            text = autoregressive_decode(model, audio, tokenizer, prompt,
+                                         beam_size=beam_size)
+            LAST_INFER_STATS.update(status=("ok" if text else "empty"),
+                                    fallback=not bool(text),
+                                    n_failed_windows=0 if text else 1)
+            return text
         if hasattr(model, "generate"):
             out = model.generate(audio, prompt=prompt, num_beams=beam_size)
-            return out if isinstance(out, str) else tokenizer.decode(out)
+            text = out if isinstance(out, str) else tokenizer.decode(out)
+            LAST_INFER_STATS.update(status=("ok" if text else "empty"),
+                                    fallback=not bool(text),
+                                    n_failed_windows=0 if text else 1)
+            return text
         if hasattr(model, "transcribe"):
-            return model.transcribe([audio], num_beams=beam_size)[0]
-        return str(model(audio, prompt=prompt))
-    except Exception:
+            text = model.transcribe([audio], num_beams=beam_size)[0]
+            LAST_INFER_STATS.update(status=("ok" if text else "empty"),
+                                    fallback=not bool(text),
+                                    n_failed_windows=0 if text else 1)
+            return text
+        text = str(model(audio, prompt=prompt))
+        LAST_INFER_STATS.update(status=("ok" if text else "empty"),
+                                fallback=not bool(text),
+                                n_failed_windows=0 if text else 1)
+        return text
+    except Exception as e:
+        LAST_INFER_ERROR = f"{type(e).__name__}: {e}"
+        LAST_INFER_STATS.update(status="exception", fallback=True,
+                                n_failed_windows=1,
+                                error=LAST_INFER_ERROR)
         return ""
-
-
-# ---------------------------------------------------------------- 便利封装
-
-def infer_file(audio_path: str, model, tokenizer):
-    """从音频文件推理。本地用(需 soundfile)。"""
-    import soundfile as sf
-    import numpy as np
-    audio, sr = sf.read(audio_path, dtype="float32")
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)       # 转单声道
-    if sr != 16000:
-        import soxr
-        audio = soxr.resample(audio, sr, 16000)
-        sr = 16000
-    return infer_a2s(model, audio, tokenizer, sr)
-
 
 # ---------------------------------------------------------------- 教师强制探针(诊断,2026-07-15)
 

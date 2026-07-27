@@ -62,6 +62,23 @@ def test_sampler_default_still_d2_when_mix_none():
         assert abs(counts[d] / total - w) < 0.02, (d, counts[d] / total, w)
 
 
+def test_sampler_quota_is_exact_even_for_tiny_pool():
+    av = {"only": ["A2S", "A2S_lite", "TAST", "AMT"]}
+    plan = dialect_sampler(av, seed=7, epoch=0)
+    assert len(plan) == 1, plan
+    av3 = {f"u{i}": ["A2S", "A2S_lite", "TAST", "AMT"] for i in range(3)}
+    assert len(dialect_sampler(av3, seed=7, epoch=0)) == 3
+
+
+def test_sampler_rejects_incomplete_or_invalid_mix():
+    for bad in ({"AMT": 1.0}, {**DIALECT_MIX, "AMT": -0.1}):
+        try:
+            dialect_sampler({"u": ["AMT"]}, seed=1, epoch=0, mix=bad)
+            raise AssertionError(f"bad mix accepted: {bad}")
+        except ValueError:
+            pass
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

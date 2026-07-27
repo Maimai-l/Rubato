@@ -16,11 +16,12 @@ batch 契约(与 rubato/model/train.py:training_step_logic 一致):
      spm 真实模型、tiling 的音频补零×预设链次序(R-S4.5)。见 LOCAL_VERIFICATION.md D 步。
 """
 from __future__ import annotations
+import math
 import random
 import re
 from pathlib import Path
 
-from rubato.model.build import DIALECT_PROMPT
+from rubato.model.build import DIALECT_PROMPT, build_target_sequence
 from rubato.model.sampling import dialect_sampler, tiling_offset
 from rubato.model.train import bucket_batches
 
@@ -70,12 +71,9 @@ def encode_target(tokenizer, dialect: str, label_text: str,
     else:
         label_pieces = tokenizer.encode(label_text, out_type=str)
 
-    # 2. 拼 prompt + eot(与 build.build_target_sequence 同布局,但这里要保留 piece 串)
-    prompt = list(DIALECT_PROMPT[dialect])
-    if domain in ("real", "synth"):
-        prompt.append(f"<|{domain}|>")
-    pieces = prompt + list(label_pieces) + ["<|eot|>"]
-    loss_mask_full = [False] * len(prompt) + [True] * (len(label_pieces) + 1)
+    # 2. 生产训练路径直接调用唯一的目标序列构造器，避免 prompt/mask 两套实现漂移。
+    pieces, loss_mask_full = build_target_sequence(
+        dialect, list(label_pieces), domain=domain)
 
     # 3. piece → id + token_type + ts_bin
     ids, types, bins = [], [], []
@@ -109,38 +107,6 @@ def _supports_sampling(tokenizer) -> bool:
 
 
 # ---------------------------------------------------------------- 音频加载(本地,LOCAL)
-
-def online_room_augment(audio, utt_id: str, epoch: int, presets_cfg: dict,
-                        seed: int = 20260706, sr: int = 16000,
-                        irs_dir: str = "assets/irs/real"):
-    """
-    在线房间增广(R-S4.5 apply_online):对【干声】每 epoch 施加一个 hash 选中的录音预设
-    (真实 IR 优先,见 irgen.resolve_ir)。同 (utt, epoch) 确定,不同 epoch 变→白拿的房间多样性。
-
-    这补上论文的增广乘数中"房间/环境"那一维,且【无额外磁盘】(不预渲多份)。
-    前提:S4 应渲【干声】(源音色,不烘焙预设),预设在此在线施加;若 S4 已烘焙预设,
-    此步会二次加混响,需在 S4 关闭预设烘焙(见 EXECUTOR 指引)。
-    音色维度另需在渲染期用多个源(见 sources.yaml),在线只能变房间不能变音色。
-    """
-    import hashlib
-    from rubato.render.irgen import apply_preset
-    presets = presets_cfg["presets"]
-    weights = presets_cfg.get("weights", {pid: 1.0 for pid in presets})
-    ids = list(presets)
-    h = hashlib.sha256(f"{seed}:{epoch}:{utt_id}:preset".encode()).hexdigest()
-    u = int(h[:15], 16) / float(16 ** 15)
-    # 加权选一个预设
-    tot = sum(weights.get(pid, 0.0) for pid in ids) or 1.0
-    acc, chosen = 0.0, ids[-1]
-    for pid in ids:
-        acc += weights.get(pid, 0.0) / tot
-        if u < acc:
-            chosen = pid
-            break
-    ps_seed = int(int(h[15:30], 16) % 1_000_000)
-    return apply_preset(audio, presets[chosen], sr=sr, seed=ps_seed,
-                        preset_id=chosen, irs_dir=irs_dir)
-
 
 def acoustic_augment(audio, utt_id: str, epoch: int, seed: int = 20260706):
     """
@@ -263,6 +229,26 @@ class RubatoDataset:
                  max_target_len: int | None = None,
                  augment: bool | None = None,
                  acoustic_aug: bool = False):
+        ids = [u.get("utt_id") for u in utts]
+        if any(not x for x in ids):
+            raise ValueError("RubatoDataset: utt_id 不能为空")
+        if len(set(ids)) != len(ids):
+            from collections import Counter
+            dup = [k for k, n in Counter(ids).items() if n > 1][:10]
+            raise ValueError(f"RubatoDataset:重复 utt_id 会静默覆盖，已拒绝:{dup}")
+        known = set(DIALECT_PROMPT)
+        for u in utts:
+            unknown = set(u.get("dialects") or []) - known
+            if unknown:
+                raise ValueError(
+                    f"RubatoDataset:{u['utt_id']} 含未知 dialect {sorted(unknown)}")
+            dur = u.get("dur_s")
+            if dur is None or not math.isfinite(float(dur)) or float(dur) <= 0:
+                raise ValueError(
+                    f"RubatoDataset:{u['utt_id']} dur_s 必须为正有限数，得到 {dur}")
+            if u.get("domain") not in (None, "real", "synth"):
+                raise ValueError(
+                    f"RubatoDataset:{u['utt_id']} domain 非法:{u.get('domain')!r}")
         self.utts = {u["utt_id"]: u for u in utts}
         self.labels = labels
         self.acoustic_aug = bool(acoustic_aug)   # C1a(D58):声学增广旗,与 alpha/tiling 增广独立
@@ -281,6 +267,9 @@ class RubatoDataset:
         self._tok_len: dict = {}
         self.last_mix_report: dict = {}         # 每 epoch 的池大小/配额/过采样倍数,给日志看
         self._len_ok = self._build_len_filter() if max_target_len else None
+        if self.train and not self._available():
+            raise ValueError(
+                "RubatoDataset:长度过滤/标签校验后训练集没有任何可用 (utt,dialect)")
         self._plan: list[tuple[str, str]] = []
         self.set_epoch(0)
 
@@ -299,7 +288,13 @@ class RubatoDataset:
                 t = lab.get(d)
                 if not t:
                     continue
-                n = len(self.tok.encode(t, out_type=str)) + len(DIALECT_PROMPT[d]) + 2  # +domain+eot
+                label_pieces = list(self.tok.encode(t, out_type=str))
+                full_pieces, _ = build_target_sequence(
+                    d, label_pieces, domain=u.get("domain"))
+                # decoder 实际接收 seq[:-1]。旧实现手算 prompt/domain/eot，不仅和
+                # 生产构造器重复，还把无 domain 样本多算 1、所有样本再多算 eot 的
+                # teacher-forcing 右移，恰好卡在位置上限的样本会被错误过滤。
+                n = len(full_pieces) - 1
                 if n <= self.max_target_len:
                     ok.add((uid, d))
                     self._tok_len[(uid, d)] = n
@@ -334,6 +329,8 @@ class RubatoDataset:
             self._plan = dialect_sampler(av, self.seed, epoch,
                                          mix=self.dialect_mix,
                                          report=self.last_mix_report)
+            if not self._plan:
+                raise RuntimeError(f"epoch{epoch} 方言采样计划为空")
             # 混比生效自证(O4 验收即看此行):配额来自注入 mix 还是缺省,日志可查,不靠信任
             print(f"  epoch{epoch} 混比报告: " + " ".join(
                 f"{d}[池{r['pool_size']} 额{r['quota']} 过采x{r['oversample_ratio']}]"

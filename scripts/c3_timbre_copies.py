@@ -82,7 +82,7 @@ def transform_rows(rows: list[dict]) -> list[dict]:
 
 def _render_s2_task(t) -> dict:
     midi_path, pid, out_dir, src2, preset2 = t
-    from rubato.render.core import render_midi_to_wav44, finalize
+    from rubato.render.core import render_midi_to_wav44, finalize, render_qc
     import yaml
     scfg = yaml.safe_load(open(str(ROOT / "configs" / "sources.yaml"), encoding="utf-8"))
     pcfg = yaml.safe_load(open(str(ROOT / "configs" / "recording_presets.yaml"), encoding="utf-8"))
@@ -98,8 +98,20 @@ def _render_s2_task(t) -> dict:
             render_midi_to_wav44(midi_path, scfg["sources"][src2], scfg, wav_path, utt_id=utt,
                                  timeout_s=float(scfg["render"].get("timeout_s", 600)))
             finalize(wav_path, pcfg["presets"][preset2], scfg, pcfg, utt, opus_path)
-            return {"ok": True, "elapsed_s": round(time.time() - t0, 1),
-                    "source": src2, "preset": preset2}
+            qc = render_qc(
+                midi_path, opus_path,
+                tol_s=float(scfg["render"].get("duration_tol_s", 1.5)),
+                gate_db=float(scfg["render"].get("silence_gate_db", -60)))
+            if qc["ok"]:
+                return {"ok": True, "elapsed_s": round(time.time() - t0, 1),
+                        "source": src2, "preset": preset2,
+                        "attempts": attempt + 1, "qc": qc}
+            last_err = RuntimeError(
+                "render_qc:"
+                f"audible={qc.get('audible')} diff_s={qc.get('diff_s')} "
+                f"error={qc.get('error')}")
+            if os.path.exists(opus_path):
+                os.unlink(opus_path)
         except PermissionError as e:
             last_err = e
             time.sleep(1.0 + attempt)
@@ -112,6 +124,11 @@ def _render_s2_task(t) -> dict:
                     os.unlink(wav_path)
                 except OSError:
                     pass
+    if os.path.exists(opus_path):
+        try:
+            os.unlink(opus_path)
+        except OSError:
+            pass
     return {"ok": False, "error": f"{type(last_err).__name__}: {str(last_err)[:120]}"}
 
 

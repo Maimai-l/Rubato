@@ -65,8 +65,8 @@ try:
     training_step_logic(stub, batch, None, ts_token_ids=ts_ids,
                         guards={"vocab": 8000, "max_pos": 512})
     check("oob_caught", False, "没拦住")
-except AssertionError as e:
-    check("oob_caught", "8500" in str(e) and "8000" in str(e), str(e))
+except ValueError as e:
+    check("oob_caught", "8500" in str(e) and "7999" in str(e), str(e))
 
 batch["labels"] = torch.full((B, L), 10, dtype=torch.long)
 long_batch = dict(batch, input_ids=torch.full((B, 600), 10, dtype=torch.long),
@@ -79,7 +79,7 @@ try:
     training_step_logic(stub, long_batch, None, ts_token_ids=ts_ids,
                         guards={"vocab": 8000, "max_pos": 512})
     check("overlen_caught", False, "没拦住")
-except AssertionError as e:
+except ValueError as e:
     check("overlen_caught", "600" in str(e) and "512" in str(e), str(e))
 
 print(f"\n全部通过: {PASS} 项")

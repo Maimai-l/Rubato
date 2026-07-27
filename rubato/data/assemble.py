@@ -61,6 +61,7 @@ def assemble(sources: list[dict], audio_resolver, default_split: str = "train") 
     utts: list[dict] = []
     labels: dict[str, dict] = {}
     per_source: dict[str, dict] = {}
+    per_file: dict[str, dict] = {}
     dup_ids: list[str] = []
 
     for src in sources:
@@ -70,29 +71,40 @@ def assemble(sources: list[dict], audio_resolver, default_split: str = "train") 
         st = per_source.setdefault(kind, {"rows": 0, "kept": 0, "bad_schema": 0,
                                           "no_dialect": 0, "no_audio": 0, "dup": 0,
                                           "filtered": 0})
+        file_key = str(src["path"])
+        if file_key in per_file:
+            raise ValueError(f"重复装配同一 labels 文件:{file_key}")
+        fst = per_file[file_key] = {
+            "kind": kind, "rows": 0, "kept": 0, "bad_schema": 0,
+            "no_dialect": 0, "no_audio": 0, "dup": 0, "filtered": 0}
+
+        def bump(key):
+            st[key] += 1
+            fst[key] += 1
+
         for row in read_jsonl(src["path"]):
-            st["rows"] += 1
+            bump("rows")
             if row_fn is not None:
                 row = row_fn(row)
                 if row is None:             # row_fn 返回 None = 过滤(如黑名单工作),计数不静默
-                    st["filtered"] += 1
+                    bump("filtered")
                     continue
             norm = normalize_row(row, kind)
             if norm is None:
-                st["bad_schema"] += 1
+                bump("bad_schema")
                 continue
             uid, lab, split = norm
             dialects = [k for k in DIALECT_KEYS if lab.get(k)]
             if not dialects:
-                st["no_dialect"] += 1
+                bump("no_dialect")
                 continue
             if uid in labels:                        # 重复 utt_id(跨源撞名或重跑追加)
-                st["dup"] += 1
+                bump("dup")
                 dup_ids.append(uid)
                 continue
             res = audio_resolver(uid, kind, row)
             if res is None:
-                st["no_audio"] += 1
+                bump("no_audio")
                 continue
             audio_path, dur_s = res
             u = {"utt_id": uid, "kind": kind, "audio_path": audio_path,
@@ -107,14 +119,15 @@ def assemble(sources: list[dict], audio_resolver, default_split: str = "train") 
                 u["dur_s"] = float(win[1]) - float(win[0])
             utts.append(u)
             labels[uid] = lab
-            st["kept"] += 1
+            bump("kept")
 
     totals = {"utts": len(utts), "labels": len(labels),
               "by_dialect": {d: sum(1 for u in utts if d in u["dialects"])
                              for d in DIALECT_KEYS},
               "by_split": _count(u["split"] for u in utts),
               "by_kind": _count(u["kind"] for u in utts)}
-    stats = {"per_source": per_source, "totals": totals, "dup_utt_ids": dup_ids[:20]}
+    stats = {"per_source": per_source, "per_file": per_file,
+             "totals": totals, "dup_utt_ids": dup_ids[:20]}
     return utts, labels, stats
 
 

@@ -31,8 +31,8 @@ git fetch origin && git checkout claude/training-issues-diagnosis-9ygud6 && git 
 
 # 第1步 PDMX 过滤 → manifest(注意:产 manifest 的是 s3_filter_pdmx,不是 s3_full_filter)
 python scripts/s3_filter_pdmx.py            # 判据:manifest ~5 万曲;若 1 万几→停,报我
-# 第2步 去跨数据集泄漏(必须在 s5 前,否则测试集污染)
-python scripts/s3_minhash_leakage.py
+# 第2步内容泄漏证书在装配完成、正式训练前生成（绑定实际启用的全部 manifest）
+# python scripts/certify_pdmx_leakage.py
 
 # 第3步 PDMX A2S/A2S_lite 文本(tokenizer 语料大头)
 python scripts/s5_parallel.py               # 判据:processed ~几万;合并阶段流式不 OOM

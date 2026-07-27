@@ -72,7 +72,7 @@ class Stub(nn.Module):
 
 
 S = 80
-mkrow = lambda d: {"audio": [0.0] * S, "input_ids": [1, 2, 3], "labels": [2, 3, 4],
+mkrow = lambda d: {"audio": [0.0] * S, "input_ids": [1, 2, 3], "labels": [2, 3, 5],
                    "token_types": [0, 0, 1], "loss_mask": [True] * 3, "ts_bins": [0, 0, 5],
                    "dialect": d}
 batch3 = collate_batch([mkrow("A2S"), mkrow("A2S"), mkrow("TAST"), mkrow("AMT")])

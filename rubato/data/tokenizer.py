@@ -39,9 +39,11 @@ def build_vocab_spec(spec_path: str | Path | None = None) -> dict:
     }
     counts["total"] = sum(counts.values())
     spec["counts"] = counts
-    assert spec["user_defined_symbols"] == (
-        spec["timestamps"] + spec["midi"] + spec["beat"] + spec["prompt"]
-    ), "user_defined_symbols 与四段清单失同步 —— vocab_spec.json 被手改?"
+    expected_symbols = (
+        spec["timestamps"] + spec["midi"] + spec["beat"] + spec["prompt"])
+    if spec["user_defined_symbols"] != expected_symbols:
+        raise ValueError(
+            "user_defined_symbols 与四段清单失同步 —— vocab_spec.json 被手改?")
     return spec
 
 
@@ -188,18 +190,3 @@ def check_glyph_coverage(spm_model_path: str, probes: list[str] | None = None) -
     return {"n_probes": len(probes), "single_piece": single, "split": split,
             "split_rate": round(split / max(len(probes), 1), 3),
             "examples_split": examples}
-
-
-# ---------------------------------------------------------------- 训练期子词正则(R-S9.4)
-
-def encode_with_regularization(sp, text: str, alpha: float = 0.25,
-                               sample: bool = True) -> list[int]:
-    """
-    论文 α=0.25 采样式切分(R-S9.4)。user_defined_symbols(时间戳/prompt/MIDI)
-    在 SPM 内永远原子,不受采样影响 —— 只有语义 piece 参与正则。
-    eval 时 sample=False 走确定性最优切分。
-    """
-    if sample:
-        return sp.encode(text, out_type=int, enable_sampling=True,
-                         alpha=alpha, nbest_size=-1)
-    return sp.encode(text, out_type=int)

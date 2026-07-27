@@ -65,11 +65,6 @@ def shown(row: dict[str, str]) -> str:
     title = clean(row.get("song_name")) or clean(row.get("title"))
     return f"{title or '(untitled)'}" + (f" — {composer}" if composer else "")
 
-
-def path_stem(value: str) -> str:
-    return Path(clean(value)).stem
-
-
 def resolve_mid(row: dict[str, str], pdmx_root: Path) -> Path:
     raw = clean(row.get("mid"))
     return pdmx_root / raw.lstrip("./\\").replace("/", "\\")

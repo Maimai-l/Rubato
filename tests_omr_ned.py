@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, ".")
-from rubato.model.omr_ned import omr_ned_musicdiff, _find_scores
+from rubato.model.omr_ned import omr_ned_musicdiff, omr_ned_legato, _find_scores
 
 PASS = 0
 
@@ -79,5 +79,49 @@ try:
 except ImportError:
     PASS += 1
     print("  ok  xml_nonempty(skip:沙盒无 partitura,执行端覆盖)")
+
+print("[5] 正式终评统一走已校准的 LEGATO JSON 接口，原始参考不经导出器")
+script = tmp / "compute_OMR-NED.py"
+script.write_text("# stub", encoding="utf-8")
+seen_legato = {}
+
+
+def fake_legato_runner(cmd, cwd, run_tmp):
+    seen_legato["cmd"] = cmd
+    seen_legato["refs"] = json.loads(
+        Path(cmd[cmd.index("--ground_truth") + 1]).read_text(encoding="utf-8"))
+    out = run_tmp / "ref_preds" / "pred_xml" / "output"
+    out.mkdir(parents=True)
+    (out / "output.csv").write_text(
+        "file,bad kern syntax % contribution to OMR-NED,"
+        "OMR-NED (OMR-ED / total numsyms)\n"
+        "0.xml,0.0,0.4\n1.xml,0.0,0.6\nTotal:,0.0,0.5\n", encoding="utf-8")
+    return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+
+leg = omr_ned_legato(pairs, tmp / "official", script, runner=fake_legato_runner)
+check("legato_json_contract", "--prediction_file" in seen_legato["cmd"]
+      and "--ground_truth" in seen_legato["cmd"], seen_legato["cmd"])
+check("original_refs_passed", seen_legato["refs"] == ["<ref0/>", "<ref1/>"],
+      seen_legato["refs"])
+check("legato_percent_mean", leg["omr_ned_mean"] == 50.0, leg)
+check("legato_per_pair", leg["scores"] == [40.0, 60.0], leg)
+check("legato_complete_gate", leg["complete"] is True, leg)
+check("legato_csv_preserved", (tmp / "official" / "output.csv").exists())
+
+def fake_partial_runner(cmd, cwd, run_tmp):
+    out = run_tmp / "ref_preds" / "pred_xml" / "output"
+    out.mkdir(parents=True)
+    (out / "output.csv").write_text(
+        "file,bad kern syntax % contribution to OMR-NED,"
+        "OMR-NED (OMR-ED / total numsyms)\n"
+        "0.xml,0.0,0.4\nTotal:,0.0,0.4\n", encoding="utf-8")
+    return SimpleNamespace(returncode=0, stdout="partial", stderr="")
+
+
+partial = omr_ned_legato(pairs, tmp / "partial", script, runner=fake_partial_runner)
+check("partial_legato_fail_closed",
+      partial["complete"] is False and partial["omr_ned_mean"] is None
+      and partial["partial_omr_ned_mean"] == 40.0, partial)
 
 print(f"\n全部通过: {PASS} 项")

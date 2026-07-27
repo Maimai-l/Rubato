@@ -109,7 +109,8 @@ ts_bins     (B,L)   时间戳位置的 bin 编号(0..3999),其余位置 0
 ```
 **构造要点**:
 - prompt 用 `build.DIALECT_PROMPT[dialect]`;`build_target_sequence()` 已产 tokens + loss_mask。
-- token 化:`tokenizer.encode(text)`;训练期子词正则用 `tokenizer.encode_with_regularization(sp, text, alpha=0.25)`(R-S9.4);eval 用确定性。
+- token 化统一走 `dataset.encode_target()`：训练期在其中执行 SentencePiece
+  `enable_sampling=True, alpha=0.25`(R-S9.4)，eval 走确定性切分；不再保留第二套旁路封装。
 - dialect 采样:每 epoch 调 `sampling.dialect_sampler(available_by_utt, seed, epoch)`;tiling 用 `sampling.tiling_offset(...)`,时间戳整体 +t0 后重新 bin 化。
 - bucketing:`train.bucket_batches(samples, max_batch_sec=560)`。
 - 音频源:MAESTRO FLAC(AMT)、flat/vn/human Opus、nASAP 借 MAESTRO FLAC。labels 来自 `labels.jsonl`(C 步产出)+ `maestro_amt_labels.jsonl`(gen_amt_labels.py 产出)。

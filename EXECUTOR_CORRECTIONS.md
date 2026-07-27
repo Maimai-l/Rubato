@@ -219,8 +219,8 @@ wk = work_key_or_fallback(row["composer_name"], row["song_name"], piece_id)
 ## 6d. 渲染增广落地清单(音色 + 真实 IR + 在线房间)
 
 论文靠 8 VST × 2 房麦 × 每段多变体拿真实录音鲁棒性(头号卖点)。我们之前:4 源、合成混响、
-每段渲一次(无增广)。修复方向如下(代码已就位:`irgen.load_real_ir/resolve_ir/audit_real_irs`、
-`dataset.online_room_augment`)。
+每段渲一次(无增广)。真实 IR 的离线渲染代码已就位
+(`irgen.load_real_ir/resolve_ir/audit_real_irs`)；在线房间增广只适用于干声，当前湿声池不能接。
 
 **① 音色源:全部保留(用户决定),凑够多样性**
 - 所有 SFZ 音源【保留,不删】——都是真钢琴,低保真也是真实录音的多样性。
@@ -240,9 +240,9 @@ wk = work_key_or_fallback(row["composer_name"], row["song_name"], piece_id)
   教堂 ~75-85%)+ 劣化长尾(老录音/电话/业余视频/异域混响 ~15-25%)。缩水规模下更不该把
   料浪费在离分布外的声学上。
 
-**④ 每段增广倍数:2-3 音色变体 + 在线房间(不是 16,也不是 1)**
-- **房间**:`RubatoDataset` 里对干声调 `online_room_augment(audio, utt_id, epoch, presets_cfg)`
-  每 epoch 换一个预设(真实 IR)→ 零额外磁盘、每 epoch 变。
+**④ 每段增广倍数:2-3 音色变体；房间维度需先建立干声管线**
+- **房间**:当前音频已在渲染期烘焙预设，禁止再在线叠加房间。旧的未接线原型已删除；
+  若未来改为干声池，必须把干声产物/配置/测试作为一条完整功能重新实现。
 - **音色**:算力够 → 每段预渲 2-3 个不同源;算力紧 → 每段 1 源但 hash 保证 8+ 源全局均匀覆盖。
 - **前提**:S4 渲【干声】(源音色,不烘焙预设),预设在线加;若 S4 已把预设烘进 opus,
   在线再加=二次混响,须在 `core.finalize` 关掉预设烘焙(渲染期只出干声)。

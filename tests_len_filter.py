@@ -56,6 +56,17 @@ rep = ds.len_filter_report
 check("report_counts", rep["dropped_by_dialect"] == {"A2S": 1, "AMT": 1}, rep)
 check("plan_excludes_long", all(u != "u_long" for u, _ in ds._plan), ds._plan)
 
+print("[1b] 位置上限按 decoder 实际输入 seq[:-1] 计算，边界样本不多过滤")
+edge_labels = {"u_edge": {"A2S": "abc"}}
+edge_utts = [{"utt_id": "u_edge", "kind": "pdmx", "audio_path": str(wav),
+              "dur_s": 1.0, "dialects": ["A2S"], "split": "train",
+              "domain": "synth"}]
+# A2S prompt 5 + domain 1 + label 3 + eot 1 = full 10；decoder input=9。
+edge = RubatoDataset(
+    edge_utts, edge_labels, Tok(), train=False, max_target_len=9)
+check("exact_decoder_limit_kept",
+      edge._available().get("u_edge") == ["A2S"], edge.len_filter_report)
+
 print("[2] __getitem__ 正常取样(保留项),长度守卫不误伤")
 item = ds[0]
 check("getitem_ok", len(item["input_ids"]) + 1 <= 64, len(item["input_ids"]))
@@ -111,5 +122,19 @@ check("attn_cap_bites", all(len(b) <= 8 for b in bs), [len(b) for b in bs])
 check("attn_cap_all_kept", sum(len(b) for b in bs) == 30)
 bs2 = bucket_batches(long_samples, max_batch_sec=600.0, max_attn_sq=None)
 check("attn_cap_optional", len(bs2) == 1, len(bs2))           # 不传 = 旧行为
+
+print("[7] Dataset 启动守卫:重复 ID / 空可用训练集不能静默跑")
+try:
+    RubatoDataset([utts[0], dict(utts[0])], labels, Tok(), train=True)
+    dup_rejected = False
+except ValueError:
+    dup_rejected = True
+check("duplicate_id_rejected", dup_rejected)
+try:
+    RubatoDataset([utts[1]], labels, Tok(), train=True, max_target_len=8)
+    empty_rejected = False
+except ValueError:
+    empty_rejected = True
+check("empty_after_filter_rejected", empty_rejected)
 
 print(f"\n全部通过: {PASS} 项")

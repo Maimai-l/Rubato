@@ -10,7 +10,6 @@ S11 损失三件套(R-S11.1)。纯数学,沙盒可完整验证。
 """
 from __future__ import annotations
 import torch
-import torch.nn.functional as F
 
 
 def ordinal_smoothing_targets(y: int, n_bins: int = 4000, p_center: float = 0.9,
@@ -33,61 +32,6 @@ def ordinal_smoothing_targets(y: int, n_bins: int = 4000, p_center: float = 0.9,
         for i, r in zip(idxs, raw):
             q[i] = (1 - p_center) * r / Z
     return q
-
-
-def timestamp_loss(logits: torch.Tensor, targets: torch.Tensor,
-                   n_bins: int = 4000, p_center: float = 0.9, w: int = 5) -> torch.Tensor:
-    """
-    时间戳位置的序数平滑 CE。
-    logits: (N, n_bins) 时间戳 token 的 logits;targets: (N,) 目标 bin。
-    """
-    logp = F.log_softmax(logits, dim=-1)
-    loss = 0.0
-    for i in range(logits.shape[0]):
-        q = ordinal_smoothing_targets(int(targets[i].item()), n_bins, p_center, w).to(logits.device)
-        loss = loss + (-(q * logp[i]).sum())
-    return loss / max(logits.shape[0], 1)
-
-
-def semantic_loss(logits: torch.Tensor, targets: torch.Tensor,
-                  label_smoothing: float = 0.1) -> torch.Tensor:
-    """语义 token 的 label-smoothed CE。logits: (N, V);targets: (N,)。"""
-    return F.cross_entropy(logits, targets, label_smoothing=label_smoothing)
-
-
-def sequence_loss(token_ce: torch.Tensor, seq_lengths: torch.Tensor) -> torch.Tensor:
-    """
-    R-S11.1 序列级长度归一化。
-    token_ce: (B,) 每条序列的 Σ_t CE_t(已 mask,只含计 loss 的位置)。
-    seq_lengths: (B,) 每条序列的有效 token 数 |T|。
-    返回 batch 平均的 L_seq。
-    """
-    normalized = token_ce * seq_lengths.float().clamp(min=1).pow(-0.5)
-    return normalized.mean()
-
-
-def combined_loss(sem_logits, sem_targets, ts_logits, ts_targets,
-                  seq_lengths, ts_seq_lengths=None,
-                  label_smoothing: float = 0.1) -> dict:
-    """
-    组合三件套。返回 {loss, sem, ts}。
-    实际训练中按 token 类型分流:语义位置走 semantic_loss,时间戳位置走 timestamp_loss,
-    再各自序列级长度归一化后相加。此处给出结构,精确分流在 dataloader/collate 定 token 类型。
-
-    注意:此函数是"结构演示/监控指标"版本(逐 token 平均,不含 1/√|T|)。
-    真正进 backward 的训练 loss 用下面的 batch_sequence_loss —— 它精确实现论文公式
-    (逐序列 ΣCE × |T|^{-1/2},batch 取平均)且完全向量化。
-    """
-    parts = {}
-    total = torch.tensor(0.0)
-    if sem_logits is not None and sem_logits.shape[0] > 0:
-        parts["sem"] = semantic_loss(sem_logits, sem_targets, label_smoothing)
-        total = total + parts["sem"]
-    if ts_logits is not None and ts_logits.shape[0] > 0:
-        parts["ts"] = timestamp_loss(ts_logits, ts_targets)
-        total = total + parts["ts"]
-    parts["loss"] = total
-    return parts
 
 
 # ================================================================ 论文精确训练 loss(向量化)
@@ -150,8 +94,14 @@ import re as _re
 _PITCH_PIECE = _re.compile(r"^(?:[Nn]\d{1,3}|[a-gA-G](?:#{1,2}|-{1,2})?\d)$")
 
 
-def build_pitch_token_mask(tokenizer, vocab_size: int = 8000) -> torch.Tensor:
+def build_pitch_token_mask(tokenizer, vocab_size: int | None = None) -> torch.Tensor:
     """全词表扫一遍 → BoolTensor[vocab],True=音高 piece。启动时建一次(8000 次查表,毫秒级)。"""
+    if vocab_size is None:
+        if not hasattr(tokenizer, "get_piece_size"):
+            raise ValueError("vocab_size 未提供且 tokenizer 无 get_piece_size()")
+        vocab_size = int(tokenizer.get_piece_size())
+    if vocab_size <= 0:
+        raise ValueError(f"vocab_size 必须 >0，得到 {vocab_size}")
     m = torch.zeros(vocab_size, dtype=torch.bool)
     for i in range(vocab_size):
         try:
@@ -180,6 +130,10 @@ def batch_sequence_loss(log_probs: torch.Tensor, labels: torch.Tensor,
     返回 {loss, sem, ts, n_sem, n_ts}(loss 带梯度)。
     """
     B, L, V = log_probs.shape
+    if not (0.0 <= label_smoothing < 1.0):
+        raise ValueError(f"label_smoothing 越界:{label_smoothing}")
+    if not (0.0 < p_center <= 1.0) or w < 1:
+        raise ValueError(f"时间戳平滑参数非法:p_center={p_center} w={w}")
     flat_lp = log_probs.reshape(B * L, V)
     flat_labels = labels.reshape(B * L)
     flat_types = token_types.reshape(B * L)
@@ -203,7 +157,10 @@ def batch_sequence_loss(log_probs: torch.Tensor, labels: torch.Tensor,
     per_token_mon = per_token                       # 监控口径 = 未加权(基线曲线可比性)
     if pitch_mask is not None:
         pm = pitch_mask.to(flat_labels.device)
-        is_pitch_flat = pm[flat_labels.clamp(min=0, max=pm.numel() - 1)] & sem_sel
+        if pm.numel() != V:
+            raise ValueError(
+                f"pitch_mask 长度 {pm.numel()} != 模型词表 {V}；拒绝静默 clamp token id")
+        is_pitch_flat = pm[flat_labels] & sem_sel
         if pitch_weight != 1.0 and is_pitch_flat.any():
             per_token_mon = per_token.detach().clone()
             w_vec = torch.ones_like(per_token)
@@ -246,4 +203,12 @@ def build_ts_token_ids(tokenizer, n_bins: int = 4000) -> torch.Tensor:
     if missing:
         raise ValueError(f"{missing}/{n_bins} 个时间戳 token 不在词表内 —— "
                          "tokenizer 训练时 user_defined_symbols 未含全部时间戳字形")
+    if len(set(ids)) != n_bins:
+        raise ValueError(
+            f"时间戳 token id 非一一映射:只有 {len(set(ids))}/{n_bins} 个唯一 id")
+    if hasattr(tokenizer, "get_piece_size"):
+        vocab = int(tokenizer.get_piece_size())
+        if min(ids) < 0 or max(ids) >= vocab:
+            raise ValueError(
+                f"时间戳 token id 越界:[{min(ids)},{max(ids)}] vs vocab={vocab}")
     return torch.tensor(ids, dtype=torch.long)

@@ -85,8 +85,14 @@ def main(argv=None):
         if ref is None or not ref.exists():
             miss_ref.append(u)
             continue
-        pairs.append({"perf_id": u, "flac": str(flac), "ref_xml": str(ref),
-                      "n_segments": d["n_segments"]})
+        pairs.append({
+            "perf_id": u, "flac": str(flac), "ref_xml": str(ref),
+            "n_segments": d["n_segments"],
+            # This is the repository's conservative local split, not the
+            # paper's standard 102-recording ASAP benchmark.
+            "benchmark": "rubato_local_conservative_holdout_v1",
+            "benchmark_expected_count": len(units),
+        })
 
     write_jsonl(args.out, pairs)
     print(f"nASAP test:行 {n_test_rows} / 单元 {len(units)}")

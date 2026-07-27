@@ -57,8 +57,9 @@ def main(argv=None):
         try:
             r = subprocess.run([args.transkun, p["flac"], str(mid)],
                                capture_output=True, text=True, errors="backslashreplace")
-        except FileNotFoundError:
-            print(f"✗ 找不到 transkun 命令: {args.transkun!r} —— 用 --transkun 指路,整段贴回")
+        except OSError as e:
+            print(f"✗ 无法启动 transkun 命令: {args.transkun!r} "
+                  f"({type(e).__name__}: {e})—— 用 --transkun 指向可执行文件")
             return 1
         if r.returncode == 0 and mid.exists() and mid.stat().st_size > 0:
             done += 1

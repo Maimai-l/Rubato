@@ -101,6 +101,17 @@ def test_grad_flows_with_weighting():
     out["loss"].backward()
     assert raw.grad is not None and torch.isfinite(raw.grad).all()
 
+def test_pitch_mask_vocab_mismatch_fails_closed():
+    lp, labels, types, mask, bins, ts_ids = _mk()
+    bad_mask = build_pitch_token_mask(StubTok(), V - 1)
+    try:
+        batch_sequence_loss(lp, labels, types, mask, bins, ts_ids,
+                            pitch_weight=2.5, pitch_mask=bad_mask)
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised, "pitch mask 尺寸不符不能靠 clamp 静默继续"
+
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

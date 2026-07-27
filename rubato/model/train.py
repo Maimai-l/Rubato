@@ -7,13 +7,13 @@ S11 训练主循环装配。规格见 SPEC.md R-S11.1~11.7 + 验收 A-S11.1。
 
 装配结构:
   RubatoDataModule  — 从分片读样本,dialect 采样,tiling,collate 成 batch
-  RubatoLitModule   — 封装 S10 的模型,training_step 用 combined_loss,eval hook 跑 nASAP/MAESTRO
+  RubatoLitModule   — 封装 S10 的模型,training_step 用 batch_sequence_loss,
+                      eval hook 跑 nASAP/MAESTRO
   train()           — 装 optimizer(R-S11.4)、schedule、止损回调,启动
 """
 from __future__ import annotations
 from pathlib import Path
 
-from rubato.model.losses import combined_loss, sequence_loss
 from rubato.model.sampling import dialect_sampler, tiling_offset, DIALECT_MIX
 from rubato.model.early_stop import StopController
 
@@ -43,16 +43,30 @@ def build_optimizer(model, cfg: dict):
         raise ValueError(
             "build_optimizer:未匹配到任何 encoder 参数,差分学习率会退化为全模型同 lr。"
             f"请检查参数命名(样本 {sample})并调整归组规则。")
+    if not other_params:
+        raise ValueError(
+            "build_optimizer:除 encoder 外没有任何可训练参数，decoder/output head 不会更新")
+
+    lr_enc = float(cfg.get("lr_encoder", 1e-4))
+    lr_dec = float(cfg.get("lr_decoder", 5e-4))
+    betas = tuple(cfg.get("betas", (0.9, 0.98)))
+    wd = float(cfg.get("wd", 0.01))
+    warmup = int(cfg.get("warmup_steps", 1500))
+    max_steps = int(cfg.get("max_steps", 100000))
+    min_ratio = float(cfg.get("min_lr_ratio", 0.1))
+    if lr_enc <= 0 or lr_dec <= 0:
+        raise ValueError(f"学习率必须 >0: encoder={lr_enc} decoder={lr_dec}")
+    if len(betas) != 2 or not (0 <= betas[0] < 1 and 0 <= betas[1] < 1):
+        raise ValueError(f"AdamW betas 非法:{betas}")
+    if wd < 0 or warmup < 0 or max_steps <= 0 or not (0 <= min_ratio <= 1):
+        raise ValueError(
+            f"优化器/scheduler 配置非法:wd={wd} warmup={warmup} "
+            f"max_steps={max_steps} min_lr_ratio={min_ratio}")
 
     opt = torch.optim.AdamW([
-        {"params": enc_params, "lr": cfg.get("lr_encoder", 1e-4)},
-        {"params": other_params, "lr": cfg.get("lr_decoder", 5e-4)},
-    ], betas=tuple(cfg.get("betas", (0.9, 0.98))), weight_decay=cfg.get("wd", 0.01))
-
-    # cosine + warmup
-    warmup = cfg.get("warmup_steps", 1500)
-    max_steps = cfg.get("max_steps", 100000)
-    min_ratio = cfg.get("min_lr_ratio", 0.1)
+        {"params": enc_params, "lr": lr_enc},
+        {"params": other_params, "lr": lr_dec},
+    ], betas=betas, weight_decay=wd)
 
     def lr_lambda(step):
         if step < warmup:
@@ -108,6 +122,17 @@ def normalize_accumulated_gradients(parameters, n_sequences: int):
     for p in parameters:
         if p.grad is not None:
             p.grad.mul_(inv)
+
+
+def clip_gradients(parameters, max_norm: float) -> float:
+    """裁剪并在 optimizer.step 前拒绝 NaN/Inf 梯度。"""
+    import math
+    import torch
+    max_norm = float(max_norm)
+    if not math.isfinite(max_norm) or max_norm <= 0:
+        raise ValueError(f"clip_norm 必须为正有限数，得到 {max_norm}")
+    return float(torch.nn.utils.clip_grad_norm_(
+        parameters, max_norm, error_if_nonfinite=True))
 
 
 def new_step_metrics() -> dict:
@@ -221,9 +246,11 @@ def resolve_log_probs(output):
             raise TypeError(f"forward 返回元组但首元素非 Tensor: {type(lp)}")
         return lp
     if isinstance(output, dict):
-        for k in ("log_probs", "transf_log_probs", "logits"):
+        for k in ("log_probs", "transf_log_probs"):
             if k in output:
                 return output[k]
+        if "logits" in output:
+            return torch.log_softmax(output["logits"], dim=-1)
         raise TypeError(f"forward 返回 dict 但无 log_probs/logits 键: {list(output)}")
     if isinstance(output, torch.Tensor):
         return output
@@ -268,17 +295,59 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
 
     # 【前置守卫】索引越界在 GPU 上是异步 device assert,栈指向随机后续 kernel(执行端三次
     # 崩溃三个不同栈)。在 forward 之前用精确断言拦下,报错自带肇事数字。
+    if audio.ndim != 2 or input_ids.ndim != 2 or labels.shape != input_ids.shape:
+        raise ValueError(
+            f"batch 形状错误:audio={tuple(audio.shape)} input={tuple(input_ids.shape)} "
+            f"labels={tuple(labels.shape)}")
+    for name, value in (("token_types", token_types), ("loss_mask", loss_mask),
+                        ("ts_bins", ts_bins)):
+        if value.shape != labels.shape:
+            raise ValueError(
+                f"{name} 形状 {tuple(value.shape)} != labels {tuple(labels.shape)}")
+    if bool((audio_len <= 0).any()) or bool((audio_len > audio.shape[1]).any()):
+        raise ValueError(
+            f"audio_lens 越界:min={int(audio_len.min())} max={int(audio_len.max())} "
+            f"padded={audio.shape[1]}")
+    if bool((input_lens <= 0).any()) or bool((input_lens > input_ids.shape[1]).any()):
+        raise ValueError(
+            f"input_lens 越界:min={int(input_lens.min())} max={int(input_lens.max())} "
+            f"padded={input_ids.shape[1]}")
+    if bool((loss_mask.sum(-1) <= 0).any()):
+        raise ValueError("batch 含零有效目标 token 的序列")
+    positions = torch.arange(labels.shape[1], device=device).unsqueeze(0)
+    valid_positions = positions < input_lens.unsqueeze(1)
+    if bool((loss_mask & ~valid_positions).any()):
+        raise ValueError("loss_mask 在 input_lens 之外仍为 True，padding 会污染 loss")
+    scored_types = token_types[loss_mask]
+    if bool(((scored_types != 0) & (scored_types != 1)).any()):
+        bad = torch.unique(scored_types[(scored_types != 0) & (scored_types != 1)])
+        raise ValueError(f"计分 token_types 只能为 0/1，得到 {bad[:10].tolist()}")
+    ts_positions = loss_mask & (token_types == 1)
+    if bool(ts_positions.any()):
+        ts_values = ts_bins[ts_positions]
+        if bool((ts_values < 0).any()) or bool((ts_values >= len(ts_token_ids)).any()):
+            raise ValueError(
+                f"ts_bins 越界:min={int(ts_values.min())} max={int(ts_values.max())} "
+                f"合法=[0,{len(ts_token_ids) - 1}]")
+        expected_ts_labels = ts_token_ids[ts_values]
+        if not bool(torch.equal(labels[ts_positions], expected_ts_labels)):
+            raise ValueError(
+                "时间戳 label id 与 ts_bins→tokenizer 映射不一致；"
+                "token_types/右移或 tokenizer 已损坏")
     if guards:
         v = guards.get("vocab")
         if v:
+            ni, nl = int(input_ids.min()), int(labels.min())
             mi, ml = int(input_ids.max()), int(labels.max())
-            assert mi < v and ml < v, \
-                f"token id 越界:input.max={mi} labels.max={ml} ≥ 词表 {v} —— tokenizer/词表替换不一致"
+            if ni < 0 or nl < 0 or mi >= v or ml >= v:
+                raise ValueError(
+                    f"token id 越界:input=[{ni},{mi}] labels=[{nl},{ml}] "
+                    f"词表=[0,{v - 1}] —— tokenizer/词表替换不一致")
         p = guards.get("max_pos")
-        if p:
-            L = int(input_ids.shape[1])
-            assert L <= p, \
-                f"目标序列长 {L} > 位置表 {p} 行 —— 超长过滤没生效或上限读错(utt 见 batch 首条)"
+        if p and int(input_ids.shape[1]) > p:
+            raise ValueError(
+                f"目标序列长 {input_ids.shape[1]} > 位置表 {p} 行 —— "
+                "超长过滤没生效或上限读错")
 
     # 1. raw wav → mel(必须走 canary 自带 preprocessor,R-S10.3 前端一致性)
     processed, processed_len = model.preprocessor(input_signal=audio, length=audio_len)
@@ -290,10 +359,19 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         transcript=input_ids, transcript_length=input_lens,
     )
     log_probs = resolve_log_probs(output)
-    assert log_probs.dim() == 3, f"log_probs 应为 (B,L,V),得 {tuple(log_probs.shape)}"
-    assert log_probs.shape[:2] == labels.shape, \
-        f"log_probs {tuple(log_probs.shape[:2])} 与 labels {tuple(labels.shape)} 未对齐 —— " \
-        "检查 collate 是否做了 teacher-forcing 右移(input=seq[:-1], labels=seq[1:])"
+    if log_probs.dim() != 3:
+        raise ValueError(f"log_probs 应为 (B,L,V),得 {tuple(log_probs.shape)}")
+    if log_probs.shape[:2] != labels.shape:
+        raise ValueError(
+            f"log_probs {tuple(log_probs.shape[:2])} 与 labels {tuple(labels.shape)} "
+            "未对齐 —— 检查 teacher-forcing 右移")
+    if guards and guards.get("vocab") \
+            and int(log_probs.shape[-1]) != int(guards["vocab"]):
+        raise ValueError(
+            f"模型输出词表 {log_probs.shape[-1]} != tokenizer {guards['vocab']}；"
+            "词表替换函数可能写了但未真正接入输出头")
+    if not bool(torch.isfinite(log_probs).all()):
+        raise FloatingPointError("模型 forward 产生 NaN/Inf log_probs")
 
     cfg = loss_cfg or {}
     parts = batch_sequence_loss(
@@ -304,8 +382,10 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         pitch_mask=cfg.get("pitch_mask"),
     )
     loss = parts["loss"]
-    assert loss.requires_grad, "loss 无梯度 —— forward 图断了(检查 no_grad/detach)"
-    assert torch.isfinite(loss), f"loss 非有限: {loss}"
+    if not loss.requires_grad:
+        raise RuntimeError("loss 无梯度 —— forward 图断了(检查 no_grad/detach)")
+    if not bool(torch.isfinite(loss)):
+        raise FloatingPointError(f"loss 非有限: {loss}")
 
     # 按 dialect 聚合逐序列 sem/ts(用户建议:四方言各自的学习曲线,别混成一个总数)
     dialect_sem: dict = {}
@@ -397,20 +477,20 @@ def _sample_audio(sample: dict):
 
 
 def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None = None,
-                   legato_omr_fn=None, eval_max: int = 128,
+                   eval_max: int = 128,
                    time_budget_s: float = 1200.0,
                    autolog: str | None = None, step: int | None = None,
                    probe_utts: list | None = None,
                    decode_legs: bool = True) -> dict:
     """
-    R-S11.5:nASAP val 跑 可解析率/OMR-NED;MAESTRO val 跑 AMT F1。
+    R-S11.5:nASAP val 跑可解析率/文本 NED 代理；MAESTRO val 跑 AMT F1。
     样本 = assemble 的 utt dict(audio_path/win/dur_s)或预载 {audio, ...};音频按需窗读。
     labels: {utt_id: {A2S..AMT}} —— 参照标签的唯一来源:AMT F1 的 ref_notes 由参照 AMT
-      文本反解(amt_text_to_notes),OMR-NED 无 LEGATO 时用 A2S 文本 NED 代理(text_ned)。
-      【无参照的样本跳过、不打 0 分】—— 旧版把缺 ref_notes 记 F1=0,会在 8000 步被
-      StopController 误判"标签管线有 bug"停训。
-    legato_omr_fn: LEGATO OMR-NED(执行端注入);缺省用 text_ned 代理,保证 best.pt
-      挑选与收敛判定始终有指标。
+      文本反解(amt_text_to_notes)。没有 LEGATO 时只计算明确标名的 A2S 文本代理
+      text_ned_proxy，绝不写成 OMR-NED。有参照但缺音频/解码失败的样本必须留在分母；
+      无参照样本不属于该指标的评测集合。
+    正式 LEGATO 只能在 scripts/eval_final.py 对整曲预测和原始参考 XML 运行。训练窗
+      既不是整曲也没有等价参考版面，不能通过“可选回调”伪装成论文 OMR-NED。
     返回指标 dict(含诊断量 empty_rate/n_eval),喂给 StopController。
     """
     from rubato.model.infer import infer_a2s, infer_amt, _EMPTY_A2S   # S12
@@ -418,10 +498,12 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     from rubato.model.evaluate import note_f1, amt_text_to_notes, text_ned
 
     labels = labels or {}
-    metrics = {"parseable_rate": 0.0, "val_omr_ned": None,
+    metrics = {"parseable_rate": 0.0, "val_text_ned_proxy": None,
                "a2s_note_f1": None, "maestro_amt_f1": None,
                "empty_rate": None, "n_eval_nasap": 0, "n_eval_maestro": 0,
-               "n_omr_scored": 0, "omr_coverage": 0.0}
+               "n_text_proxy_scored": 0, "text_proxy_coverage": 0.0,
+               "n_audio_missing": 0, "amt_eval_truncated": False,
+               "eval_complete": False}
 
     # 证据行:打印 + 缓存,eval 末尾原样追加进 autolog 文件(git 里的报告由代码写,
     # 执行端只 commit 不编辑 —— 人肉摘录三次丢失/删改证据后,把这一步从人手里拿走)。
@@ -443,7 +525,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     t_eval0 = _time.time()
     n_ok, n_total, n_empty = 0, 0, 0
     truncated = False
-    omr_scores = []
+    proxy_scores = []                    # 训练监控代理；永不冒充 OMR-NED
     viol_entries: list = []              # (is_fallback, viol_list) → viol_tally 拒因直方图
     sample_preds: list[str] = []
     ok_pred = ok_utt = ok_ref = None     # 首个过校验的预测(展示偏差修复:别只看失败样本)
@@ -517,11 +599,16 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
             break
         if si % 8 == 0:
             print(f"  eval nasap {si}/{len(subset)}({_time.time() - t_eval0:.0f}s)", flush=True)
+        n_total += 1
         audio = _sample_audio(sample)
         if audio is None:
+            metrics["n_audio_missing"] += 1
+            viol_entries.append((True, ["audio_missing"]))
+            if len(sample_preds) < 2:
+                sample_preds.append("<AUDIO_MISSING>")
             continue
-        pred = infer_a2s(model, audio, tokenizer)
-        n_total += 1
+        pred = infer_a2s(model, audio, tokenizer, domain=sample.get("domain"))
+        infer_stats = dict(getattr(_inf, "LAST_INFER_STATS", {}) or {})
         if len(sample_preds) < 2:              # 模型实际吐了什么 —— 定性"胶水坏/模型早"的直接证据
             sample_preds.append(pred[:160])
         if n_probed < 2:
@@ -580,38 +667,41 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
                     n_probed += 1
                     _p(f"  eval 探针失败({type(e).__name__}: {e})—— 贴回本行")
         viol = validate_units(text_to_units(pred)) if pred else ["empty"]
-        if pred == _EMPTY_A2S:
+        is_fallback = bool(infer_stats.get("fallback")) or pred == _EMPTY_A2S
+        is_partial = infer_stats.get("status") == "partial"
+        if is_fallback:
             n_empty += 1
             viol = viol or ["empty_fallback"]
+        if is_partial:
+            viol = list(viol) + [
+                f"partial_windows:{infer_stats.get('n_failed_windows', 0)}"]
         # 拒因直方图 v2(D44):v1 拿 pred 复验 —— 但校验拒绝发生在 infer 层内部,eval 只
         # 见兜底常量,直方图退化成 empty 率(58000-61000 实测全是"兜底=4x")。真实违规
         # 由 infer.LAST_VIOLS 带出:有真实违规 = 模型输出被校验拦下(按类计);无 = 异常/空路径。
         _tv = list(getattr(_inf, "LAST_VIOLS", []) or [])
         # 通过样本无条件记「通过」:beam 首试失败、greedy 复活的样本,LAST_VIOLS 留有首试
         # 残留,不清会把通过样本计进拒类(abtest 首跑实测 通过=3 vs parseable=5)
-        if not viol and pred != _EMPTY_A2S:
+        if not viol and not is_fallback and not is_partial:
             viol_entries.append((False, []))
         else:
-            viol_entries.append((pred == _EMPTY_A2S and not _tv, _tv or viol))
+            viol_entries.append((is_fallback and not _tv, _tv or viol))
         if not viol:
             n_ok += 1
-            if ok_pred is None and pred != _EMPTY_A2S:
+            if ok_pred is None and not is_fallback:
                 # 首个真正通过校验的预测:样本预测[0]/[1] 是确定性子集的前两个样本,
                 # 它们长期失败 → 显示的永远是兜底常量,通过的样本反而从未被看见(展示偏差)
                 ok_pred = pred[:160]
                 ok_utt = sample.get("utt_id", "?")
                 ok_ref = (labels.get(ok_utt, {}) or {}).get("A2S") or ""
             ref_a2s = labels.get(sample.get("utt_id"), {}).get("A2S")
-            if legato_omr_fn and sample.get("ref_xml"):
-                omr_scores.append(legato_omr_fn(pred, sample["ref_xml"]))
-            elif ref_a2s:
-                omr_scores.append(text_ned(pred, ref_a2s))    # 代理指标,见 evaluate.text_ned
+            if ref_a2s:
+                proxy_scores.append(text_ned(pred, ref_a2s))
     metrics["parseable_rate"] = n_ok / max(n_total, 1)
     metrics["empty_rate"] = (n_empty / n_total) if n_total else None
     metrics["n_eval_nasap"] = n_total
     metrics["eval_truncated"] = truncated
-    metrics["n_omr_scored"] = len(omr_scores)
-    metrics["omr_coverage"] = len(omr_scores) / max(n_total, 1)
+    metrics["n_text_proxy_scored"] = len(proxy_scores)
+    metrics["text_proxy_coverage"] = len(proxy_scores) / max(n_total, 1)
     for k, p in enumerate(sample_preds):
         _p(f"  eval 样本预测[{k}]: {p!r}")
     if ok_pred is not None:
@@ -626,8 +716,8 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
             _p(f"  eval 兜底异常: {_inf.LAST_INFER_ERROR[:600]}")
         if not (_inf.LAST_DECODE_DEBUG or _inf.LAST_INFER_ERROR):
             _p("  eval 兜底但无现场记录 —— 空谱来自非异常路径,贴回本行")
-    if omr_scores:
-        metrics["val_omr_ned"] = sum(omr_scores) / len(omr_scores)
+    if proxy_scores:
+        metrics["val_text_ned_proxy"] = sum(proxy_scores) / len(proxy_scores)
     if viol_entries:
         _vt = viol_tally(viol_entries)
         _p("  eval 拒因(样本数): "
@@ -648,9 +738,16 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     # MAESTRO val:AMT note F1(mir_eval)。R-S11.7 的"步≥8000 且 AMT F1<70 → 停训"
     # 依赖它;参照音符从该窗的真值 AMT 文本反解。无参照样本跳过(不打 0 分)。
     f1s = []
-    for si, sample in enumerate(_eval_subset(maestro_val, eval_max)):
+    maestro_subset = _eval_subset(maestro_val, eval_max)
+    n_amt_expected = sum(
+        1 for s in maestro_subset if labels.get(s.get("utt_id"), {}).get("AMT"))
+    n_amt_ref_invalid = 0
+    n_amt_audio_missing = 0
+    amt_truncated = False
+    for si, sample in enumerate(maestro_subset):
         if _time.time() - t_eval0 > 2 * time_budget_s:     # AMT 共享总时限(nasap 用掉一份)
             _p(f"  eval 总时限用尽,AMT 截断于 {si}")
+            amt_truncated = True
             break
         if si % 8 == 0:
             print(f"  eval maestro {si}({_time.time() - t_eval0:.0f}s)", flush=True)
@@ -660,25 +757,43 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         try:
             ref_notes = amt_text_to_notes(ref_text)
         except Exception:
+            n_amt_ref_invalid += 1
             continue
         if not ref_notes:
+            n_amt_ref_invalid += 1
             continue
         audio = _sample_audio(sample)
         if audio is None:
+            n_amt_audio_missing += 1
+            f1s.append(0.0)               # 有参照却读不到音频：不能从分母消失
             continue
-        pred_text = infer_amt(model, audio, tokenizer)
+        pred_text = infer_amt(model, audio, tokenizer,
+                              domain=sample.get("domain"))
         try:
             est_notes = amt_text_to_notes(pred_text)
         except Exception:
             est_notes = []
         f1s.append(note_f1(ref_notes, est_notes)["f1"])
     metrics["n_eval_maestro"] = len(f1s)
+    metrics["n_eval_maestro_expected"] = n_amt_expected
+    metrics["n_amt_ref_invalid"] = n_amt_ref_invalid
+    metrics["n_amt_audio_missing"] = n_amt_audio_missing
+    metrics["amt_eval_truncated"] = amt_truncated
+    metrics["eval_complete"] = (
+        (len(subset) > 0 or n_amt_expected > 0)
+        and not truncated and not amt_truncated
+        and n_total == len(subset)
+        and metrics["n_audio_missing"] == 0
+        and n_amt_ref_invalid == 0
+        and len(f1s) == n_amt_expected)
     if f1s:
         metrics["maestro_amt_f1"] = 100.0 * sum(f1s) / len(f1s)
     _p(f"  eval 指标: parseable={metrics['parseable_rate']:.2f} "
-       f"amt_f1={metrics['maestro_amt_f1']} omr_ned={metrics['val_omr_ned']} "
-       f"omr_scored={metrics['n_omr_scored']}/{metrics['n_eval_nasap']} "
-       f"n_maestro={metrics['n_eval_maestro']}")
+       f"amt_f1={metrics['maestro_amt_f1']} "
+       f"text_ned_proxy={metrics['val_text_ned_proxy']} "
+       f"proxy_scored={metrics['n_text_proxy_scored']}/{metrics['n_eval_nasap']} "
+       f"n_maestro={metrics['n_eval_maestro']}/{n_amt_expected} "
+       f"complete={metrics['eval_complete']}")
 
     # 证据自动落盘(追加,不覆盖):报告由代码写,执行端只 commit —— 摘录/删改这一步收走
     if autolog and _lines:
@@ -698,14 +813,16 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     return metrics
 
 
-def omr_metric_eligible(metrics: dict, min_scored: int = 12,
-                        min_coverage: float = 0.80) -> bool:
-    """OMR 指标是否足以驱动 best/收敛/回滚，而不只是少数容易样本的条件均值。"""
+def proxy_metric_eligible(metrics: dict, min_scored: int = 12,
+                          min_coverage: float = 0.80) -> bool:
+    """训练监控的文本代理是否完整；字段与正式 LEGATO OMR-NED 永久分离。"""
     return (
-        metrics.get("val_omr_ned") is not None
+        metrics.get("val_text_ned_proxy") is not None
+        and metrics.get("eval_complete", False)
         and not metrics.get("eval_truncated", False)
-        and int(metrics.get("n_omr_scored", 0)) >= min_scored
-        and float(metrics.get("omr_coverage", 0.0)) >= min_coverage)
+        and not metrics.get("amt_eval_truncated", False)
+        and int(metrics.get("n_text_proxy_scored", 0)) >= min_scored
+        and float(metrics.get("text_proxy_coverage", 0.0)) >= min_coverage)
 
 
 # ---------------------------------------------------------------- 断点续训(长跑生死线)
@@ -835,12 +952,32 @@ def save_snapshot(path, model, opt, sched, step: int, epoch: int,
     余量 45MiB,数周长跑必然中途崩;只存模型权重的 ckpt 恢复不了 Adam 动量和 lr 进度,
     崩一次等于从头再来。"""
     import torch
+    import random
+    import numpy as np
     from pathlib import Path as _P
     path = _P(path)
     tmp = path.with_suffix(".tmp")
+    has_cuda_params = any(p.is_cuda for p in model.parameters())
+    np_state = np.random.get_state()
+    rng = {
+        "python": random.getstate(),
+        # PyTorch 2.6 默认 weights_only=True；NumPy ndarray 不是安全白名单类型。
+        # 转成纯容器，保持快照可由安全加载器读取。
+        "numpy": {
+            "bit_generator": np_state[0],
+            "keys": np_state[1].tolist(),
+            "pos": int(np_state[2]),
+            "has_gauss": int(np_state[3]),
+            "cached_gaussian": float(np_state[4]),
+        },
+        "torch": torch.get_rng_state(),
+        "cuda": (torch.cuda.get_rng_state_all()
+                 if has_cuda_params and torch.cuda.is_available() else None),
+    }
     torch.save({"model": model.state_dict(), "optimizer": opt.state_dict(),
                 "scheduler": sched.state_dict(), "step": step, "epoch": epoch,
-                "batch_cursor": int(batch_cursor), "snapshot_version": 2}, tmp)
+                "batch_cursor": int(batch_cursor), "rng_state": rng,
+                "snapshot_version": 3}, tmp)
     tmp.replace(path)                          # 原子:写一半崩不会毁掉上一份
 
 
@@ -856,6 +993,8 @@ def load_snapshot(path, model, opt, sched, allow_legacy_cursor: bool = False):
     if not path.exists():
         return None
     try:
+        import random
+        import numpy as np
         snap = torch.load(str(path), map_location="cpu")
         if "batch_cursor" not in snap and not allow_legacy_cursor:
             raise RuntimeError(
@@ -865,6 +1004,24 @@ def load_snapshot(path, model, opt, sched, allow_legacy_cursor: bool = False):
         model.load_state_dict(snap["model"])
         opt.load_state_dict(snap["optimizer"])     # state 张量随参数设备自动就位
         sched.load_state_dict(snap["scheduler"])
+        rng = snap.get("rng_state")
+        if rng:
+            random.setstate(rng["python"])
+            ns = rng["numpy"]
+            if isinstance(ns, dict):
+                np.random.set_state((
+                    ns["bit_generator"], np.asarray(ns["keys"], dtype=np.uint32),
+                    int(ns["pos"]), int(ns["has_gauss"]),
+                    float(ns["cached_gaussian"])))
+            else:
+                # 兼容开发期短暂写出的 v3 草案（需显式非安全加载才可能读到）。
+                np.random.set_state(ns)
+            torch.set_rng_state(rng["torch"])
+            if rng.get("cuda") is not None and torch.cuda.is_available():
+                torch.cuda.set_rng_state_all(rng["cuda"])
+        else:
+            print("⚠ 旧版快照无 RNG 状态：权重/优化器可续训，但 dropout/随机采样轨迹"
+                  "无法逐位复现；下一次保存将升级为 v3", flush=True)
         cursor = int(snap.get("batch_cursor", 0))
         if "batch_cursor" not in snap:
             print("⚠ 显式允许旧版快照：本次将从保存 epoch 的开头重放", flush=True)
@@ -875,13 +1032,56 @@ def load_snapshot(path, model, opt, sched, allow_legacy_cursor: bool = False):
             f"({type(e).__name__}: {e})") from e
 
 
+def save_train_control(path, step: int, best_eval_metric: dict,
+                       stopper: StopController) -> None:
+    """原子保存小型训练决策状态，避免恢复后 best/平台历史失忆。"""
+    import json
+    path = Path(path)
+    tmp = path.with_suffix(".tmp")
+    payload = {
+        "version": 1, "step": int(step),
+        "best_eval_metric": {
+            str(k): (None if v == float("inf") else float(v))
+            for k, v in best_eval_metric.items()},
+        "stopper": stopper.state_dict(),
+    }
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1),
+                   encoding="utf-8")
+    tmp.replace(path)
+
+
+def load_train_control(path, snapshot_step: int, best_eval_metric: dict,
+                       stopper: StopController) -> bool:
+    """恢复训练决策状态；损坏或时间线领先都硬失败，不静默重置。"""
+    import json
+    path = Path(path)
+    if not path.exists():
+        return False
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        control_step = int(state["step"])
+        if control_step > int(snapshot_step):
+            raise ValueError(
+                f"control step {control_step} 领先 snapshot step {snapshot_step}")
+        for k, v in (state.get("best_eval_metric") or {}).items():
+            if k in best_eval_metric and v is not None:
+                best_eval_metric[k] = float(v)
+        stopper.load_state_dict(state.get("stopper") or {})
+        return True
+    except Exception as e:
+        raise RuntimeError(
+            f"训练控制状态损坏，拒绝在 best/早停历史失忆后续训：{path} "
+            f"({type(e).__name__}: {e})") from e
+
+
 # ---------------------------------------------------------------- 主循环(R-S11.6/11.7)
 
 def train(model, datamodule, cfg: dict, tokenizer,
-          eval_every_steps: int = 3000, legato_omr_fn=None):
+          eval_every_steps: int = 3000):
     """
     主训练循环。装 optimizer + 止损 + checkpoint。需 GPU,本地跑。
-    R-S11.6:每 eval 存 ckpt,滚动保留 6,选 val OMR-NED 最低。
+    R-S11.6:每 eval 存 ckpt,滚动保留 6,选完整 val 文本 NED 代理最低。
+    论文可比的 LEGATO OMR-NED 只由 scripts/eval_final.py 对整曲计算。
     R-S11.7:StopController 四触发。
     """
     import torch
@@ -902,8 +1102,11 @@ def train(model, datamodule, cfg: dict, tokenizer,
     max_steps = cfg.get("max_steps", 100000)
     log_every = int(cfg.get("log_every", 50))
     save_every = int(cfg.get("save_every_steps", 200))
-    ckpt_ring = []      # 滚动保留 6
-    best_omr = float("inf")
+    selection_metric = str(cfg.get("selection_metric", "text_ned_proxy"))
+    if selection_metric != "text_ned_proxy":
+        raise ValueError(
+            f"不支持的训练期 checkpoint 选择指标:{selection_metric}")
+    best_eval_metric = {selection_metric: float("inf")}
     recent, recent_sem, recent_ts = [], [], []      # 近 50 步窗口(日志 + final_* 判据)
     recent_pv: list = []                            # 音高 CE 滚动窗(D82,训练侧"听没听"直读)
     recent_gn: list = []                            # 裁剪前梯度范数(有效 lr 是否被裁剪吃掉)
@@ -928,6 +1131,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     # 日志自证 —— H1 实验首份贴回就无法确认 --clip-norm 是否生效,判决差点悬空。
     # 此行进贴回清单:没有它 = 旧代码,先 git pull。
     print(f"训练配置回显: clip_norm={float(cfg.get('clip_norm', 1.0))} "
+          f"config={cfg.get('train_config', '<programmatic>')} "
           f"lr_enc={float(cfg.get('lr_encoder', 1e-4)):.1e} "
           f"lr_dec={float(cfg.get('lr_decoder', 5e-4)):.1e} "
           f"accum={float(cfg.get('grad_accum_to_audio_sec', 2000)):.0f}s "
@@ -948,6 +1152,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     # 断点续训:last.pt 存在且未禁用 → 全状态 + epoch 内下一批 cursor 精确恢复。
     # (_finish 定义必须在前:曾在"续训即达 max_steps"的分支上先调后定义 → UnboundLocalError)
     last_pt = ckpt_dir / "last.pt"
+    control_path = ckpt_dir / "train_control.json"
     resume_batch_cursor = 0
     if cfg.get("resume", True):
         got = load_snapshot(
@@ -959,6 +1164,11 @@ def train(model, datamodule, cfg: dict, tokenizer,
             print(f"续训:恢复 step={step} epoch={start_epoch} "
                   f"batch_cursor={resume_batch_cursor}(优化器/调度器状态一并恢复;"
                   f"lr 按当前配置重刷 enc={applied[0]:.2e} dec={applied[1]:.2e})")
+            if load_train_control(control_path, step, best_eval_metric, stopper):
+                hist_sizes = ",".join(
+                    f"{k}:{len(v)}" for k, v in stopper.metric_history.items())
+                print(f"  训练控制状态已恢复:best={best_eval_metric} "
+                      f"metric_histories={{{hist_sizes}}}", flush=True)
             if step >= max_steps:
                 return _finish("max_steps_reached")
 
@@ -971,13 +1181,29 @@ def train(model, datamodule, cfg: dict, tokenizer,
     from rubato.model.losses import build_pitch_token_mask
     loss_cfg["pitch_weight"] = float(cfg.get("pitch_loss_weight", 1.0))
     loss_cfg["pitch_mask"] = build_pitch_token_mask(
-        tokenizer, int(cfg.get("vocab_size", 8000)))
+        tokenizer, int(cfg.get("vocab_size")
+                       or cfg.get("guards", {}).get("vocab")
+                       or tokenizer.get_piece_size()))
     print(f"  音高 piece 掩码: {int(loss_cfg['pitch_mask'].sum())} 个 | "
           f"加权 ×{loss_cfg['pitch_weight']:g}", flush=True)
     use_bf16 = (str(cfg.get("precision", "")).startswith("bf16")
                 and torch.cuda.is_available())
     autocast = (lambda: torch.autocast("cuda", dtype=torch.bfloat16)) if use_bf16 \
         else (lambda: __import__("contextlib").nullcontext())
+
+    # 跨进程恢复现有 step ckpt；否则每次重启都从空 ring 开始，“滚动6”会越积越多。
+    def _step_num(path):
+        try:
+            return int(path.stem.removeprefix("step"))
+        except ValueError:
+            return -1
+    ckpt_keep = int(cfg.get("ckpt_keep", 6))
+    if ckpt_keep <= 0:
+        raise ValueError(f"ckpt_keep 必须 >0，得到 {ckpt_keep}")
+    existing_steps = sorted(ckpt_dir.glob("step*.pt"), key=_step_num)
+    for stale in existing_steps[:-ckpt_keep]:
+        stale.unlink(missing_ok=True)
+    ckpt_ring = existing_steps[-ckpt_keep:]
 
     model.train()
     opt.zero_grad()
@@ -1018,8 +1244,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
             # (m 与 √v 同比缩放相消),纯常数裁剪对 AdamW 的有效步长影响远小于 SGD 直觉 ——
             # 所以 H1 必须靠 --clip-norm 对照实验判决,不靠此处推理(EXPERIMENT_H1.md)。
             gn_groups = group_grad_norms(opt.param_groups)   # 分组(enc/dec)裁剪前范数,H2 观测
-            gn = float(torch.nn.utils.clip_grad_norm_(model.parameters(),
-                                                      float(cfg.get("clip_norm", 1.0))))
+            gn = clip_gradients(model.parameters(), float(cfg.get("clip_norm", 1.0)))
             opt.step()
             sched.step()
             opt.zero_grad()
@@ -1075,6 +1300,11 @@ def train(model, datamodule, cfg: dict, tokenizer,
 
             # 评测 + 止损(D77 双节奏:探针每 eval_every 跑;解码腿按 eval_decode_every 稀疏)
             if step % eval_every_steps == 0:
+                # control 状态会记录本次 eval；必须先保证同一步模型快照存在，避免
+                # control.step 领先 last.pt 而恢复出混合时间线。
+                if step % save_every != 0:
+                    save_snapshot(last_pt, model, opt, sched, step, epoch,
+                                  batch_cursor=next_batch_cursor)
                 _dec_every = int(cfg.get("eval_decode_every") or 0) or eval_every_steps
                 _full = (step % _dec_every == 0)
                 model.eval()
@@ -1083,7 +1313,6 @@ def train(model, datamodule, cfg: dict, tokenizer,
                                        getattr(datamodule, "maestro_val", []),
                                        tokenizer,
                                        labels=getattr(datamodule, "labels", None),
-                                       legato_omr_fn=legato_omr_fn,
                                        eval_max=int(cfg.get("eval_max", 128)),
                                        time_budget_s=float(cfg.get("eval_time_budget_s", 1200)),
                                        autolog=cfg.get("eval_autolog"), step=step,
@@ -1096,31 +1325,45 @@ def train(model, datamodule, cfg: dict, tokenizer,
                         return _finish("max_steps_reached")
                     continue               # 仅探针:不进止损器/不评 best.pt(不是坏 eval)
 
-                best_eligible = omr_metric_eligible(m)
-                action = stopper.update(
-                    step, m["parseable_rate"], m.get("maestro_amt_f1"),
-                    m.get("val_omr_ned") if best_eligible else None,
-                    recent_loss=recent[-1])
+                proxy_eligible = proxy_metric_eligible(m)
+                selection_name = selection_metric if proxy_eligible else None
+                selection_value = (m.get("val_text_ned_proxy")
+                                   if proxy_eligible else None)
+                if not m.get("eval_complete", False):
+                    action = {"action": "continue",
+                              "reason": "eval不完整/超时/缺音频，不进入止损器"}
+                else:
+                    action = stopper.update(
+                        step, m["parseable_rate"], m.get("maestro_amt_f1"),
+                        selection_value, recent_loss=recent[-1],
+                        selection_metric=selection_name or "none")
                 report["stop_events"].append({"step": step, **action})
 
                 # ckpt(滚动 6)
                 ck = ckpt_dir / f"step{step}.pt"
                 torch.save({"model": model.state_dict(), "step": step, "metrics": m}, ck)
                 ckpt_ring.append(ck)
-                if len(ckpt_ring) > 6:
+                if len(ckpt_ring) > ckpt_keep:
                     old = ckpt_ring.pop(0)
                     old.unlink(missing_ok=True)
-                # OMR-NED 只对“可解析且有参照”的样本有定义。旧逻辑可凭 1 个容易样本
-                # 刷新 best.pt；现在只有完整、样本量足够且覆盖率达标的 eval 才有资格。
-                if best_eligible and m["val_omr_ned"] < best_omr:
-                    best_omr = m["val_omr_ned"]
-                    torch.save({"model": model.state_dict(), "step": step},
+                # 文本代理只对“可解析且有参照”的样本有定义。只有完整、样本量足够且
+                # 覆盖率达标的 eval 才能刷新 best.pt；正式 OMR 不参与训练选择。
+                if (selection_value is not None
+                        and selection_value < best_eval_metric[selection_name]):
+                    best_eval_metric[selection_name] = selection_value
+                    torch.save({"model": model.state_dict(), "step": step,
+                                "selection_metric": selection_name,
+                                "selection_value": selection_value},
                                ckpt_dir / "best.pt")
-                elif m.get("val_omr_ned") is not None and not best_eligible:
-                    print("  best.pt 不更新:OMR eval 未满足完整性门槛"
-                          f"(scored={m.get('n_omr_scored')}/{m.get('n_eval_nasap')}, "
-                          f"coverage={m.get('omr_coverage', 0):.2f}, "
-                          f"truncated={m.get('eval_truncated')})", flush=True)
+                elif m.get("val_text_ned_proxy") is not None \
+                        and selection_value is None:
+                    print("  best.pt 不更新:eval 未满足完整性门槛"
+                          f"(proxy={m.get('n_text_proxy_scored')}/{m.get('n_eval_nasap')}, "
+                          f"complete={m.get('eval_complete')})", flush=True)
+
+                # 评测改变了 best/平台历史后立即落几十字节的小状态文件；无需再重写
+                # 2GB last.pt。恢复时要求 control.step 不领先模型快照。
+                save_train_control(control_path, step, best_eval_metric, stopper)
 
                 # 处理止损动作
                 act = action["action"]

@@ -89,8 +89,12 @@ def test_transkun_resume_and_fail():
         stub = Path(td) / "fake_transkun.py"
         stub.write_text("import sys;open(sys.argv[2],'wb').write(b'MThd');print('ok')",
                         encoding="utf-8")
-        sh = Path(td) / "transkun"
-        sh.write_text(f"#!/bin/sh\nexec {PY} {stub} \"$@\"\n")
+        sh = Path(td) / ("transkun.cmd" if os.name == "nt" else "transkun")
+        if os.name == "nt":
+            sh.write_text(f'@"{PY}" "{stub}" %*\n', encoding="utf-8")
+        else:
+            sh.write_text(f"#!/bin/sh\nexec {PY} {stub} \"$@\"\n",
+                          encoding="utf-8")
         sh.chmod(sh.stat().st_mode | stat.S_IEXEC)
         r = _run("calib_transkun.py", ["--transkun", str(sh)], {"RUBATO_WORK": str(work)})
         assert r.returncode == 0, r.stdout + r.stderr

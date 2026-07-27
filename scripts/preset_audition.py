@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import harden_stdout, read_jsonl
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def main(argv=None):
@@ -34,8 +35,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="逐预设产 legacy/fixed/fixed_w70 对照音频,供用户实听定数")
     ap.add_argument("--midi", default="", help="参考 MIDI;缺省取 manifest 第一首")
     ap.add_argument("--manifest", default=str(ROOT / "work" / "manifest_pieces.jsonl"))
-    ap.add_argument("--sources", default="configs/sources.yaml")
-    ap.add_argument("--presets", default="configs/recording_presets.yaml")
+    ap.add_argument("--sources", default=str(REPO_ROOT / "configs" / "sources.yaml"))
+    ap.add_argument("--presets", default=str(REPO_ROOT / "configs" / "recording_presets.yaml"))
     ap.add_argument("--source", default="", help="音源 id;缺省取配置第一个")
     ap.add_argument("--seconds", type=float, default=20.0, help="试听片段长度")
     ap.add_argument("--out", default=str(ROOT / "reports" / "preset_audition"))

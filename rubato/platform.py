@@ -37,15 +37,6 @@ def load_binaries(project_yaml: str | Path | None = None) -> dict:
     return cfg.get("binaries", {}) or {}
 
 
-def posix_path(p: str | Path) -> str:
-    """
-    路径统一为正斜杠字符串(问题#16:Windows 下 glob 正斜杠 × os.sep 反斜杠拼接
-    产出 'mid/1\\49\\file.mid' 混合路径,subprocess 偶发失败)。
-    拼路径永远用 pathlib 的 /,落字符串前过一次本函数。
-    """
-    return Path(p).as_posix()
-
-
 def resolve_exe(name: str, binaries: dict | None = None) -> str:
     """
     解析外部程序的可执行路径。
@@ -172,14 +163,6 @@ def write_jsonl(path: str | Path, rows) -> None:
     with open(p, "w", encoding="utf-8", newline="\n") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-
-def append_jsonl(path: str | Path, row: dict) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
 
 if __name__ == "__main__":
     # 自检:UTF-8 往返(含音乐符号与中文作曲家名)+ 程序解析

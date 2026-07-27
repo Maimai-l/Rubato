@@ -14,7 +14,7 @@
 |---|---|---|---|
 | 1 | **s7 只写 report 不落 labels**;而 CORPUS_REGEN 却写"产出 nasap_labels.jsonl"(承诺了不存在的产物) | 高(报的就是它) | 执行者加 `--out-labels/--out-corpus`;我把循环内 `setdefault(open())` 提到循环外(每首曲重开文件的 churn),文档改成带参调用 |
 | 2 | **s3 三脚本歧义**:`s3_full_filter.py` 只写统计 report、**不产 manifest**,名字却像"全量过滤";真正产 `manifest_pieces.jsonl` 的是 `s3_filter_pdmx.py` | 高(同 s7 的坑) | 文档点名:产 manifest 用 `s3_filter_pdmx.py`;`s3_full_filter.py` 是诊断 |
-| 3 | **泄漏防护会被绕过**:`s5`/`s5_parallel` 都传【空 blacklist】,泄漏防护全靠 `s3_minhash_leakage.py` 先把 manifest 洗过。跳过它 = 零泄漏防护 = 测试集污染 | 高 | 文档把顺序钉死:`s3_filter → s3_minhash_leakage → s5`,并解释为何不能跳 |
+| 3 | **泄漏防护会被绕过**:旧流程只靠 `s3_minhash_leakage.py` 原地洗单个 manifest，解析失败还会跳过；恢复池/追加 manifest 可完全漏检 | 高 | 新增严格 `certify_pdmx_leakage.py`：扫描装配实际启用的全部 train manifest、失败关闭、证书绑定 SHA256；正式训练入口强制核验证书 |
 | 4 | **labels→数据集的胶水完全缺失**:三份 labels.jsonl schema 不一致(maestro 用 `midi_file`/`amt_text`,pdmx/nasap 用 `utt_id`/`AMT`),且都不带音频路径;没有任何代码把它们合成 `RubatoDataset(utts, labels)`。训练代码有、入口没有 → 语料/词表全对了也训不起来 | **最高(下一个必踩)** | 新增 `rubato/data/assemble.py`(纯逻辑,`tests_assemble.py` 22 项)+ `scripts/build_dataset.py`(带 `--dry-run` 装配自检 + 训练入口) |
 | 5 | **assemble 的 nASAP 音频未对接**:s7 标签行不带音频引用,`resolve_audio` 会把 nASAP 全判 no_audio | 中 | `build_dataset.py --dry-run` 会显示 `nasap kept=0`;resolver 里 **【EXECUTOR】** 注释指明补 nASAP↔FLAC 映射 |
 | 6 | `s5_parallel.merge_outputs` 把全部 corpus+labels 读进内存再 join | 低(规模,非正确性) | 记录;53k 量级通常可承受,爆内存再改流式 |
@@ -24,7 +24,8 @@
 - `gen_amt_labels.py`:确实写 `maestro_amt_labels.jsonl`("w")。✓(但 schema 是 `midi_file`/`amt_text`,见 #4)
 - `s5_parallel` 的 `"".join(corpus_lines)`:每个 chunk 文件以 `\n` 收尾,拼接不会粘行。✓
 - `write_text/write_jsonl`:都 `mkdir(parents=True)`,目录缺失会建而非静默失败。✓
-- `s3_filter_pdmx` / `s3_minhash_leakage`:都真写 manifest。✓
+- `s3_filter_pdmx`:真写 manifest。严格泄漏证书器只写审计证书、不篡改 manifest；旧
+  `s3_minhash_leakage` 已改为兼容转发。✓
 
 ## 第二轮(用户追问"为什么不用 VN/PDMX 了")
 

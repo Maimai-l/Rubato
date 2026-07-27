@@ -8,7 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from rubato.render.core import render_midi_to_wav44, finalize, assign_source_and_preset
+from rubato.render.core import (
+    render_midi_to_wav44, finalize, assign_source_and_preset, render_qc,
+)
 from rubato.ops import mem_budget_map, available_gb
 from rubato.platform import harden_stdout   # Windows GBK 控制台:打印 '−' 会崩,先硬化
 import yaml
@@ -65,19 +67,51 @@ def render_one(args: tuple) -> dict:
     preset = presets["presets"][preset_id]
 
     wav_path = str(Path(out_dir) / f"{utt_id}.wav")
-    try:
-        render_midi_to_wav44(midi_path, source, sources, wav_path, utt_id=utt_id,
-                             timeout_s=float(sources["render"].get("timeout_s", 600)))
-        opus_path = str(Path(out_dir) / f"{utt_id}.opus")
-        finalize(wav_path, preset, sources, presets, utt_id, opus_path)
-        return {"utt_id": utt_id, "elapsed_s": round(time.time() - t0, 1),
-                "source": src_id, "preset": preset_id, "ok": True}
-    except Exception as e:
-        return {"utt_id": utt_id, "error": f"{type(e).__name__}: {str(e)[:80]}",
-                "elapsed_s": round(time.time() - t0, 1), "ok": False}
-    finally:
-        if os.path.exists(wav_path):
-            os.unlink(wav_path)
+    last_error = None
+    last_qc = None
+    for attempt in range(1, 3):  # R-S4.4: QC failure gets exactly one re-render
+        try:
+            render_midi_to_wav44(
+                midi_path, source, sources, wav_path, utt_id=utt_id,
+                timeout_s=float(sources["render"].get("timeout_s", 600)))
+            finalize(wav_path, preset, sources, presets, utt_id, opus_path)
+            last_qc = render_qc(
+                midi_path, opus_path,
+                tol_s=float(sources["render"].get("duration_tol_s", 1.5)),
+                gate_db=float(sources["render"].get("silence_gate_db", -60)))
+            if last_qc["ok"]:
+                return {
+                    "utt_id": utt_id,
+                    "elapsed_s": round(time.time() - t0, 1),
+                    "source": src_id,
+                    "preset": preset_id,
+                    "attempts": attempt,
+                    "qc": last_qc,
+                    "ok": True,
+                }
+            last_error = (
+                "render_qc:"
+                f"audible={last_qc.get('audible')} "
+                f"diff_s={last_qc.get('diff_s')} "
+                f"error={last_qc.get('error')}")
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {str(e)[:120]}"
+        finally:
+            if os.path.exists(wav_path):
+                os.unlink(wav_path)
+        # Never let a failed but non-empty file satisfy the resume predicate.
+        if os.path.exists(opus_path):
+            os.unlink(opus_path)
+    return {
+        "utt_id": utt_id,
+        "error": last_error or "render_failed",
+        "elapsed_s": round(time.time() - t0, 1),
+        "source": src_id,
+        "preset": preset_id,
+        "attempts": 2,
+        "qc": last_qc,
+        "ok": False,
+    }
 
 
 def _done(task) -> bool:

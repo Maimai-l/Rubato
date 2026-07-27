@@ -4,7 +4,7 @@ import numpy as np
 sys.path.insert(0, ".")
 from rubato.model.infer import (
     split_audio, build_tast_prompt, strip_timestamps, truncate_after_20s,
-    merge_windows, validate_a2s, infer_a2s, _EMPTY_A2S,
+    validate_a2s, infer_a2s, _EMPTY_A2S,
 )
 
 PASS = 0
@@ -69,18 +69,6 @@ class BrokenModel:
 result2 = infer_a2s(BrokenModel(), np.zeros(30*16000, dtype=np.float32), None)
 check("broken_returns_valid", not validate_a2s(result2), f"{result2}: {validate_a2s(result2)}")
 
-print("[9] 合并委托 merge_ref")
-from rubato.intermo.core import Note, Measure, ScoreIR, SPitch, project
-from fractions import Fraction as F
-def ir_of(steps, start=0):
-    return ScoreIR([Note("PR", SPitch(s,0,4), F(start+i), F(1)) for i,s in enumerate(steps)],
-                   [Measure(F(start+i),4,4,0) for i in range(len(steps))], F(start+len(steps)))
-w1 = project(ir_of("CDE"), "A2S")
-w2 = project(ir_of("EF"), "A2S")
-merged = merge_windows([w1, w2])
-check("merge_valid", not validate_a2s(merged), validate_a2s(merged))
-check("merge_correct", merged == project(ir_of("CDEF"), "A2S"), merged)
-
 print(f"\n全部通过: {PASS} 项")
 print("注:single_window_infer 调 NeMo model.generate/transcribe 需 GPU,带三形态兜底+beam重试,")
-print("    本地验证;分窗/剥戳/截断/合并/stub 沙盒已验证。")
+print("    本地验证;分窗/剥戳/截断/stub 沙盒已验证。IR 合并见 tests_merge.py。")

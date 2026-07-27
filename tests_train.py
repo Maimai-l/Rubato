@@ -4,7 +4,7 @@ sys.path.insert(0, ".")
 from rubato.model.train import (
     build_optimizer, bucket_batches, group_grad_norms,
     normalize_accumulated_gradients, new_step_metrics,
-    accumulate_step_metrics, finalize_step_metrics,
+    accumulate_step_metrics, finalize_step_metrics, clip_gradients,
 )
 
 PASS = 0
@@ -134,6 +134,22 @@ check("full_step_audio", sm["batch_audio_sec"] == 100.0 and sm["micro_batches"] 
 check("loss_sequence_weighted", abs(sm["loss"] - 3.0) < 1e-7, sm["loss"])
 check("semantic_token_weighted", abs(sm["semantic_loss"] - 5 / 3) < 1e-7,
       sm["semantic_loss"])
+
+print("[9] 非有限梯度必须在 optimizer.step 前硬失败")
+p_bad = torch.nn.Parameter(torch.tensor(1.0))
+p_bad.grad = torch.tensor(float("nan"))
+try:
+    clip_gradients([p_bad], 1.0)
+    nonfinite_rejected = False
+except RuntimeError:
+    nonfinite_rejected = True
+check("nonfinite_gradient_rejected", nonfinite_rejected)
+try:
+    clip_gradients([torch.nn.Parameter(torch.tensor(1.0))], 0.0)
+    bad_clip_rejected = False
+except ValueError:
+    bad_clip_rejected = True
+check("bad_clip_norm_rejected", bad_clip_rejected)
 
 print(f"\n全部通过: {PASS} 项")
 print("注:training_step/eval_hook/主循环需 GPU+NeMo 模型+真实数据,带断言本地跑;")

@@ -25,6 +25,7 @@ from rubato.platform import harden_stdout, read_jsonl
 from rubato.data.cleanup import purge_label_rows
 
 ROOT = Path(r"D:\vscode_projects\ee_download")
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _load_cfgs(sources_path, presets_path):
@@ -75,8 +76,8 @@ def main(argv=None):
     ap.add_argument("--manifest", default=str(ROOT / "work" / "manifest_pieces.jsonl"))
     ap.add_argument("--audio-dir", default=str(ROOT / "work" / "pdmx_audio"))
     ap.add_argument("--vn-labels", default=str(ROOT / "work" / "pdmx_perf_labels.jsonl"))
-    ap.add_argument("--sources", default="configs/sources.yaml")
-    ap.add_argument("--presets", default="configs/recording_presets.yaml")
+    ap.add_argument("--sources", default=str(REPO_ROOT / "configs" / "sources.yaml"))
+    ap.add_argument("--presets", default=str(REPO_ROOT / "configs" / "recording_presets.yaml"))
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args(argv)
 

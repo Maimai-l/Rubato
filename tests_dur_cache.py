@@ -17,6 +17,7 @@ def _fresh_bd(cache_path: str):
     """每个用例干净进程态:重载模块 + 指定缓存文件。"""
     os.environ["RUBATO_DUR_CACHE"] = cache_path
     import scripts.build_dataset as bd
+    bd._dur_db_close()
     importlib.reload(bd)
     return bd
 
@@ -69,9 +70,10 @@ def test_corrupt_lines_tolerated_and_cache_failure_harmless():
         bd = _fresh_bd(str(cache))
         assert abs(bd._flac_dur(str(wav)) - 1.0) < 1e-6     # 坏行跳过,照常工作
         # 缓存目录不可写(指到不存在盘符风格路径)→ 装配仍必须工作
-        bd2 = _fresh_bd(str(Path(td) / "no_dir_here" / "x" * 260 / "dur.jsonl")
+        bd2 = _fresh_bd(str(Path(td) / "no_dir_here" / ("x" * 260) / "dur.jsonl")
                         if os.name == "nt" else "/proc/definitely/not/writable/dur.jsonl")
         assert abs(bd2._flac_dur(str(wav)) - 1.0) < 1e-6
+        bd2._dur_db_close()
 
 
 if __name__ == "__main__":

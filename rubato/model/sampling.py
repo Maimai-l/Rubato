@@ -3,6 +3,7 @@ S11 采样与 tiling(R-S11.2, R-S11.3)。纯逻辑,沙盒可验证。
 """
 from __future__ import annotations
 import hashlib
+import math
 
 DIALECT_MIX = {"A2S": 0.35, "A2S_lite": 0.15, "TAST": 0.20, "AMT": 0.30}
 
@@ -42,6 +43,11 @@ def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
     import random
     rng = random.Random(f"{seed}:{epoch}")
     mix = mix or DIALECT_MIX
+    if set(mix) != set(DIALECT_MIX):
+        raise ValueError(
+            f"dialect mix 键必须恰为 {sorted(DIALECT_MIX)}，得到 {sorted(mix)}")
+    if any(not math.isfinite(float(w)) or float(w) < 0 for w in mix.values()):
+        raise ValueError(f"dialect mix 含负数/非有限权重: {mix}")
     pools = {d: [u for u, avail in available_by_utt.items() if avail and d in avail]
              for d in mix}
     pools = {d: p for d, p in pools.items() if p}
@@ -49,9 +55,19 @@ def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
         return []
     n_total = sum(1 for a in available_by_utt.values() if a)
     tot_w = sum(mix[d] for d in pools)
+    if tot_w <= 0:
+        raise ValueError(f"有数据的方言权重总和必须 >0: pools={sorted(pools)} mix={mix}")
+    # 最大余数法：独立 round() 不守恒，N 很小时甚至四类 quota 全为 0。
+    # 先取 floor，再按小数余数补齐，保证一个 epoch 精确采 N 条。
+    raw_quota = {d: n_total * float(mix[d]) / tot_w for d in pools}
+    quotas = {d: int(math.floor(q)) for d, q in raw_quota.items()}
+    remain = n_total - sum(quotas.values())
+    order = sorted(pools, key=lambda d: (-(raw_quota[d] - quotas[d]), d))
+    for d in order[:remain]:
+        quotas[d] += 1
     out = []
     for d in sorted(pools):
-        quota = int(round(n_total * mix[d] / tot_w))
+        quota = quotas[d]
         pool = pools[d]
         take = rng.sample(pool, min(quota, len(pool)))     # 优先无放回
         while len(take) < quota:                           # 小池按混比过采样(有放回)
@@ -61,6 +77,8 @@ def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
             report[d] = {"pool_size": len(pool), "quota": quota,
                          "oversample_ratio": round(quota / max(len(pool), 1), 2)}
     rng.shuffle(out)
+    if len(out) != n_total:
+        raise RuntimeError(f"dialect quota 不守恒:{len(out)} != {n_total}")
     return out
 
 

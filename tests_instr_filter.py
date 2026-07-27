@@ -1,5 +1,6 @@
 """乐器过滤 + 可验证清理 + 语料重建 回归测试。运行: python tests_instr_filter.py"""
 import json
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -149,10 +150,15 @@ with open(mani_p, "w", encoding="utf-8") as f:
                             "midi_path": str(tmp / "pa.mid")}) + "\n")
     f.write(json.dumps({"piece_id": "DRUM_P", "xml_raw": str(mxl),
                         "midi_path": str(tmp / "dr.mid")}) + "\n")
-rc = audit.main(["--manifest", str(mani_p), "--xml-root", str(tmp), "--audio-dir", str(aud),
-                 "--text-labels", str(tmp / "no1.jsonl"), "--vn-labels", str(tmp / "no2.jsonl"),
-                 "--out-ids", str(tmp / "bad_p.txt"), "--workers", "2"])
-check("pool_audit_rc0", rc == 0, rc)
+proc = subprocess.run([
+    sys.executable, str(Path(__file__).resolve().parent /
+                        "scripts" / "s3_instrument_audit.py"),
+    "--manifest", str(mani_p), "--xml-root", str(tmp),
+    "--audio-dir", str(aud), "--text-labels", str(tmp / "no1.jsonl"),
+    "--vn-labels", str(tmp / "no2.jsonl"),
+    "--out-ids", str(tmp / "bad_p.txt"), "--workers", "2",
+], capture_output=True, text=True, encoding="utf-8", errors="replace")
+check("pool_audit_rc0", proc.returncode == 0, proc.stdout + proc.stderr)
 ids_p = (tmp / "bad_p.txt").read_text(encoding="utf-8")
 check("pool_found_only_drum", ids_p.strip().startswith("DRUM_P") and "PP" not in ids_p, ids_p)
 

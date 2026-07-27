@@ -233,3 +233,29 @@ def duration_check(audio_path: str, expected_dur_s: float, tol_s: float = 1.5) -
     diff = abs(actual - expected_dur_s)
     return {"ok": diff < tol_s, "actual_s": round(actual, 2),
             "expected_s": round(expected_dur_s, 2), "diff_s": round(diff, 2)}
+
+
+def render_qc(midi_path: str, audio_path: str, tol_s: float = 1.5,
+              gate_db: float = -60.0) -> dict:
+    """R-S4.4 runtime gate for a newly rendered file.
+
+    This is intentionally called by the render workers, not merely by an
+    after-the-fact audit.  A parse/probe failure fails closed: a non-empty
+    output file alone is not proof that sfizz completed successfully.
+    """
+    try:
+        import mido
+        expected = float(mido.MidiFile(str(midi_path)).length)
+        duration = duration_check(audio_path, expected, tol_s=tol_s)
+        audible = silence_check(audio_path, gate_db=gate_db)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "audible": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        **duration,
+        "audible": bool(audible),
+        "ok": bool(duration["ok"] and audible),
+    }

@@ -3,6 +3,7 @@ import sys
 sys.path.insert(0, ".")
 from rubato.model.build import (
     build_target_sequence, DIALECT_PROMPT, estimate_params, check_param_count,
+    verify_encoder_loaded, resize_decoder_vocab,
 )
 
 PASS = 0
@@ -43,6 +44,12 @@ print("[3] 域提示可选")
 t_dom, m_dom = build_target_sequence("A2S", ["x"], domain="real")
 check("domain_added", "<|real|>" in t_dom)
 check("domain_masked", m_dom[t_dom.index("<|real|>")] == False)  # 域提示也是 prompt,不计 loss
+try:
+    build_target_sequence("A2S", ["x"], domain="unknown")
+    bad_domain_rejected = False
+except ValueError:
+    bad_domain_rejected = True
+check("bad_domain_rejected", bad_domain_rejected)
 
 print("[4] 参数量核算(A-S10.1,修正为 1024 维)")
 # canary-180m-flash 实测配置:dec hidden=1024(非 512)
@@ -70,6 +77,39 @@ check("detects_wrong_backbone", not r_bad["ok"], r_bad)
 # 无基准 → 只报告不判定
 r_none = check_param_count(new_total)
 check("no_ref_reports_only", r_none["ok"] is None, r_none)
+
+print("[6] encoder hash 校验支持嵌套键，零匹配必须失败")
+import torch
+_a = {"model.encoder.layer.weight": torch.tensor([1.0]),
+      "decoder.weight": torch.tensor([2.0])}
+_b = {"model.encoder.layer.weight": torch.tensor([1.0]),
+      "decoder.weight": torch.tensor([9.0])}
+_v = verify_encoder_loaded(_a, _b)
+check("nested_encoder_matched", _v["ok"] and _v["n_checked"] == 1, _v)
+_zero = verify_encoder_loaded({"decoder.weight": torch.tensor([1.0])},
+                              {"decoder.weight": torch.tensor([1.0])})
+check("zero_encoder_match_fails", not _zero["ok"] and _zero["n_checked"] == 0,
+      _zero)
+
+print("[7] 词表换形必须同时替换 embedding/输出头，参数增长精确可核")
+class _VocabModel(torch.nn.Module):
+    def __init__(self, with_head=True):
+        super().__init__()
+        self.emb = torch.nn.Embedding(10, 4)
+        self.head = torch.nn.Linear(4, 10) if with_head else torch.nn.Linear(4, 4)
+vm = _VocabModel()
+before = sum(p.numel() for p in vm.parameters())
+swap = resize_decoder_vocab(vm, 13, old_vocab=10)
+after = sum(p.numel() for p in vm.parameters())
+check("embedding_and_head_replaced",
+      swap["replaced_embeddings"] == 1 and swap["replaced_linears"] == 1, swap)
+check("param_growth_exact", after == before + swap["param_growth"], (before, after, swap))
+try:
+    resize_decoder_vocab(_VocabModel(with_head=False), 13, old_vocab=10)
+    missing_head_rejected = False
+except RuntimeError:
+    missing_head_rejected = True
+check("missing_output_head_rejected", missing_head_rejected)
 
 print(f"\n全部通过: {PASS} 项")
 print("注:实际 canary 加载、encoder hash 核对、前端一致性验证需 GPU+NeMo+canary.nemo,")

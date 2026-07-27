@@ -2,13 +2,19 @@
 运行: python tests_resume.py"""
 import sys
 import tempfile
+import random
 from pathlib import Path
 
 sys.path.insert(0, ".")
 import torch
 import torch.nn as nn
+import numpy as np
 
-from rubato.model.train import build_optimizer, save_snapshot, load_snapshot, apply_cfg_lrs
+from rubato.model.train import (
+    build_optimizer, save_snapshot, load_snapshot, apply_cfg_lrs,
+    save_train_control, load_train_control,
+)
+from rubato.model.early_stop import StopController
 
 PASS = 0
 
@@ -62,6 +68,15 @@ s1 = opt1.state_dict()["state"]
 s2 = opt2.state_dict()["state"]
 check("adam_momentum_equal",
       all(torch.equal(s1[k]["exp_avg"], s2[k]["exp_avg"]) for k in s1), "动量不一致")
+
+print("[1b] Python/NumPy/Torch RNG 必须随快照恢复")
+random.seed(123); np.random.seed(123); torch.manual_seed(123)
+save_snapshot(snap, m1, opt1, sched1, step=7, epoch=2, batch_cursor=11)
+expected_rng = (random.random(), float(np.random.rand()), float(torch.rand(())))
+random.seed(999); np.random.seed(999); torch.manual_seed(999)
+load_snapshot(snap, m2, opt2, sched2)
+got_rng = (random.random(), float(np.random.rand()), float(torch.rand(())))
+check("rng_state_restored", got_rng == expected_rng, (got_rng, expected_rng))
 
 print("[2] 恢复后继续训 3 步:两条时间线(不断 vs 断点续)逐位一致")
 m3, opt3, sched3 = mk()
@@ -131,5 +146,26 @@ for _ in range(3):
     opt5.step(); sched5.step(); opt5.zero_grad()
 check("timeline_identical_after_noop_reapply",
       all(torch.equal(a, b) for a, b in zip(m3.state_dict().values(), m5.state_dict().values())))
+
+print("[5] best/早停历史随断点恢复，control 不得领先模型快照")
+ctrl = tmp / "train_control.json"
+best1 = {"text_ned_proxy": 0.81}
+stop1 = StopController()
+stop1.metric_history = {"text_ned_proxy": [0.9, 0.85, 0.81]}
+stop1.loss_median_window = [3.0, 2.9]
+save_train_control(ctrl, 7, best1, stop1)
+best2 = {"text_ned_proxy": float("inf")}
+stop2 = StopController()
+check("control_restored", load_train_control(ctrl, 7, best2, stop2))
+check("best_restored", best2 == best1, best2)
+check("stop_history_restored",
+      stop2.metric_history == stop1.metric_history
+      and stop2.loss_median_window == stop1.loss_median_window)
+try:
+    load_train_control(ctrl, 6, best2, stop2)
+    ahead_raised = False
+except RuntimeError:
+    ahead_raised = True
+check("control_ahead_rejected", ahead_raised)
 
 print(f"\n全部通过: {PASS} 项")

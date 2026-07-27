@@ -14,6 +14,7 @@ S8 装配 + 训练启动:把三份 labels.jsonl(+音频)合成 RubatoDataModule,
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -24,15 +25,24 @@ from rubato.platform import harden_stdout
 from rubato.data.assemble import assemble, partition_by_split
 harden_stdout()   # 执行端 P8 实测:第 155 行打 '⚠' 在 GBK 控制台崩;此前全库硬化时漏了本脚本
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
 ROOT = Path(r"D:\vscode_projects\ee_download")
 WORK = ROOT / "work"
+DEFAULT_TRAIN_CONFIG = REPO_ROOT / "configs" / "train.yaml"
+DEFAULT_VOCAB_SPEC = REPO_ROOT / "configs" / "vocab_spec.json"
 
 # labels.jsonl 来源(与 s5/s5_vn/s7/gen_amt 的输出对齐)。
 #   pdmx_perf(s5_vn_render):表现性音频 + TAST,行内带 audio_path。← 有它就优先,含 TAST。
 #   pdmx_a2s(s5 文本):仅 A2S/A2S_lite 文本(TAST=null),需配 S4 直排音频。
 SOURCES = [
-    {"path": str(WORK / "pdmx_perf_labels.jsonl"), "kind": "pdmx", "domain": "synth"},
-    {"path": str(WORK / "pdmx_a2s_labels.jsonl"),  "kind": "pdmx", "domain": "synth"},
+    {"path": str(WORK / "pdmx_perf_labels.jsonl"), "kind": "pdmx", "domain": "synth",
+     "manifests": [str(WORK / "manifest_pieces.jsonl"),
+                   str(WORK / "manifest_giant.jsonl")],
+     "quarantine_unmapped": True},
+    {"path": str(WORK / "pdmx_a2s_labels.jsonl"),  "kind": "pdmx", "domain": "synth",
+     "manifests": [str(WORK / "manifest_pieces.jsonl"),
+                   str(WORK / "manifest_giant.jsonl")],
+     "quarantine_unmapped": True},
     {"path": str(WORK / "nasap_labels.jsonl"),     "kind": "nasap",   "domain": "real"},
     # 【必须用切窗版】整曲版 maestro_amt_labels.jsonl 是几分钟长的不可训行(P8 实测只装出
     # 1,276 条、AMT 全灭);切窗版 23,657 条 12-25s 窗,行带 win=[t0,t1] + split(来自 MAESTRO CSV)。
@@ -57,7 +67,10 @@ if _PERF_S2.exists():
 # (清单生成即 train-only),行内带 audio_path(pdmx_audio_r3_native 下,flac)。
 _PERF_R3 = WORK / "pdmx_perf_labels_r3_native.jsonl"
 if _PERF_R3.exists():
-    SOURCES.append({"path": str(_PERF_R3), "kind": "pdmx", "domain": "synth"})
+    SOURCES.append({
+        "path": str(_PERF_R3), "kind": "pdmx", "domain": "synth",
+        "manifest": str(WORK / "manifest_pieces_round3_restore_train_vn_ok.jsonl"),
+    })
 
 # ---------------------------------------------------------------- 音频时长缓存
 # 【D71,用户点名"竞赛早 TLE 了"】进程内 dict 之外加【持久化】层:75 万行逐个
@@ -74,6 +87,22 @@ _DUR_DB_PENDING = 0
 def _dur_db_path() -> Path:
     import os as _os
     return Path(_os.environ.get("RUBATO_DUR_CACHE") or (WORK / "audio_dur_cache.jsonl"))
+
+
+def _dur_db_close() -> None:
+    """刷新并关闭持久缓存句柄；Windows 下否则会锁住缓存文件/临时目录。"""
+    global _DUR_DB_FH, _DUR_DB_PENDING
+    fh, _DUR_DB_FH = _DUR_DB_FH, None
+    _DUR_DB_PENDING = 0
+    if fh is not None:
+        try:
+            fh.flush()
+        finally:
+            fh.close()
+
+
+import atexit as _atexit
+_atexit.register(_dur_db_close)
 
 
 def _dur_db_load() -> None:
@@ -225,37 +254,71 @@ def resolve_audio(utt_id: str, kind: str, row: dict):
     return None
 
 
-def _pdmx_row_fn():
+def _load_pdmx_eval_blacklist() -> set[str]:
+    """Build the exact external-evaluation work blacklist once per assembly."""
+    from scripts.s3_filter_pdmx import get_nasap_test_works, get_beyer_work_keys
+    from rubato.data.pdmx import build_blacklist
+    blacklist = build_blacklist(
+        get_nasap_test_works(WORK),
+        get_beyer_work_keys(
+            ROOT / "asap-dataset" / "asap-dataset" / "asap_annotations.json"))
+    if not blacklist:
+        raise RuntimeError("PDMX evaluation blacklist is empty")
+    return blacklist
+
+
+def _pdmx_row_fn(manifest_paths=None, quarantine_unmapped: bool = False,
+                 blacklist: set[str] | None = None):
     """PDMX 行注入:manifest 的 split/work_key(标签行不带,P8 实测全体默认 train、val/test≈0);
     命中 nASAP-test/Beyer 黑名单的工作【过滤出训练】(问题#14 的装配层强制,P4 曾以空名单跑过)；
     以及审计确认的音频截断 utt(隔离清单在 configs/pdmx_duration_quarantine.jsonl)。"""
     import json as _json
     m = {}
-    mani = WORK / "manifest_pieces.jsonl"
-    if not mani.exists():
-        raise FileNotFoundError(
-            f"PDMX manifest 缺失：{mani}。不能把全部样本静默当 train。")
-    with open(mani, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                r = _json.loads(line)
-            except Exception:
-                continue
-            if r.get("piece_id"):
-                m[r["piece_id"]] = (r.get("split"), r.get("work_key"))
+    if manifest_paths is None:
+        manifest_paths = [WORK / "manifest_pieces.jsonl"]
+    elif isinstance(manifest_paths, (str, Path)):
+        manifest_paths = [manifest_paths]
+    manifest_paths = [Path(x) for x in manifest_paths]
+    for mani in manifest_paths:
+        if not mani.exists():
+            raise FileNotFoundError(
+                f"PDMX manifest 缺失：{mani}。不能把全部样本静默当 train。")
+        with open(mani, "r", encoding="utf-8") as f:
+            for n, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = _json.loads(line)
+                except Exception as e:
+                    raise ValueError(
+                        f"PDMX manifest {mani.name} 第 {n} 行 JSON 损坏:"
+                        f"{type(e).__name__}: {e}") from e
+                piece_id = r.get("piece_id")
+                if not piece_id:
+                    raise ValueError(f"PDMX manifest {mani.name} 第 {n} 行缺 piece_id")
+                split = r.get("split")
+                work_key = r.get("work_key")
+                if split not in {"train", "val", "test"}:
+                    raise ValueError(
+                        f"PDMX manifest {mani.name} 第 {n} 行 split 非法: {split!r}")
+                if not isinstance(work_key, str) or not work_key.strip():
+                    raise ValueError(
+                        f"PDMX manifest {mani.name} 第 {n} 行 work_key 缺失")
+                value = (split, work_key)
+                if piece_id in m and m[piece_id] != value:
+                    raise ValueError(
+                        f"PDMX manifest piece_id 重复且元数据冲突:{piece_id} "
+                        f"{m[piece_id]} vs {value}")
+                m[piece_id] = value
     if not m:
         raise RuntimeError(f"PDMX manifest 为空或没有有效 piece_id：{mani}")
     try:
-        from scripts.s3_filter_pdmx import get_nasap_test_works, get_beyer_work_keys
-        from rubato.data.pdmx import build_blacklist
-        bl = build_blacklist(get_nasap_test_works(WORK),
-                             get_beyer_work_keys(ROOT / "asap-dataset" / "asap-dataset" / "asap_annotations.json"))
+        bl = set(blacklist) if blacklist is not None else _load_pdmx_eval_blacklist()
     except Exception as e:
         raise RuntimeError(
-            f"PDMX 泄漏黑名单构建失败，拒绝在不过滤的情况下训练：{type(e).__name__}: {e}") from e
+            f"PDMX 泄漏黑名单构建失败，拒绝在不过滤的情况下训练："
+            f"{type(e).__name__}: {e}") from e
 
     duration_quarantine = set()
     qpath = Path(__file__).resolve().parent.parent / "configs" / "pdmx_duration_quarantine.jsonl"
@@ -268,33 +331,344 @@ def _pdmx_row_fn():
                 try:
                     uid = str(_json.loads(line)["utt_id"])
                 except Exception as e:
-                    print(f"  ⚠ 时长隔离清单第 {n} 行无效({type(e).__name__}),已忽略")
-                    continue
+                    raise ValueError(
+                        f"时长隔离清单第 {n} 行无效，拒绝把可能截断样本放回训练:"
+                        f"{type(e).__name__}: {e}") from e
                 duration_quarantine.add(uid)
         print(f"  [INFO] PDMX duration quarantine utt_ids: {len(duration_quarantine)}")
+
+    audit = {"unmapped_piece_ids": set(),
+             "manifests": [str(x) for x in manifest_paths]}
 
     def row_fn(row):
         uid = str(row.get("utt_id") or "")
         if uid in duration_quarantine:
             return None                # 已证实音频被截断:计 filtered,不进入训练/评测
-        info = m.get(row.get("piece_id"))
-        if info:
-            split, wk = info
-            if wk and wk in bl:
-                return None                # 黑名单工作:计 filtered,不进任何 split
-            if split and not row.get("split"):
-                row["split"] = split
+        piece_id = row.get("piece_id")
+        if not piece_id:
+            raise ValueError(f"PDMX 标签 {uid or '<unknown>'} 缺 piece_id，无法注入 split/去泄漏")
+        info = m.get(piece_id)
+        if info is None:
+            if quarantine_unmapped:
+                audit["unmapped_piece_ids"].add(str(piece_id))
+                return None
+            raise ValueError(
+                f"PDMX 标签 {uid or '<unknown>'} 的 piece_id={piece_id} 不在 manifest；"
+                "拒绝按默认 train 静默放行")
+        split, wk = info
+        if split == "train" and wk in bl:
+            return None                # 外部评测作品只禁止进入 train
+        if split and not row.get("split"):
+            row["split"] = split
         return row
+    row_fn.audit = audit
     return row_fn
+
+
+def attach_pdmx_row_fns(sources: list[dict]) -> None:
+    """按每个 PDMX 波次自己的 manifest 注入 split/work_key/泄漏过滤。"""
+    cache = {}
+    blacklist = None
+    for src in sources:
+        if src["kind"] != "pdmx":
+            continue
+        if blacklist is None:
+            blacklist = _load_pdmx_eval_blacklist()
+        manifests = tuple(src.get("manifests") or
+                          [src.get("manifest") or (WORK / "manifest_pieces.jsonl")])
+        quarantine = bool(src.get("quarantine_unmapped", False))
+        # 允许隔离 unmapped 的混合历史文件必须各自留 audit，不能共享集合后误报。
+        key = (tuple(map(str, manifests)), quarantine,
+               str(src["path"]) if quarantine else "")
+        if key not in cache:
+            cache[key] = _pdmx_row_fn(
+                manifests, quarantine_unmapped=quarantine,
+                blacklist=blacklist)
+        src["row_fn"] = cache[key]
+
+
+def active_pdmx_manifest_paths(sources: list[dict]) -> list[Path]:
+    """Return the exact manifest set that supplies split metadata this run."""
+    paths: dict[str, Path] = {}
+    for src in sources:
+        if src.get("kind") != "pdmx":
+            continue
+        manifests = src.get("manifests") or [
+            src.get("manifest") or (WORK / "manifest_pieces.jsonl")]
+        for raw in manifests:
+            p = Path(raw).resolve()
+            paths[str(p).lower()] = p
+    return [paths[k] for k in sorted(paths)]
+
+
+def _file_fingerprint(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    rows = 0
+    with path.open("rb") as handle:
+        for line in handle:
+            digest.update(line)
+            if line.strip():
+                rows += 1
+    return digest.hexdigest(), rows
+
+
+def verify_pdmx_leakage_certificate(
+        manifest_paths: list[str | Path],
+        certificate_path: str | Path = ROOT / "reports" /
+        "pdmx_leakage_certificate.json") -> dict:
+    """Verify that content-level leakage audit covers these exact bytes."""
+    cp = Path(certificate_path)
+    if not cp.is_file():
+        raise FileNotFoundError(
+            f"PDMX 内容泄漏证书不存在:{cp}；先跑 scripts/certify_pdmx_leakage.py")
+    try:
+        cert = json.loads(cp.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ValueError(
+            f"PDMX 内容泄漏证书损坏:{cp} ({type(e).__name__}: {e})") from e
+    if cert.get("status") != "pass":
+        raise ValueError(
+            f"PDMX 内容泄漏证书未通过:status={cert.get('status')!r} "
+            f"reason={cert.get('reason')!r}")
+    if int(cert.get("leaked_count", -1)) != 0:
+        raise ValueError(
+            f"PDMX 内容泄漏证书仍含 {cert.get('leaked_count')} 个泄漏 piece")
+    records = cert.get("manifests")
+    if not isinstance(records, list) or not records:
+        raise ValueError("PDMX 内容泄漏证书缺 manifests")
+    certified = {
+        str(Path(r["path"]).resolve()).lower(): r
+        for r in records if isinstance(r, dict) and r.get("path")
+    }
+    actual = {
+        str(Path(p).resolve()).lower(): Path(p).resolve()
+        for p in manifest_paths
+    }
+    if set(certified) != set(actual):
+        missing = sorted(set(actual) - set(certified))
+        stale = sorted(set(certified) - set(actual))
+        raise ValueError(
+            f"PDMX 内容泄漏证书清单集合不匹配:未认证={missing} 多余={stale}")
+    for key, path in actual.items():
+        if not path.is_file():
+            raise FileNotFoundError(f"PDMX manifest 不存在:{path}")
+        sha, rows = _file_fingerprint(path)
+        rec = certified[key]
+        if sha != rec.get("sha256") or rows != int(rec.get("rows", -1)):
+            raise ValueError(
+                f"PDMX 内容泄漏证书过期:{path} "
+                f"sha={sha[:12]}/{str(rec.get('sha256'))[:12]} "
+                f"rows={rows}/{rec.get('rows')}")
+    if int(cert.get("target_parse_failed", -1)) != 0 \
+            or int(cert.get("reference_parse_failed", -1)) != 0:
+        raise ValueError("PDMX 内容泄漏证书存在未解析目标/参考，不能 fail open")
+    return cert
+
+
+def validate_assembly_for_training(stats: dict) -> None:
+    """训练装配硬门：任何非空数据源零保留都必须中止，不能只打印警告后继续。"""
+    bad = []
+    detail = stats.get("per_file") or stats.get("per_source", {})
+    for source, s in detail.items():
+        if int(s.get("rows", 0)) > 0 and int(s.get("kept", 0)) == 0:
+            bad.append(
+                f"{source}(kind={s.get('kind', source)}, rows={s.get('rows')}, "
+                f"no_audio={s.get('no_audio')}, "
+                f"no_dialect={s.get('no_dialect')}, filtered={s.get('filtered')})")
+    if bad:
+        raise RuntimeError(
+            "训练装配失败：以下非空数据源 kept=0，拒绝拿残缺数据集训练："
+            + "; ".join(bad))
+
+
+def validate_cli_args(args) -> None:
+    """训练启动前验证所有会进入除法、取模、采样或预算的数值参数。"""
+    positive = {
+        "max_batch_sec": args.max_batch_sec,
+        "clip_norm": args.clip_norm,
+        "eval_max": args.eval_max,
+        "eval_every": args.eval_every,
+        "smoke_steps": args.smoke_steps,
+        "probe_n": args.probe_n,
+        "abtest_n": args.abtest_n,
+    }
+    bad = [f"{k}={v}" for k, v in positive.items() if v is None or float(v) <= 0]
+    if args.smoke < 0 or args.prefetch < 0 or args.eval_decode_every < 0:
+        bad.extend([
+            f"smoke={args.smoke}" if args.smoke < 0 else "",
+            f"prefetch={args.prefetch}" if args.prefetch < 0 else "",
+            (f"eval_decode_every={args.eval_decode_every}"
+             if args.eval_decode_every < 0 else ""),
+        ])
+    if args.pitch_loss_weight <= 0:
+        bad.append(f"pitch_loss_weight={args.pitch_loss_weight}")
+    if args.lr_enc is not None and args.lr_enc <= 0:
+        bad.append(f"lr_enc={args.lr_enc}")
+    if args.lr_dec is not None and args.lr_dec <= 0:
+        bad.append(f"lr_dec={args.lr_dec}")
+    bad = [x for x in bad if x]
+    if bad:
+        raise ValueError("非法 CLI 数值参数:" + ", ".join(bad))
+
+
+def load_train_config(path: str | Path) -> dict:
+    """Load and validate the runtime training configuration.
+
+    This file used to be documentation-only while the production entrypoint
+    silently hard-coded a second set of values.  Keep one source of truth:
+    explicit CLI flags override this mapping, everything else comes from it.
+    """
+    import yaml
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"训练配置不存在:{path}")
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ValueError(
+            f"训练配置无法解析:{path} ({type(e).__name__}: {e})") from e
+    if not isinstance(cfg, dict):
+        raise ValueError(f"训练配置根节点必须是 mapping:{path}")
+    allowed_top = {
+        "tokenizer", "data", "optim", "max_steps", "max_epochs",
+        "precision", "loss", "specaugment", "eval", "ckpt", "seed",
+    }
+    unknown_top = set(cfg) - allowed_top
+    if unknown_top:
+        raise ValueError(
+            f"训练配置含未消费的顶层键:{sorted(unknown_top)}；"
+            "拒绝把拼错/写了未调用的配置静默忽略")
+    for section in ("tokenizer", "data", "optim", "loss", "eval", "ckpt"):
+        if not isinstance(cfg.get(section), dict):
+            raise ValueError(f"训练配置缺 mapping 节:{section}")
+    allowed_sections = {
+        "tokenizer": {"vocab", "spm_alpha"},
+        "data": {"mix", "max_duration_per_batch_sec"},
+        "optim": {
+            "name", "lr_decoder", "lr_encoder", "lr_encoder_from_scratch",
+            "betas", "wd", "warmup_steps", "schedule", "min_lr_ratio",
+            "clip_norm", "grad_accum_to_audio_sec",
+        },
+        "loss": {"len_weight_pow", "sem_label_smooth", "ts_smooth",
+                 "pitch_weight"},
+        "eval": {"every_steps", "decode_every_steps",
+                 "max_samples_per_source"},
+        "ckpt": {"keep", "save_every_steps", "select_by"},
+    }
+    for section, allowed in allowed_sections.items():
+        unknown = set(cfg[section]) - allowed
+        if unknown:
+            raise ValueError(
+                f"训练配置 {section} 含未消费键:{sorted(unknown)}")
+    if str(cfg["optim"].get("name", "")).lower() != "adamw":
+        raise ValueError("生产优化器只实现 adamw")
+    if str(cfg["optim"].get("schedule", "")).lower() != "cosine":
+        raise ValueError("生产 scheduler 只实现 cosine")
+    if float(cfg["loss"].get("len_weight_pow", 0.5)) != 0.5:
+        raise ValueError(
+            "生产 loss 固定使用 1/sqrt(T)，len_weight_pow 必须为 0.5")
+    if cfg["ckpt"].get("select_by") != "text_ned_proxy":
+        raise ValueError(
+            "当前训练期 best checkpoint 只支持 text_ned_proxy")
+    if str(cfg.get("precision", "")).lower() not in {"bf16", "fp32"}:
+        raise ValueError("precision 只支持 bf16/fp32")
+    mix = cfg["data"].get("mix")
+    expected_dialects = {"A2S", "A2S_lite", "TAST", "AMT"}
+    if not isinstance(mix, dict) or set(mix) != expected_dialects:
+        raise ValueError(
+            f"data.mix 必须且只能含 {sorted(expected_dialects)}")
+    if any(float(v) < 0 for v in mix.values()) or abs(
+            sum(float(v) for v in mix.values()) - 1.0) > 1e-6:
+        raise ValueError("data.mix 权重必须非负且总和为 1")
+    positives = {
+        "tokenizer.vocab": cfg["tokenizer"].get("vocab"),
+        "data.max_duration_per_batch_sec":
+            cfg["data"].get("max_duration_per_batch_sec"),
+        "optim.lr_decoder": cfg["optim"].get("lr_decoder"),
+        "optim.lr_encoder": cfg["optim"].get("lr_encoder"),
+        "optim.grad_accum_to_audio_sec":
+            cfg["optim"].get("grad_accum_to_audio_sec"),
+        "max_steps": cfg.get("max_steps"),
+        "max_epochs": cfg.get("max_epochs"),
+        "eval.every_steps": cfg["eval"].get("every_steps"),
+        "eval.max_samples_per_source":
+            cfg["eval"].get("max_samples_per_source"),
+        "ckpt.keep": cfg["ckpt"].get("keep"),
+        "ckpt.save_every_steps": cfg["ckpt"].get("save_every_steps"),
+    }
+    bad = [f"{k}={v}" for k, v in positives.items()
+           if v is None or float(v) <= 0]
+    if bad:
+        raise ValueError("训练配置正数项非法:" + ", ".join(bad))
+    if cfg.get("specaugment") not in (False, None):
+        raise ValueError(
+            "specaugment=true 尚无生产实现；拒绝把写了但未调用的配置当作已生效")
+    return cfg
+
+
+def apply_train_config_defaults(args, cfg: dict):
+    """Resolve config-controlled CLI values in place; explicit CLI wins."""
+    data = cfg["data"]
+    optim = cfg["optim"]
+    ev = cfg.get("eval") or {}
+    loss = cfg["loss"]
+    if args.max_batch_sec is None:
+        args.max_batch_sec = (
+            120.0 if args.smoke
+            else float(data.get("max_duration_per_batch_sec", 60.0)))
+    if args.clip_norm is None:
+        args.clip_norm = float(optim.get("clip_norm", 1.0))
+    if args.eval_max is None:
+        args.eval_max = int(ev.get("max_samples_per_source", 48))
+    if args.eval_every is None:
+        args.eval_every = int(
+            ev.get("every_steps", cfg.get("eval_every_steps", 1000)))
+    if args.eval_decode_every is None:
+        args.eval_decode_every = int(ev.get("decode_every_steps", 0))
+    if args.pitch_loss_weight is None:
+        args.pitch_loss_weight = float(loss.get("pitch_weight", 1.0))
+    if args.lr_enc is None:
+        if args.from_scratch:
+            # 热启动 encoder 的低学习率不能静默套到随机初始化模型上。若没有单列
+            # from-scratch 值，就与 decoder 同速；显式 CLI 仍优先。
+            args.lr_enc = float(
+                optim.get("lr_encoder_from_scratch",
+                          optim.get("lr_decoder", 5e-4)))
+        else:
+            args.lr_enc = float(optim.get("lr_encoder", 1e-4))
+    if args.lr_dec is None:
+        args.lr_dec = float(optim.get("lr_decoder", 5e-4))
+    return args
+
+
+def select_training_partitions(part: dict) -> tuple[list, list, list, list, list]:
+    """返回 train/nASAP-val/MAESTRO-val/nASAP-test/MAESTRO-test。
+
+    test 只供 ``scripts/eval_final.py`` 最终一次评测；训练期 checkpoint 选择、早停、
+    探针都只能看 val。旧入口把 val+test 合并，造成不可逆的 test 泄漏。
+    """
+    train = list(part.get("train", []))
+    val = list(part.get("val", []))
+    test = list(part.get("test", []))
+    nasap_val = [u for u in val if u.get("kind") == "nasap"]
+    maestro_val = [u for u in val if u.get("kind") == "maestro"]
+    nasap_test = [u for u in test if u.get("kind") == "nasap"]
+    maestro_test = [u for u in test if u.get("kind") == "maestro"]
+    return train, nasap_val, maestro_val, nasap_test, maestro_test
 
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--train-config", default=str(DEFAULT_TRAIN_CONFIG),
+                    help="生产训练配置；显式 CLI 参数优先于该文件")
     ap.add_argument("--dry-run", action="store_true", help="只装配 + 打印 stats,不建模型/不训练")
     ap.add_argument("--tokenizer", default=str(WORK / "rubato_spm.model"))
     ap.add_argument("--nemo", default=str(ROOT / "canary-180m-flash.nemo"))
-    ap.add_argument("--vocab-spec", default="configs/vocab_spec.json")
+    ap.add_argument("--vocab-spec", default=str(DEFAULT_VOCAB_SPEC))
     ap.add_argument("--from-scratch", action="store_true")
+    ap.add_argument("--no-resume", action="store_true",
+                    help="不读取已有 last.pt；从 .nemo 当前初始化重新开始，但不随机重置参数。"
+                         "--from-scratch 会自动包含此语义。")
     ap.add_argument("--allow-legacy-resume-from-epoch-start", action="store_true",
                     help="仅兼容旧版 last.pt（缺 epoch 内 batch_cursor）：明确接受从该 epoch "
                          "开头重放。新版快照不需要；默认拒绝不精确续跑。")
@@ -317,22 +691,22 @@ def main():
                          "重刷生效(不加这层,快照会把 CLI 值静默还原成旧 lr)。H2 实验:3e-4")
     ap.add_argument("--lr-enc", type=float, default=None,
                     help="encoder 组峰值 lr,默认热启动 1e-4 / --from-scratch 5e-4")
-    ap.add_argument("--clip-norm", type=float, default=1.0,
+    ap.add_argument("--clip-norm", type=float, default=None,
                     help="梯度裁剪阈值。序列损失量纲 ≈65(非逐 token 平均),若日志 gn 长期"
                          "远大于阈值 = 有效 lr 被裁剪吃掉几十倍 —— 证实后按 gn 中位数上调(如 10)")
-    ap.add_argument("--eval-max", type=int, default=48,
+    ap.add_argument("--eval-max", type=int, default=None,
                     help="每次 eval 抽的样本数/源。逐 token 生成:快路径 ~10s/样本,128 个≈半小时起;"
                          "监控用 48 足够,论文终评另跑全量")
-    ap.add_argument("--eval-every", type=int, default=1000,
+    ap.add_argument("--eval-every", type=int, default=None,
                     help="每多少优化步跑一次 eval+存滚动 ckpt。这台卡 ~1600 步/epoch、"
                          "每步几十秒 —— 3000 步一评是两天一评,太稀;1000 步≈半天一评")
-    ap.add_argument("--eval-decode-every", type=int, default=0,
+    ap.add_argument("--eval-decode-every", type=int, default=None,
                     help="解码腿(48×逐 token 生成,~25 分钟)的独立节奏;0=与 --eval-every 同步。"
                          "探针(秒级,试验主判据)仍按 --eval-every 每次跑(D77 双节奏)")
     ap.add_argument("--smoke-steps", type=int, default=800,
                     help="冒烟步数。执行端实测:100 utt × 800 步 sem 8.98→3.83 稳降但没到 0.05"
                          "(全新 embedding+头要背下语料需要更多步);32 utt × 4000 步可达标")
-    ap.add_argument("--pitch-loss-weight", type=float, default=1.0,
+    ap.add_argument("--pitch-loss-weight", type=float, default=None,
                     help="音高 piece 的 CE 权重(D82;均值归一,总量级不变只移内部占比;"
                          "1.0=仅监控 pv= 列)")
     ap.add_argument("--augment-acoustic", action="store_true",
@@ -357,39 +731,69 @@ def main():
                          "栈指向随机后续 kernel(实测三次崩溃三个栈);CPU 上同一越界给出"
                          "精确 Python 栈 + 肇事索引。配 --smoke 用,慢但一锤定音")
     args = ap.parse_args()
-    if args.max_batch_sec is None:
-        # 缺省按模式定:全量 60(16GB 卡 100s 仍 OOM,首 batch 145s 单样本撑爆)、
-        # 冒烟 120(小集小批)。显式传参则全程生效 —— 旧版在建 dm 后无条件改回 60/120,
-        # CLI 形同虚设,救火时(想临时降到 40s)会静默不生效。
-        args.max_batch_sec = 120.0 if args.smoke else 60.0
+    train_spec = load_train_config(args.train_config)
+    apply_train_config_defaults(args, train_spec)
+    validate_cli_args(args)
 
-    pdmx_fn = _pdmx_row_fn()
-    for src in SOURCES:
-        if src["kind"] == "pdmx":
-            src["row_fn"] = pdmx_fn
-    utts, labels, stats = assemble(SOURCES, resolve_audio)
+    attach_pdmx_row_fns(SOURCES)
+    try:
+        utts, labels, stats = assemble(SOURCES, resolve_audio)
+    finally:
+        # 装配结束后训练阶段不再写时长缓存，立即释放 Windows 文件锁。
+        _dur_db_close()
     print("=== 装配统计(每一步丢弃都计数,不静默)===")
     for kind, s in stats["per_source"].items():
         print(f"  {kind:8s} rows={s['rows']:>7} kept={s['kept']:>7} "
               f"no_audio={s['no_audio']:>7} no_dialect={s['no_dialect']:>6} "
               f"bad_schema={s['bad_schema']:>5} dup={s['dup']:>5} "
               f"filtered={s['filtered']:>5}")
+    print("  -- per file --")
+    for path, s in stats.get("per_file", {}).items():
+        print(f"  {Path(path).name:38s} kind={s['kind']:8s} rows={s['rows']:>7} "
+              f"kept={s['kept']:>7} no_audio={s['no_audio']:>7} "
+              f"no_dialect={s['no_dialect']:>6} dup={s['dup']:>5} "
+              f"filtered={s['filtered']:>5}")
+    for src in SOURCES:
+        audit = getattr(src.get("row_fn"), "audit", {})
+        missing = audit.get("unmapped_piece_ids") or set()
+        if missing:
+            print(f"  ⚠ manifest 无映射隔离: {Path(src['path']).name} "
+                  f"{len(missing)} 个 unique piece；样例={sorted(missing)[:5]}")
     print(f"  TOTAL utts={stats['totals']['utts']} by_dialect={stats['totals']['by_dialect']}")
     print(f"        by_kind={stats['totals']['by_kind']} by_split={stats['totals']['by_split']}")
     if stats["dup_utt_ids"]:
         print(f"  ⚠ 撞名 utt_id 样本: {stats['dup_utt_ids']}")
 
-    # 健壮性红线:任何一源 kept==0 或 no_audio 占绝大多数 → 停,别拿半个数据集去训。
-    for kind, s in stats["per_source"].items():
-        if s["rows"] and s["kept"] == 0:
-            print(f"  ✗ 源 {kind} kept=0(rows={s['rows']})—— 音频全配不上或标签全空,先修 resolve_audio/标签,别训。")
+    # 健壮性红线必须真的中止；旧代码只有 print，随后照常进入训练。
+    validate_assembly_for_training(stats)
 
     part = partition_by_split(utts)
-    train_utts = part["train"]
-    nasap_val = [u for u in (part["val"] + part["test"]) if u["kind"] == "nasap"]
-    maestro_val = [u for u in (part["val"] + part["test"]) if u["kind"] == "maestro"]
+    (train_utts, nasap_val, maestro_val,
+     nasap_test, maestro_test) = select_training_partitions(part)
     print(f"  train={len(train_utts)} nasap_val={len(nasap_val)} maestro_val={len(maestro_val)} "
-          f"other={len(part.get('other', []))}(隔离/未知split,两不进 —— 泄漏隔离生效应见 1239)")
+          f"nasap_test(保留终评)={len(nasap_test)} "
+          f"maestro_test(保留终评)={len(maestro_test)} "
+          f"other={len(part.get('other', []))}(隔离/未知split,训练/验证/终评均不进)")
+    if not train_utts:
+        raise RuntimeError("train split 为空，拒绝启动训练")
+    if not nasap_val or not maestro_val:
+        raise RuntimeError(
+            f"验证集不完整：nasap_val={len(nasap_val)} maestro_val={len(maestro_val)}；"
+            "拒绝在缺少关键验证源时训练")
+
+    active_manifests = active_pdmx_manifest_paths(SOURCES)
+    try:
+        leak_cert = verify_pdmx_leakage_certificate(active_manifests)
+        print("  PDMX 内容泄漏证书: PASS "
+              f"(train_unique={leak_cert.get('target_unique_train')} "
+              f"refs={leak_cert.get('reference_signatures')})")
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        if not args.dry_run:
+            raise RuntimeError(
+                "PDMX 内容级泄漏未获当前 manifest 证书，禁止启动训练。"
+                f"{type(e).__name__}: {e}") from e
+        print("  ⚠ PDMX 内容泄漏证书: 未通过；dry-run 可完成，但正式训练会被阻止。"
+              f"{type(e).__name__}: {e}")
 
     if args.dry_run:
         print("\n--dry-run:装配 OK。确认上面 kept/no_audio 合理后去掉 --dry-run 开训。")
@@ -421,8 +825,7 @@ def main():
     if pf["problems"]:
         for p in pf["problems"]:
             print(f"  ✗ {p}")
-        print("体检不过,禁止开训 —— 把上面整块贴回给规划端。")
-        return
+        raise RuntimeError("模型词表/位置表体检不过，禁止开训")
 
     if args.probe_only:
         # 诊断模式,不训练。v2(D27 后):三源探针 —— 对齐审计发现只有 nASAP 对齐故障,
@@ -649,9 +1052,19 @@ def main():
         from rubato.model.sampling import mix_with_amt
         dialect_mix = mix_with_amt(args.amt_mix)
         print("  混比(O4 调整): " + " ".join(f"{d}={v:.4f}" for d, v in sorted(dialect_mix.items())))
+    tokenizer_cfg = train_spec["tokenizer"]
+    configured_vocab = int(tokenizer_cfg.get("vocab", pf["vocab"]))
+    if configured_vocab != int(pf["vocab"]):
+        raise RuntimeError(
+            f"train.yaml tokenizer.vocab={configured_vocab} != 实际 tokenizer={pf['vocab']}")
+    configured_mix = dict(train_spec["data"].get("mix") or {})
+    if dialect_mix is None:
+        dialect_mix = configured_mix
     train_ds = RubatoDataset(train_utts, labels, tok, train=True, max_target_len=max_tgt,
                              augment=not args.smoke, dialect_mix=dialect_mix,
-                             acoustic_aug=args.augment_acoustic)
+                             acoustic_aug=args.augment_acoustic,
+                             seed=int(train_spec.get("seed", 20260706)),
+                             alpha=float(tokenizer_cfg.get("spm_alpha", 0.25)))
     lf = train_ds.len_filter_report
     print(f"  超长过滤: 保留 {lf.get('kept_pairs')} 对,丢弃 {lf.get('dropped_by_dialect') or 0}")
     _dropped = sum((lf.get("dropped_by_dialect") or {}).values())
@@ -682,12 +1095,27 @@ def main():
                   if u.get("utt_id") == "pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000"), None)
     if _good:
         dm.probe_utts.append(_good)
+    optim_cfg = train_spec["optim"]
+    loss_spec = train_spec["loss"]
+    ts_smooth = loss_spec.get("ts_smooth") or {}
+    ckpt_cfg = train_spec["ckpt"]
     cfg = {
-        "lr_encoder": args.lr_enc if args.lr_enc is not None
-                      else (1e-4 if not args.from_scratch else 5e-4),   # 从头训:统一 lr
-        "lr_decoder": args.lr_dec if args.lr_dec is not None else 5e-4,
-        "precision": "bf16",                       # 5070 Ti 支持;fp32 想开就删这行
+        "train_config": str(Path(args.train_config).resolve()),
+        "lr_encoder": args.lr_enc,
+        "lr_decoder": args.lr_dec,
+        "betas": tuple(optim_cfg.get("betas", (0.9, 0.98))),
+        "wd": float(optim_cfg.get("wd", 0.01)),
+        "warmup_steps": int(optim_cfg.get("warmup_steps", 1500)),
+        "min_lr_ratio": float(optim_cfg.get("min_lr_ratio", 0.1)),
+        "max_steps": int(train_spec.get("max_steps") or 100000),
+        "max_epochs": int(train_spec.get("max_epochs", 1000)),
+        "grad_accum_to_audio_sec": float(
+            optim_cfg.get("grad_accum_to_audio_sec", 2000)),
+        "precision": str(train_spec.get("precision", "bf16")),
         "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
+        "save_every_steps": int(ckpt_cfg.get("save_every_steps", 200)),
+        "ckpt_keep": int(ckpt_cfg.get("keep", 6)),
+        "selection_metric": str(ckpt_cfg["select_by"]),
         "clip_norm": args.clip_norm,
         "eval_decode_every": args.eval_decode_every,
         "pitch_loss_weight": args.pitch_loss_weight,
@@ -695,11 +1123,18 @@ def main():
         "prefetch_batches": args.prefetch,         # 预取深度;0=串行直迭代(对照)
         "allow_legacy_resume_from_epoch_start":
             args.allow_legacy_resume_from_epoch_start,
+        # --from-scratch 若仍自动读 last.pt，就会把随机初始化和旧 optimizer 全部覆盖。
+        "resume": not (args.no_resume or args.from_scratch),
         "eval_max": args.eval_max,                 # 每次 eval 抽的 val 子集(逐 token 生成,大了小时级)
         "eval_time_budget_s": 1200,                # eval 硬时限:超时截断按已评样本出指标,不再"疑似卡死"
         # eval 证据自动落盘到 repo 内(追加式);执行端上报 = git add reports/eval_autolog.md
         # + commit + push,不再人肉摘录(三次摘录事故后收权)
         "eval_autolog": str(Path(__file__).resolve().parent.parent / "reports" / "eval_autolog.md"),
+        "loss": {
+            "sem_label_smooth": float(loss_spec.get("sem_label_smooth", 0.1)),
+            "p_center": float(ts_smooth.get("p_center", 0.9)),
+            "w": int(ts_smooth.get("w", 5)),
+        },
         # 训练步前置守卫:越界在 forward 之前拦下,报错自带肇事数字(不吃 CUDA 异步栈的亏)
         "guards": {"vocab": pf["vocab"], "max_pos": max_tgt},
     }

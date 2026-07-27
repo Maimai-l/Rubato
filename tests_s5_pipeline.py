@@ -1,6 +1,11 @@
 """s5_vn_render 流水线接线的 mock 测试(不需真 VN/sfizz/partitura)。
-用 fork 让主进程 monkeypatch 的模块函数传到 worker。运行: python tests_s5_pipeline.py"""
-import sys, os, json, types, tempfile, multiprocessing
+
+真实进程池由 tests_ops.py 覆盖；这里把 pipeline_map 换成同进程调度器，专门验证
+VN → MIDI/CSV → 渲染 → 切片 → 标签/续跑的生产接线。这样 Windows spawn 也会真正
+执行测试，不再因为 monkeypatch 无法跨进程继承而整段跳过。
+运行: python tests_s5_pipeline.py
+"""
+import sys, os, json, types, tempfile
 sys.path.insert(0, ".")
 
 PASS = 0
@@ -9,17 +14,48 @@ def check(name, cond, detail=""):
     if cond: PASS += 1; print(f"  ok  {name}")
     else: print(f"  FAIL {name}  {detail}"); raise SystemExit(1)
 
-if sys.platform.startswith("win"):
-    print("  skip  Windows spawn 不继承 monkeypatch;此接线测试仅在 fork 平台跑")
-    print("\n全部通过: 0 项(skipped)")
-    raise SystemExit(0)
-try:
-    multiprocessing.set_start_method("fork")
-except RuntimeError:
-    pass
-
 import scripts.s5_vn_render as s5
+import rubato.ops as ops
 from fractions import Fraction as F
+
+
+def inline_pipeline_map(items, gpu_stage, cpu_stage, *, n_cpu, on_result=None,
+                        done_fn=None, key_fn=None, max_inflight=None,
+                        weight_fn=None, budget_gb=None, initializer=None, initargs=(),
+                        max_tasks_per_child=None, log=print, log_every=50):
+    """Production-compatible sequential harness for wiring tests.
+
+    It deliberately exercises the real gpu_stage/cpu_stage/on_result/done_fn
+    callbacks. Process scheduling, memory admission and worker recycling are
+    tested separately in tests_ops.py.
+    """
+    del n_cpu, key_fn, max_inflight, budget_gb, max_tasks_per_child, log, log_every
+    items = list(items)
+    stats = {"total": len(items), "done_skipped": 0, "dropped": 0,
+             "ok": 0, "failed": 0, "peak_gb_est": 0.0}
+    if initializer:
+        initializer(*initargs)
+    for item in items:
+        if done_fn and done_fn(item):
+            stats["done_skipped"] += 1
+            continue
+        mid = gpu_stage(item)
+        if mid is None:
+            stats["dropped"] += 1
+            continue
+        if weight_fn:
+            stats["peak_gb_est"] = max(stats["peak_gb_est"], float(weight_fn(mid)))
+        try:
+            result = cpu_stage(mid)
+            if on_result:
+                on_result(item, result)
+            stats["ok"] += 1
+        except Exception:
+            stats["failed"] += 1
+    return stats
+
+
+ops.pipeline_map = inline_pipeline_map
 
 # 假 partitura:load_musicxml 返回带 .parts 的对象
 fake_part = types.SimpleNamespace(notes=[], notes_tied=[])
@@ -50,7 +86,7 @@ s5.part_to_ir = lambda part: FAKE_IR
 s5.vn_infer = lambda xml, comp, mid: mid + "_midi_notes.csv"      # 假装 VN 成功产 CSV
 s5.csv_to_tmap = lambda csv, part: (TimeMap([(F(0),0.0),(F(4),16.0)]), {})
 s5.render_midi = lambda mid, utt, sc, pr, out, pick=None: open(out, "w").close() or out   # 假渲染:touch 文件(pick=二音色缝隙)
-s5._read_audio = lambda path: ([0.0] * (17 * 16000), 16000)                    # 假整曲17s(≥tmap末端,过截断校验)
+s5._read_audio = lambda path: ([0.1] * (17 * 16000), 16000)                    # 假整曲17s(≥tmap末端、非静音)
 s5._slice_audio = lambda audio, sr, t0, t1, out, min_sec=2.0: (
     open(str(out).replace(".opus",".wav"),"w").close() or str(out).replace(".opus",".wav"))
 

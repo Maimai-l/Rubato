@@ -47,13 +47,16 @@ def build_target_sequence(dialect: str, label_pieces: list[str],
     """
     if dialect not in DIALECT_PROMPT:
         raise ValueError(f"未知 dialect {dialect}")
+    if domain not in (None, "real", "synth"):
+        raise ValueError(f"未知 domain {domain!r}; expected real/synth/None")
     prompt = list(DIALECT_PROMPT[dialect])
     if domain in ("real", "synth"):
         prompt.append(f"<|{domain}|>")     # 可选域提示
     tokens = prompt + list(label_pieces) + ["<|eot|>"]
     # prompt 段不计 loss(False),标签段与 eot 计 loss(True)
     mask = [False] * len(prompt) + [True] * (len(label_pieces) + 1)
-    assert len(tokens) == len(mask)
+    if len(tokens) != len(mask):
+        raise RuntimeError("目标序列与 loss mask 长度不一致")
     return tokens, mask
 
 
@@ -155,11 +158,15 @@ def frontend_spec_from_cfg(cfg: dict) -> dict:
 # ---------------------------------------------------------------- encoder 权重 hash(R-S10.2,本地)
 
 def hash_state_dict(state_dict, prefix: str = "encoder") -> dict[str, str]:
-    """对 state_dict 中指定前缀的每个张量算 hash。R-S10.2 逐层核对用。"""
+    """对 state_dict 中路径段名等于 ``prefix`` 的张量算 hash。
+
+    NeMo 版本可能使用 ``encoder.*`` 或 ``model.encoder.*``。只用 startswith
+    会在后一种结构上得到空集合，过去空集合还会被误判为校验通过。
+    """
     import torch
     out = {}
     for k, v in state_dict.items():
-        if k.startswith(prefix):
+        if prefix in k.split("."):
             b = v.detach().cpu().numpy().tobytes()
             out[k] = hashlib.sha256(b).hexdigest()[:16]
     return out
@@ -175,11 +182,14 @@ def verify_encoder_loaded(model_state, checkpoint_state, prefix: str = "encoder"
     common = set(h_model) & set(h_ckpt)
     mismatches = [k for k in common if h_model[k] != h_ckpt[k]]
     only_model = set(h_model) - set(h_ckpt)
+    only_ckpt = set(h_ckpt) - set(h_model)
     return {
-        "ok": not mismatches and not only_model,
+        "ok": bool(common) and not mismatches and not only_model and not only_ckpt,
         "n_checked": len(common),
         "mismatches": mismatches[:10],
         "in_model_not_ckpt": sorted(only_model)[:10],
+        "in_ckpt_not_model": sorted(only_ckpt)[:10],
+        "error": ("未匹配到任何 encoder 参数" if not common else None),
     }
 
 
@@ -246,23 +256,32 @@ def resize_decoder_vocab(model, new_vocab: int, old_vocab: int | None = None) ->
         old_vocab = max(embs)
 
     n_emb = n_lin = 0
+    param_growth = 0
     for parent in model.modules():
         for name, child in parent.named_children():
             if isinstance(child, nn.Embedding) and child.num_embeddings == old_vocab:
                 new = nn.Embedding(new_vocab, child.embedding_dim,
                                    padding_idx=child.padding_idx)
+                param_growth += sum(p.numel() for p in new.parameters()) \
+                    - sum(p.numel() for p in child.parameters())
                 setattr(parent, name, new)
                 n_emb += 1
             elif isinstance(child, nn.Linear) and child.out_features == old_vocab:
                 new = nn.Linear(child.in_features, new_vocab,
                                 bias=child.bias is not None)
+                param_growth += sum(p.numel() for p in new.parameters()) \
+                    - sum(p.numel() for p in child.parameters())
                 setattr(parent, name, new)
                 n_lin += 1
     if n_emb == 0:
         raise RuntimeError(f"未找到 num_embeddings=={old_vocab} 的 Embedding —— "
                            "old_vocab 传错或模型结构不符")
+    if n_lin == 0:
+        raise RuntimeError(f"未找到 out_features=={old_vocab} 的输出 Linear —— "
+                           "输出头可能未替换；拒绝只换 embedding 后开训")
     return {"replaced_embeddings": n_emb, "replaced_linears": n_lin,
-            "old_vocab": old_vocab, "new_vocab": new_vocab}
+            "old_vocab": old_vocab, "new_vocab": new_vocab,
+            "param_growth": param_growth}
 
 
 # ---------------------------------------------------------------- 词表/位置表体检(训前必跑)
@@ -361,7 +380,8 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
     enc_layers = cfg.get("encoder", {}).get("n_layers")
     report["arch"] = {"enc_layers": enc_layers,
                       "frontend": frontend_spec_from_cfg(cfg)}
-    assert enc_layers == 17, f"R-S10.1 违反:encoder 应 17 层,得 {enc_layers}"
+    if enc_layers != 17:
+        raise RuntimeError(f"R-S10.1 违反:encoder 应 17 层,得 {enc_layers}")
 
     if from_scratch:
         report["reinit_modules"] = reinit_all_parameters(model)
@@ -373,31 +393,47 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
     import sentencepiece as spm
     sp = spm.SentencePieceProcessor(model_file=str(tokenizer_model))
     new_vocab = sp.get_piece_size()
+    total_before_swap = sum(p.numel() for p in model.parameters())
     report["vocab_swap"] = resize_decoder_vocab(model, new_vocab)
+    total_after_swap = sum(p.numel() for p in model.parameters())
+    expected_after_swap = total_before_swap + report["vocab_swap"]["param_growth"]
+    report["vocab_swap"].update(
+        total_before=total_before_swap, total_after=total_after_swap,
+        expected_total_after=expected_after_swap,
+        exact_param_count_ok=(total_after_swap == expected_after_swap))
+    if total_after_swap != expected_after_swap:
+        raise RuntimeError(
+            "词表换形参数量不守恒:"
+            f"before={total_before_swap} growth={report['vocab_swap']['param_growth']} "
+            f"expected={expected_after_swap} actual={total_after_swap}")
 
     # 5. encoder hash 核对(R-S10.2)。热启动:权重必须【一致】(确认载入);
     #    从头训:权重必须【改变】(确认已随机化,防止意外沿用预训练 encoder)。
     new_state = model.state_dict()
     report["encoder_verify"] = verify_encoder_loaded(new_state, ckpt_state, "encoder")
     if from_scratch:
-        assert not report["encoder_verify"]["ok"], \
-            "from_scratch 但 encoder 权重与 ckpt 仍一致 —— reinit 未生效,会误用预训练 encoder"
+        if report["encoder_verify"]["n_checked"] == 0:
+            raise RuntimeError(
+                "from_scratch encoder 校验未匹配到任何参数，无法证明随机化生效")
+        if report["encoder_verify"]["ok"]:
+            raise RuntimeError(
+                "from_scratch 但 encoder 权重与 ckpt 仍一致 —— reinit 未生效")
     else:
-        assert report["encoder_verify"]["ok"], \
-            f"R-S10.2 违反:encoder 权重未正确载入 {report['encoder_verify']}"
+        if not report["encoder_verify"]["ok"]:
+            raise RuntimeError(
+                f"R-S10.2 违反:encoder 权重未正确载入 {report['encoder_verify']}")
 
-    # 5b. 前端一致性(R-S10.3)—— 强制接入(问题5修复:此前 verify_frontend 已写但未调用)
+    # 5b. 前端不另造一份近似实现：训练和推理都直接调用恢复模型的 preprocessor。
+    # 旧代码的“失败或结果里有 note”断言因结果恒带 note 而无条件通过。
+    if not hasattr(model, "preprocessor") or not callable(model.preprocessor):
+        raise RuntimeError("恢复模型没有可调用的 preprocessor，训练前端链断裂")
+    report["frontend_mode"] = "reuse_restored_nemo_preprocessor"
     if frontend_wav_paths:
         fe_spec = frontend_spec_from_cfg(cfg)
-        report["frontend_verify"] = verify_frontend(
+        report["frontend_diagnostic"] = verify_frontend(
             model.preprocessor, frontend_wav_paths, fe_spec)
-        # 若归一化方式不同 diff 会偏大,此时结论是"复用 NeMo preprocessor"而非报错;
-        # 但结构性错误(mel 数/hop 不符)必须抓——由 verify_frontend 内部体现。
-        assert report["frontend_verify"].get("ok") is not False or \
-            "note" in report["frontend_verify"], \
-            f"R-S10.3 前端结构不符 {report['frontend_verify']}"
     else:
-        report["frontend_verify"] = {"skipped": "未提供 frontend_wav_paths"}
+        report["frontend_diagnostic"] = {"skipped": "训练直接复用 NeMo preprocessor"}
 
     # 6. 参数量(A-S10.1,相对基准)。emb/softmax 是否共享权重因版本而异,
     #    tied/untied 两种口径任一吻合即通过,避免误伤正确模型。
@@ -406,7 +442,7 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
     r_tied = check_param_count(total, backbone_ref=backbone_ref, tied=True)
     report["param_count"] = r_untied if r_untied.get("ok") else r_tied
     if backbone_ref is not None and not (r_untied.get("ok") or r_tied.get("ok")):
-        raise AssertionError(
+        raise RuntimeError(
             f"A-S10.1 违反:backbone 参数量偏离(untied={r_untied} tied={r_tied})")
 
     return model, report

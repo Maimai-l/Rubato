@@ -51,12 +51,13 @@ PDMX 过滤有【三个】s3 脚本,别跑错:
   (过 metadata/license/work_key_or_fallback,缺 composer 用 `__nometa__` 兜底不丢)。
 - `scripts/s3_full_filter.py` ← **只写统计 report,不产 manifest**。名字像"全量过滤"但它是诊断用的,
   跑它你会以为过滤完了、其实没有 manifest(这正是 s7 踩过的同一个坑:算了不落盘)。别拿它当产 manifest 的。
-- **`scripts/s3_minhash_leakage.py`** ← 【必须在 s3_filter 之后、s5 之前跑一次】。它按内容(MinHash)
-  剔除跨数据集近重复(nASAP/ASAP 泄漏),**覆盖写**回 `manifest_pieces.jsonl`。
-  ⚠ 跳过它 = **s5 用空 blacklist、没有任何泄漏防护**(s5/s5_parallel 都传空 blacklist,
-  依赖的就是 manifest 已被 minhash 洗过)。顺序错 = 测试集污染,评测数字全废。
+- **`scripts/certify_pdmx_leakage.py`** ← 【训练前必须跑一次】。它按内容(MinHash)
+  检查当前装配实际使用的全部 PDMX train manifest，并把每个 manifest 的 SHA256/行数写入
+  `reports/pdmx_leakage_certificate.json`。任何参考谱/训练谱解析失败或发现近重复都失败关闭；
+  它不覆盖原 manifest。`build_dataset.py` 正式训练会核验该证书与当前文件逐字节一致。
 
-正确顺序:`s3_filter_pdmx.py` → `s3_minhash_leakage.py` →(下面)`s5`。
+正确顺序:`s3_filter_pdmx.py` → S4/S5/装配 → `certify_pdmx_leakage.py` → 正式训练。
+旧命令 `s3_minhash_leakage.py` 仅保留为兼容入口，现已转发到同一个严格证书器，不再改 manifest。
 
 ### 1.1 PDMX → A2S / A2S_lite（`scripts/s5_pdmx_a2s_labels.py` 或并行版 `s5_parallel.py`）
 
@@ -297,7 +298,8 @@ nASAP↔FLAC)带 **【EXECUTOR】** 注释 —— 按你的真实目录核对。
 
 ## 6. 一句话流程
 
-拉最新分支 → 删旧语料/词表 → **s3_filter_pdmx → s3_minhash_leakage** → s5(全池) + s7(带 --out-labels) + gen_amt →
+拉最新分支 → 删旧语料/词表 → **s3_filter_pdmx** → s5(全池) + s7(带 --out-labels) + gen_amt →
+严格 `certify_pdmx_leakage` →
 装配 `tok_corpus.txt`（**只 A2S+A2S_lite**，不去重）→ `train_unigram(vocab=8000)` → 过两条验收门（vocab≈8000 且 split_rate<0.30）→
 **`build_dataset.py --dry-run` 验装配**（每源 kept>0）→ 才建模型、训练。
 任何一步数据量"莫名变少"就停下抓 bug，别接受降级。

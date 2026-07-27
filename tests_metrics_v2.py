@@ -5,7 +5,7 @@ import time
 
 import torch
 
-from rubato.model.train import viol_tally, omr_metric_eligible
+from rubato.model.train import viol_tally, proxy_metric_eligible
 from rubato.model.infer import _probe_from_logprobs
 
 
@@ -31,14 +31,13 @@ def test_viol_tally_empty():
     assert viol_tally([]) == {}
 
 
-def test_omr_metric_requires_representative_coverage():
-    good = {"val_omr_ned": 0.4, "n_omr_scored": 40,
-            "omr_coverage": 0.83, "eval_truncated": False}
-    assert omr_metric_eligible(good)
-    assert not omr_metric_eligible({**good, "n_omr_scored": 1})
-    assert not omr_metric_eligible({**good, "omr_coverage": 0.79})
-    assert not omr_metric_eligible({**good, "eval_truncated": True})
-    assert not omr_metric_eligible({**good, "val_omr_ned": None})
+def test_text_proxy_is_named_and_gated_separately():
+    good = {"val_text_ned_proxy": 0.8, "n_text_proxy_scored": 40,
+            "text_proxy_coverage": 0.83, "eval_complete": True}
+    assert proxy_metric_eligible(good)
+    assert not proxy_metric_eligible({**good, "text_proxy_coverage": 0.2})
+    assert not proxy_metric_eligible({**good, "eval_complete": False})
+    assert "val_omr_ned" not in good  # 训练代理永远不能冒充 LEGATO OMR-NED
 
 
 class PitchTok:

@@ -1,12 +1,11 @@
-# 训练配置(v2 §6/§10)。标 TUNE 的按 D2 实测吞吐调
-model: {arch: canary-180m-flash, param_count_tol: 0.02, route: auto}  # auto=先路线A后B,time-box 在脚本内
-tokenizer: {vocab: 8000, spm_alpha: 0.25, ts_bins: 4000, ts_ms: 10, normalization: identity}
+# 生产训练入口唯一运行配置。模型架构由 --nemo，时间戳/规范化由 vocab_spec.json 管理；
+# 分段参数属于上游清单生成器，不在这里伪装成训练期开关。
+tokenizer: {vocab: 8000, spm_alpha: 0.25}
 data:
-  score_seg: {min_measures: 4, max_measures: 32, max_sec: 40}
-  amt_seg: {target_sec: [12, 25], search_win_sec: 1.0}
   # R-S11.2【不变量】:DBD 已裁,份额并入主线;与 rubato/model/sampling.DIALECT_MIX 一致
   mix: {A2S: 0.35, A2S_lite: 0.15, TAST: 0.20, AMT: 0.30}
-  max_duration_per_batch_sec: 560     # TUNE
+  # 16GB Windows 实测 100–150s OOM；60s 是当前安全生产值。CLI 可显式覆盖。
+  max_duration_per_batch_sec: 60
 optim:
   name: adamw
   lr_decoder: 5.0e-4
@@ -16,14 +15,23 @@ optim:
   warmup_steps: 1500
   schedule: cosine
   min_lr_ratio: 0.1
+  clip_norm: 1.0
   grad_accum_to_audio_sec: 2000        # 有效 batch 以音频秒计
-max_steps: null                        # 由 06_smoke 实测吞吐写入
-precision: bf16-mixed
+max_steps: 100000
+max_epochs: 1000
+precision: bf16
 loss:
   len_weight_pow: 0.5                   # 1/sqrt(|T|)
   sem_label_smooth: 0.1
   ts_smooth: {p_center: 0.9, w: 5}      # 时间戳序数平滑核
+  pitch_weight: 1.0
 specaugment: false                     # 论文未提;真实录音掉分再开
-eval_every_steps: 3000                 # R-S11.5【不变量】按步数评测,非时间制(原 eval_every_hours 违反)
-ckpt: {keep: 6, select_by: val_omr_ned}
+eval:
+  every_steps: 1000
+  decode_every_steps: 0
+  max_samples_per_source: 48
+ckpt:
+  keep: 6
+  save_every_steps: 200
+  select_by: text_ned_proxy
 seed: 20260706

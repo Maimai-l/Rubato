@@ -1,134 +1,176 @@
-"""运行期工具测试:内存感知并发 + 流式可续跑池 + 流式合并。运行: python tests_ops.py"""
-import sys, os, tempfile
+"""运行期工具测试:内存感知并发 + 流式可续跑池 + 流式合并。
+
+Windows process spawning re-imports this module, so all execution belongs under
+the ``__main__`` guard and worker callables stay at module scope.
+"""
+from __future__ import annotations
+
+import multiprocessing as mp
+import os
+import sys
+import tempfile
+
 sys.path.insert(0, ".")
-from rubato.ops import pick_workers, stream_map, concat_files, available_gb
+
+from rubato.ops import (
+    available_gb, concat_files, mem_budget_map, pick_workers,
+    pipeline_map, stream_map)
 
 PASS = 0
+_SHARED = {}
+
+
 def check(name, cond, detail=""):
     global PASS
-    if cond: PASS += 1; print(f"  ok  {name}")
-    else: print(f"  FAIL {name}  {detail}"); raise SystemExit(1)
+    if not cond:
+        print(f"  FAIL {name}  {detail}")
+        raise SystemExit(1)
+    PASS += 1
+    print(f"  ok  {name}")
 
 
-# 顶层可 pickle 的 worker 函数(multiprocessing 要求,必须在使用前定义)
-def _square(x): return x * x
-def _reciprocal(x): return 1.0 / x
+def _square(x):
+    return x * x
 
-# pipeline 用:cpu_stage 必须顶层;返回 (输入, 处理它的进程 pid) 以证明是并行子进程在跑
+
+def _reciprocal(x):
+    return 1.0 / x
+
+
 def _cpu_stage(mid):
-    import os
-    return (mid, os.getpid())
+    return mid, os.getpid()
 
-# mem_budget 用:共享计数追踪"同时运行的权重和",验证永不超预算。
-_SHARED = {}
+
 def _mb_init(cur, peak, lock):
-    _SHARED["cur"] = cur; _SHARED["peak"] = peak; _SHARED["lock"] = lock
+    _SHARED["cur"], _SHARED["peak"], _SHARED["lock"] = cur, peak, lock
+
+
 def _mb_task(item):
     import time
-    idx, w = item
+    idx, weight = item
     with _SHARED["lock"]:
-        _SHARED["cur"].value += w
-        if _SHARED["cur"].value > _SHARED["peak"].value:
-            _SHARED["peak"].value = _SHARED["cur"].value
-    time.sleep(0.03)                       # 让并发真实发生
+        _SHARED["cur"].value += weight
+        _SHARED["peak"].value = max(
+            _SHARED["peak"].value, _SHARED["cur"].value)
+    time.sleep(0.03)
     with _SHARED["lock"]:
-        _SHARED["cur"].value -= w
+        _SHARED["cur"].value -= weight
     return idx * 10
 
 
-print("[1] pick_workers:按内存/CPU 定并发,不写死")
-# 32GB 可用、每 worker 1.5GB、留 4GB → (32-4)/1.5≈18,但 CPU=8 封顶 → 8
-check("mem_and_cpu_cap", pick_workers(1.5, avail_gb=32, cpu=8) == 8, pick_workers(1.5, avail_gb=32, cpu=8))
-# 内存紧:8GB 可用、每 worker 1.5GB、留 4GB → (8-4)/1.5=2
-check("mem_bound", pick_workers(1.5, avail_gb=8, cpu=16) == 2, pick_workers(1.5, avail_gb=8, cpu=16))
-# 音源巨大:每 worker 6GB、可用 10GB、留 4 → (10-4)/6=1
-check("huge_worker_floor1", pick_workers(6.0, avail_gb=10, cpu=16) == 1, pick_workers(6.0, avail_gb=10, cpu=16))
-# hard_cap 再封顶
-check("hard_cap", pick_workers(0.5, avail_gb=64, cpu=32, hard_cap=6) == 6)
-# 永不为 0
-check("never_zero", pick_workers(100.0, avail_gb=2, cpu=8) == 1)
+def main():
+    print("[1] pick_workers:按内存/CPU 定并发,不写死")
+    check("mem_and_cpu_cap", pick_workers(1.5, avail_gb=32, cpu=8) == 8)
+    check("mem_bound", pick_workers(1.5, avail_gb=8, cpu=16) == 2)
+    check("huge_worker_floor1", pick_workers(6, avail_gb=10, cpu=16) == 1)
+    check("hard_cap", pick_workers(.5, avail_gb=64, cpu=32, hard_cap=6) == 6)
+    check("never_zero", pick_workers(100, avail_gb=2, cpu=8) == 1)
 
-print("[2] available_gb 返回正数(跨平台探测能跑)")
-check("avail_positive", available_gb() > 0, available_gb())
+    print("[2] available_gb 跨平台")
+    check("avail_positive", available_gb() > 0, available_gb())
 
-print("[3] stream_map:即时落盘不累积 + 可续跑跳过已完成")
-tmp = tempfile.mkdtemp()
-out = os.path.join(tmp, "results.txt")
-def _done(t): return os.path.exists(os.path.join(tmp, f"d_{t}"))
-written = []
-def _on(t, res):
-    open(os.path.join(tmp, f"d_{t}"), "w").close()   # 标记完成(续跑用)
-    with open(out, "a") as w: w.write(f"{t}:{res}\n")
-tasks = list(range(20))
-st = stream_map(tasks, _square, max_workers=4, done_fn=_done, on_result=_on, log=lambda *a: None)
-check("first_run_all", st["ok"] == 20 and st["done_skipped"] == 0, st)
-# 第二次:全部已完成 → 全跳过,不重复跑
-st2 = stream_map(tasks, _square, max_workers=4, done_fn=_done, on_result=_on, log=lambda *a: None)
-check("resume_skips_all", st2["done_skipped"] == 20 and st2["submitted"] == 0, st2)
-# 结果只写了一遍(没因续跑重复)
-lines = open(out).read().strip().splitlines()
-check("no_dup_on_resume", len(lines) == 20, len(lines))
-check("results_correct", "3:9" in lines and "5:25" in lines)
+    print("[3] stream_map:即时落盘 + 可续跑")
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "results.txt")
 
-print("[4] concat_files:逐块追加不吃内存 + 跳过缺块")
-a = os.path.join(tmp, "a.txt"); b = os.path.join(tmp, "b.txt")
-open(a, "w").write("l1\nl2\n"); open(b, "w").write("l3\n")
-merged = os.path.join(tmp, "m.txt")
-n = concat_files([a, os.path.join(tmp, "missing.txt"), b], merged)
-check("concat_lines", n == 3, n)
-check("concat_content", open(merged).read() == "l1\nl2\nl3\n", repr(open(merged).read()))
+        def done(task):
+            return os.path.exists(os.path.join(td, f"d_{task}"))
 
-print("[5] stream_map 记录失败不崩(一个任务抛错)")
-st3 = stream_map([1, 0, 2], _reciprocal, max_workers=2, on_result=lambda t, r: None, log=lambda *a: None)
-check("failure_counted", st3["failed"] == 1 and st3["ok"] == 2, st3)
+        def on_result(task, result):
+            open(os.path.join(td, f"d_{task}"), "w").close()
+            with open(out, "a") as handle:
+                handle.write(f"{task}:{result}\n")
 
-print("[6] pipeline_map:GPU 阶段(主进程)与 CPU 阶段(子进程池)重叠")
-from rubato.ops import pipeline_map
-import os as _os
-gpu_pids = set(); results = []
-def gpu(x):
-    gpu_pids.add(_os.getpid())          # GPU 阶段在主进程
-    return None if x % 7 == 0 else x*10  # x 是 7 的倍数 → 丢弃
-def onres(item, res):
-    results.append((item, res))
-st = pipeline_map(range(30), gpu, _cpu_stage, n_cpu=4, on_result=onres,
-                  max_inflight=6, log=lambda *a: None)
-check("gpu_in_main", gpu_pids == {_os.getpid()}, gpu_pids)         # GPU 阶段确实在主进程
-cpu_pids = {r[1][1] for r in results}
-check("cpu_in_children", _os.getpid() not in cpu_pids and len(cpu_pids) >= 2, cpu_pids)  # CPU 在多个子进程
-check("dropped_multiples_of_7", st["dropped"] == len([x for x in range(30) if x%7==0]), st)
-check("ok_count", st["ok"] == 30 - st["dropped"], st)
-# 结果正确:cpu_stage 收到的是 gpu 输出(x*10)
-mids = sorted(r[1][0] for r in results)
-check("pipeline_values", mids == sorted(x*10 for x in range(30) if x%7!=0), mids[:5])
+        tasks = list(range(20))
+        stats = stream_map(
+            tasks, _square, max_workers=4, done_fn=done,
+            on_result=on_result, log=lambda *a: None)
+        check("first_run_all",
+              stats["ok"] == 20 and stats["done_skipped"] == 0, stats)
+        resumed = stream_map(
+            tasks, _square, max_workers=4, done_fn=done,
+            on_result=on_result, log=lambda *a: None)
+        check("resume_skips_all",
+              resumed["done_skipped"] == 20 and resumed["submitted"] == 0,
+              resumed)
+        lines = open(out).read().strip().splitlines()
+        check("no_dup_on_resume", len(lines) == 20, len(lines))
+        check("results_correct", "3:9" in lines and "5:25" in lines)
 
-print("[7] pipeline_map 可续跑(done_fn 跳过)")
-st2 = pipeline_map(range(30), gpu, _cpu_stage, n_cpu=4, on_result=lambda i,r: None,
-                   done_fn=lambda x: True, log=lambda *a: None)
-check("pipeline_resume_skips_all", st2["done_skipped"] == 30 and st2["ok"] == 0, st2)
+        print("[4] concat_files 流式合并")
+        a, b = os.path.join(td, "a.txt"), os.path.join(td, "b.txt")
+        open(a, "w").write("l1\nl2\n")
+        open(b, "w").write("l3\n")
+        merged = os.path.join(td, "m.txt")
+        n = concat_files([a, os.path.join(td, "missing.txt"), b], merged)
+        check("concat_lines", n == 3, n)
+        check("concat_content", open(merged).read() == "l1\nl2\nl3\n")
 
-print("[8] mem_budget_map:同时运行的权重和【永不超预算】(异构大/小音源混排)")
-from rubato.ops import mem_budget_map
-import multiprocessing as _mp
-mgr = _mp.Manager()
-cur = mgr.Value("d", 0.0); peak = mgr.Value("d", 0.0); lock = mgr.Lock()
-# 混排:6.5(大)/1.5/0.15(小)音源;预算 8GB。任何时刻和 ≤8。
-weights = ([6.5]*4 + [1.5]*10 + [0.15]*20)
-tasks = list(enumerate(weights))
-BUDGET = 8.0
-res = []
-st = mem_budget_map(tasks, _mb_task, weight_fn=lambda t: t[1], budget_gb=BUDGET,
-                    max_workers=16, on_result=lambda t, r: res.append(r),
-                    initializer=_mb_init, initargs=(cur, peak, lock), log=lambda *a: None)
-check("all_ran", st["ok"] == len(tasks), st)
-check("peak_within_budget", peak.value <= BUDGET + 1e-6, f"peak={peak.value} budget={BUDGET}")
-check("results_correct", sorted(res) == sorted(i*10 for i,_ in tasks), res[:5])
+    print("[5] stream_map 记录单任务失败")
+    stats = stream_map(
+        [1, 0, 2], _reciprocal, max_workers=2,
+        on_result=lambda t, r: None, log=lambda *a: None)
+    check("failure_counted",
+          stats["failed"] == 1 and stats["ok"] == 2, stats)
 
-print("[9] mem_budget_map:单个超预算 task 仍单独跑(不卡死)")
-peak.value = 0.0; cur.value = 0.0
-st2 = mem_budget_map([(0, 20.0), (1, 1.0)], _mb_task, weight_fn=lambda t: t[1],
-                     budget_gb=8.0, max_workers=4, on_result=lambda t,r: None,
-                     initializer=_mb_init, initargs=(cur, peak, lock), log=lambda *a: None)
-check("oversize_still_runs", st2["ok"] == 2, st2)         # 20GB 的也跑完了(单独)
+    print("[6] pipeline_map:主进程阶段与子进程阶段")
+    main_pid = os.getpid()
+    gpu_pids, results = set(), []
 
-print(f"\n全部通过: {PASS} 项")
+    def gpu(item):
+        gpu_pids.add(os.getpid())
+        return None if item % 7 == 0 else item * 10
+
+    stats = pipeline_map(
+        range(30), gpu, _cpu_stage, n_cpu=4,
+        on_result=lambda item, result: results.append((item, result)),
+        max_inflight=6, log=lambda *a: None)
+    check("gpu_in_main", gpu_pids == {main_pid}, gpu_pids)
+    cpu_pids = {result[1] for _, result in results}
+    check("cpu_in_children",
+          main_pid not in cpu_pids and len(cpu_pids) >= 2, cpu_pids)
+    expected_drop = len([x for x in range(30) if x % 7 == 0])
+    check("dropped_multiples_of_7", stats["dropped"] == expected_drop, stats)
+    check("ok_count", stats["ok"] == 30 - expected_drop, stats)
+    check("pipeline_values",
+          sorted(result[0] for _, result in results)
+          == sorted(x * 10 for x in range(30) if x % 7 != 0))
+
+    print("[7] pipeline_map 可续跑")
+    resumed = pipeline_map(
+        range(30), gpu, _cpu_stage, n_cpu=4,
+        on_result=lambda i, r: None, done_fn=lambda x: True,
+        log=lambda *a: None)
+    check("pipeline_resume_skips_all",
+          resumed["done_skipped"] == 30 and resumed["ok"] == 0, resumed)
+
+    print("[8] mem_budget_map:并发权重不超预算")
+    manager = mp.Manager()
+    cur, peak, lock = (
+        manager.Value("d", 0.0), manager.Value("d", 0.0), manager.Lock())
+    weights = [6.5] * 4 + [1.5] * 10 + [0.15] * 20
+    tasks = list(enumerate(weights))
+    results = []
+    stats = mem_budget_map(
+        tasks, _mb_task, weight_fn=lambda task: task[1], budget_gb=8,
+        max_workers=16, on_result=lambda task, result: results.append(result),
+        initializer=_mb_init, initargs=(cur, peak, lock), log=lambda *a: None)
+    check("all_ran", stats["ok"] == len(tasks), stats)
+    check("peak_within_budget", peak.value <= 8 + 1e-6, peak.value)
+    check("budget_results", sorted(results) == [i * 10 for i in range(len(tasks))])
+
+    print("[9] 单个超预算 task 独占运行，不死锁")
+    peak.value = cur.value = 0.0
+    stats = mem_budget_map(
+        [(0, 20.0), (1, 1.0)], _mb_task,
+        weight_fn=lambda task: task[1], budget_gb=8, max_workers=4,
+        on_result=lambda task, result: None,
+        initializer=_mb_init, initargs=(cur, peak, lock), log=lambda *a: None)
+    check("oversize_still_runs", stats["ok"] == 2, stats)
+    manager.shutdown()
+    print(f"\n全部通过: {PASS} 项")
+
+
+if __name__ == "__main__":
+    mp.freeze_support()
+    main()

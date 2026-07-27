@@ -98,12 +98,13 @@ def bootstrap_ci(scores: list[float], n_resample: int = 10000,
 
 def classify_failure(est_a2s: str, ref_a2s: str | None = None,
                      omr_ned: float | None = None,
-                     ned_threshold: float = 0.3) -> str:
+                     ned_threshold: float = 30.0) -> str:
     """
     R-S13.3:失败三分类。
       - parse_fail:est 无法解析(validate 违规)→ 工程 bug(解析/生成)
       - merge_artifact:可解析但有分段/合并伪影特征(小节数与 ref 差异大、重复小节)→ 工程 bug
-      - content_error:可解析、结构正常,但音乐内容错(OMR-NED 高)→ 模型能力问题
+      - content_error:可解析、结构正常,但音乐内容错(百分制 OMR-NED > 30)→ 模型能力
+      - ok:可解析、无合并伪影且 OMR-NED 未超过诊断阈值
     只有 content_error 是"继续训练能缩"的;前两类是 bug,训练缩不了。
     """
     viol = validate_a2s_safe(est_a2s)
@@ -120,7 +121,7 @@ def classify_failure(est_a2s: str, ref_a2s: str | None = None,
     # 结构正常但内容错(OMR-NED 高)
     if omr_ned is not None and omr_ned > ned_threshold:
         return "content_error"
-    return "content_error"      # 默认:结构对但有差异 → 归模型
+    return "ok"
 
 
 def validate_a2s_safe(a2s: str) -> list[str]:
@@ -148,8 +149,8 @@ def text_ned(est: str, ref: str) -> float:
     """
     A2S 文本级归一化差异 ∈[0,1](0=全同)。用 difflib 的匹配率近似(1−ratio),
     不是严格编辑距离 —— 只用作【checkpoint 选择/收敛判定的代理指标】:
-    train.run_eval_hooks 在执行端没注入 LEGATO OMR-NED 时用它,保证 best.pt
-    的挑选与 StopController 的收敛规则始终有指标可依,而不是静默悬空。
+    train.run_eval_hooks 用它保证 best.pt 的挑选与 StopController 的收敛规则
+    始终有明确的训练监控指标，而不是静默悬空。
     论文对照的正式 OMR-NED 仍以 LEGATO 官方脚本为准(omr_ned_via_legato)。
     """
     if not ref and not est:
@@ -233,25 +234,36 @@ def gap_annotation(metric: str, value: float, tol_trainable: float = 5.0) -> dic
     }
 
 
-def build_eval_report(metrics: dict, failures: list[dict]) -> str:
+def build_eval_report(metrics: dict, failures: list[dict],
+                      compare_to_paper: bool | None = None,
+                      paper_comparable_metrics: set[str] | None = None) -> str:
     """
     R-S13.4:生成 outputs/eval_report.md 文本。
     metrics: {metric_name: value};failures: [{utt_id, category}]。
     """
     from collections import Counter
+    if paper_comparable_metrics is None:
+        # Backward-compatible programmatic API. New production callers should
+        # pass per-metric certification rather than one blanket bool.
+        paper_comparable_metrics = (
+            set(metrics) if compare_to_paper is not False else set())
     lines = ["# 评测报告\n"]
-    lines.append("## 指标对照论文\n")
+    lines.append("## 指标（仅认证为同一协议的项目对照论文）\n")
     for m, v in metrics.items():
-        ann = gap_annotation(m, v)
+        comparable = m in paper_comparable_metrics
+        ann = gap_annotation(m, v) if comparable else {
+            "metric": m, "value": v, "paper": None}
         if ann.get("paper"):
             lines.append(f"- {m}: {v} (论文 {ann['paper']}, 差距 {ann['gap']}, "
                          f"**{ann['verdict']}**)")
         else:
-            lines.append(f"- {m}: {v}")
-    lines.append("\n## 失败归因(R-S13.3)\n")
+            lines.append(f"- {m}: {v}（本地指标；测试集/聚合协议未认证为论文同口径）")
+    lines.append("\n## 样本归因(R-S13.3)\n")
     cats = Counter(f["category"] for f in failures)
-    total = sum(cats.values())
-    lines.append(f"总失败: {total}")
+    failure_total = sum(cats.get(k, 0) for k in
+                        ("parse_fail", "merge_artifact", "content_error"))
+    lines.append(f"总样本: {sum(cats.values())}; 判定失败: {failure_total}; "
+                 f"通过: {cats.get('ok', 0)}; 指标不可用: {cats.get('metric_unavailable', 0)}")
     for cat in ("parse_fail", "merge_artifact", "content_error"):
         n = cats.get(cat, 0)
         tag = "工程 bug" if cat != "content_error" else "模型能力"

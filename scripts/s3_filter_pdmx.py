@@ -59,73 +59,94 @@ def _u(*parts) -> float:
     return int(h[:15], 16) / float(16 ** 15)
 
 
+# Beyer & Dai (M2ST, ISMIR 2024) choose one ASAP piece per composer.
+# Their public implementation freezes these ACPAS piece IDs:
+#   15,78,159,172,254,288,322,374,395,399,411,418,452,478
+# The 14 works correspond to 25 real ASAP recordings (one is marked unaligned in
+# ACPAS but still belongs to the evaluation split).  "Beyer" is the author's
+# surname, not a composer name; the old implementation searched ASAP paths for
+# the substring "beyer" and therefore returned an invalid empty blacklist.
+BEYER_TEST_FOLDERS = (
+    "Bach/Fugue/bwv_846",
+    "Beethoven/Piano_Sonatas/10-1",
+    "Brahms/Six_Pieces_op_118/2",
+    "Chopin/Ballades/1",
+    "Debussy/Images_Book_1/1_Reflets_dans_lEau",
+    "Haydn/Keyboard_Sonatas/31-1",
+    "Liszt/Annees_de_pelerinage_2/1_Gondoliera",
+    "Mozart/Piano_Sonatas/12-1",
+    "Prokofiev/Toccata",
+    "Rachmaninoff/Preludes_op_23/4",
+    "Ravel/Gaspard_de_la_Nuit/1_Ondine",
+    "Schubert/Impromptu_op.90_D.899/1",
+    "Schumann/Arabeske",
+    "Scriabin/Etudes_op_8/11",
+)
+
+
 def get_beyer_work_keys(asap_annotations_path: Path) -> list[str]:
-    """Extract work_keys for ASAP-Beyer pieces."""
-    if not asap_annotations_path.exists():
-        print(f"  [WARN] ASAP annotations not found at {asap_annotations_path}")
-        return []
-    with open(asap_annotations_path, 'r', encoding='utf-8') as f:
-        ann = json.load(f)
-    beyer_keys = []
-    for key in ann:
-        if 'beyer' in key.lower():
-            # key format: "Beyer/Op101/No_1/Something.mid"
-            parts = key.split('/')
-            if len(parts) >= 2:
-                composer = parts[0]  # "Beyer"
-                piece = '/'.join(parts[1:-1])  # "Op101/No_1"
-                wk = make_work_key(composer, piece)
-                beyer_keys.append(wk)
-    # Unique
-    beyer_keys = list(set(beyer_keys))
-    print(f"  [INFO] ASAP-Beyer work_keys: {len(beyer_keys)}")
-    return beyer_keys
+    """Return the 14 work keys in the public Beyer–Dai ASAP test split.
+
+    ``asap_annotations_path`` is used to locate and validate the checked-out
+    ASAP dataset.  An incomplete checkout is fatal: silently returning an empty
+    blacklist would contaminate training while making the dry-run look healthy.
+    """
+    asap_annotations_path = Path(asap_annotations_path)
+    if not asap_annotations_path.is_file():
+        raise FileNotFoundError(
+            f"ASAP annotations not found: {asap_annotations_path}")
+    asap_root = asap_annotations_path.parent
+    missing = [
+        folder for folder in BEYER_TEST_FOLDERS
+        if not (asap_root / folder / "xml_score.musicxml").is_file()
+    ]
+    if missing:
+        raise RuntimeError(
+            "ASAP-Beyer split validation failed; reference scores missing: "
+            + ", ".join(missing[:5]))
+    keys = sorted({
+        make_work_key(folder.split("/", 1)[0], folder.split("/", 1)[1])
+        for folder in BEYER_TEST_FOLDERS
+    })
+    if len(keys) != 14:
+        raise RuntimeError(
+            f"ASAP-Beyer split should contain 14 unique works, got {len(keys)}")
+    print("  [INFO] ASAP-Beyer: 14 works / 25 real recordings "
+          "(Beyer-Dai public split)")
+    return keys
 
 
 def get_nasap_test_works(work_dir: Path) -> list[str]:
+    """Load the exact nASAP work split consumed by training/evaluation.
+
+    The old code walked every alignment TSV and accidentally included the
+    performer-specific ``*_note_alignments`` directory in the work name.  It
+    reported 1058 "works" although those were performances and did not match
+    the work keys in ``nasap_split.json``.
     """
-    Get work_keys from nASAP alignments. These are MAESTRO performances
-    aligned to ASAP scores. We build work_key from the score's composer/title.
-    Uses nasap TSV alignment file paths.
-    """
-    # The nASAP data is aligned performances. We'll collect work_keys from
-    # the ASAP annotations for all pieces that have alignment TSVs.
-    tsv_dir = ROOT / "asap-dataset" / "asap-dataset"
-    tsv_files = list(tsv_dir.glob("**/*.tsv"))
-    if not tsv_files:
-        # Fallback: collect from asap_annotations keys
-        if ASAP_ANNOTATIONS.exists():
-            with open(ASAP_ANNOTATIONS, 'r', encoding='utf-8') as f:
-                ann = json.load(f)
-            keys = []
-            for key in ann:
-                # key: "Bach/Fugue/bwv_846/Shi05M.mid"
-                parts = key.split('/')
-                if len(parts) >= 3:
-                    composer = parts[0]
-                    piece = '/'.join(parts[1:-1])  # "Fugue/bwv_846"
-                    wk = make_work_key(composer, piece)
-                    keys.append(wk)
-            keys = list(set(keys))
-            print(f"  [INFO] nASAP test work_keys (from annotations): {len(keys)}")
-            return keys
-        return []
-    # Parse TSV file paths to get work_keys
-    work_keys = set()
-    for tsv_path in tsv_files:
-        rel = tsv_path.relative_to(tsv_dir)
-        parts = rel.parts
-        # e.g. "Bach/Fugue/bwv_846/Shi05M_note_alignments/note_alignment.tsv"
-        if len(parts) >= 3:
-            composer = parts[0]
-            piece = '/'.join(parts[1:-1])  # e.g. "Fugue/bwv_846/Shi05M_note_alignments"
-            # strip the performer suffix
-            piece = re.sub(r'_[Nn]ote_[Aa]lignments?$', '', piece)
-            piece = re.sub(r'_\w+M$', '', piece)
-            wk = make_work_key(composer, piece)
-            work_keys.add(wk)
-    keys = list(work_keys)
-    print(f"  [INFO] nASAP test work_keys (from TSV files): {len(keys)}")
+    split_path = Path(work_dir) / "nasap_split.json"
+    if not split_path.is_file():
+        raise FileNotFoundError(
+            f"nASAP split manifest not found: {split_path}")
+    try:
+        manifest = json.loads(split_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ValueError(
+            f"invalid nASAP split manifest {split_path}: "
+            f"{type(e).__name__}: {e}") from e
+    raw = manifest.get("test_works")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(
+            f"{split_path} has no non-empty test_works list")
+    keys = sorted({str(x).strip() for x in raw if str(x).strip()})
+    declared = manifest.get("n_test_works")
+    if declared is not None and int(declared) != len(keys):
+        raise ValueError(
+            f"{split_path}: n_test_works={declared}, actual={len(keys)}")
+    if any("|" not in x for x in keys):
+        raise ValueError(
+            f"{split_path}: malformed work_key in test_works")
+    print(f"  [INFO] nASAP test work_keys (from nasap_split.json): {len(keys)}")
     return keys
 
 
@@ -337,8 +358,12 @@ def main(argv=None):
     blacklist = build_blacklist(nasap_test_works=nasap_keys, asap_beyer_works=beyer_keys)
     print(f"  Blacklist size: {len(blacklist)} work_keys")
     n_before = len(rows)
-    rows = [r for r in rows if r["work_key"] not in blacklist]
-    print(f"  After blacklist filter: {len(rows)} (removed {n_before - len(rows)})")
+    rows = [
+        r for r in rows
+        if not (r["split"] == "train" and r["work_key"] in blacklist)
+    ]
+    print(f"  After train-only blacklist filter: {len(rows)} "
+          f"(removed {n_before - len(rows)} train pieces)")
     if args.restore_only:
         if not restore_ids:
             raise ValueError("--restore-only requires --restore-candidates")
