@@ -48,12 +48,12 @@ for _ in range(7):
     opt1.step()
     sched1.step()
     opt1.zero_grad()
-save_snapshot(snap, m1, opt1, sched1, step=7, epoch=2)
+save_snapshot(snap, m1, opt1, sched1, step=7, epoch=2, batch_cursor=11)
 check("snapshot_written", snap.exists() and not snap.with_suffix(".tmp").exists())
 
 m2, opt2, sched2 = mk()
 got = load_snapshot(snap, m2, opt2, sched2)
-check("restore_progress", got == (7, 2), got)
+check("restore_progress", got == (7, 2, 11), got)
 check("weights_equal", all(torch.equal(a, b) for a, b in
                            zip(m1.state_dict().values(), m2.state_dict().values())))
 check("lr_equal", abs(opt1.param_groups[0]["lr"] - opt2.param_groups[0]["lr"]) < 1e-12,
@@ -79,11 +79,29 @@ for _ in range(3):
 check("timelines_identical", all(torch.equal(a, b) for a, b in
                                  zip(m1.state_dict().values(), m3.state_dict().values())))
 
-print("[3] 兜底:文件不存在 → None;损坏文件 → None 不炸")
+print("[3] 文件不存在 → None；损坏文件必须中止，绝不静默从头重训")
 check("missing_none", load_snapshot(tmp / "nope.pt", *mk()) is None)
 bad = tmp / "bad.pt"
 bad.write_bytes(b"garbage")
-check("corrupt_none", load_snapshot(bad, *mk()) is None)
+try:
+    load_snapshot(bad, *mk())
+    corrupt_raised = False
+except RuntimeError:
+    corrupt_raised = True
+check("corrupt_aborts", corrupt_raised)
+
+print("[3b] 旧快照缺 cursor 默认拒绝；只有显式授权才从 epoch 头恢复")
+legacy = tmp / "legacy.pt"
+torch.save({"model": m1.state_dict(), "optimizer": opt1.state_dict(),
+            "scheduler": sched1.state_dict(), "step": 10, "epoch": 3}, legacy)
+try:
+    load_snapshot(legacy, *mk())
+    legacy_raised = False
+except RuntimeError:
+    legacy_raised = True
+check("legacy_default_rejected", legacy_raised)
+check("legacy_explicit_epoch_start",
+      load_snapshot(legacy, *mk(), allow_legacy_cursor=True) == (10, 3, 0))
 
 print("[4] CLI 改 lr 必须穿透快照:恢复后 apply_cfg_lrs 重刷,否则被旧快照静默还原")
 m4 = M()

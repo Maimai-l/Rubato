@@ -21,8 +21,8 @@ class FakeDM:
     def __init__(self, n=12):
         self.n = n
 
-    def train_batches(self, epoch: int):
-        for i in range(self.n):
+    def train_batches(self, epoch: int, start_batch: int = 0):
+        for i in range(start_batch, self.n):
             yield {"i": torch.tensor([epoch, i]),
                    "audio": torch.full((100,), float(i)),
                    "utt": f"u{i:03d}"}
@@ -30,8 +30,8 @@ class FakeDM:
 
 class CrashDM(FakeDM):
     """只在子进程里第 3 批抛异常(父进程串行重放时正常)——模拟 pickle 后环境类故障。"""
-    def train_batches(self, epoch: int):
-        for i in range(self.n):
+    def train_batches(self, epoch: int, start_batch: int = 0):
+        for i in range(start_batch, self.n):
             if _in_child() and i == 3:
                 raise RuntimeError("子进程专属炸弹")
             yield {"i": torch.tensor([epoch, i]),
@@ -41,8 +41,8 @@ class CrashDM(FakeDM):
 
 class ExitDM(FakeDM):
     """只在子进程里第 2 批直接 os._exit —— 模拟静默死亡(无异常可传回)。"""
-    def train_batches(self, epoch: int):
-        for i in range(self.n):
+    def train_batches(self, epoch: int, start_batch: int = 0):
+        for i in range(start_batch, self.n):
             if _in_child() and i == 2:
                 os._exit(3)
             yield {"i": torch.tensor([epoch, i]),
@@ -75,9 +75,7 @@ def test_child_exception_falls_back_to_serial():
     dm = CrashDM()
     got = [_key(b) for b in _collect(prefetch_batches(dm, 1, depth=2))]
     want = [_key(b) for b in dm.train_batches(1)]        # 父进程环境:完整 12 批
-    # 回退语义 = 前缀(子进程产出的 0-3 批)+ 完整串行重放;结尾必是完整流
-    assert got[-len(want):] == want, "回退后未完整重放"
-    assert len(got) <= len(want) + 3, "重复批数超出子进程可能产出的上限"
+    assert got == want, "子进程异常回退不得重复已消费批"
 
 
 def test_silent_child_death_falls_back_fast():
@@ -86,7 +84,7 @@ def test_silent_child_death_falls_back_fast():
     got = [_key(b) for b in _collect(prefetch_batches(dm, 2, depth=2))]
     wall = time.time() - t0
     want = [_key(b) for b in dm.train_batches(2)]
-    assert got[-len(want):] == want
+    assert got == want, "子进程静默死亡回退不得重复已消费批"
     assert wall < 90, f"静默死亡检测太慢:{wall:.0f}s(应秒级,不许等到超时)"
 
 
@@ -100,6 +98,12 @@ def test_unpicklable_dm_falls_back():
     dm = UnpicklableDM()
     got = [_key(b) for b in _collect(prefetch_batches(dm, 3, depth=2))]
     assert got == [_key(b) for b in FakeDM().train_batches(3)]
+
+
+def test_start_batch_cursor():
+    dm = FakeDM()
+    got = [_key(b) for b in _collect(prefetch_batches(dm, 5, depth=0, start_batch=7))]
+    assert got == [_key(b) for b in dm.train_batches(5, start_batch=7)]
 
 
 class TinyTok:

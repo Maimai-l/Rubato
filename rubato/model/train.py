@@ -96,6 +96,75 @@ def group_grad_norms(param_groups):
     return out
 
 
+def normalize_accumulated_gradients(parameters, n_sequences: int):
+    """把 ``sum(micro_batch_mean * B)`` 的梯度归一成有效 batch 的逐序列平均。
+
+    梯度累积的边界由音频秒数决定，但论文损失的归约单位是“序列”。旧实现再按音频秒
+    缩放 micro-batch mean，会让长样本获得更大权重，且结果依赖 micro-batch 如何切分。
+    """
+    if n_sequences <= 0:
+        raise ValueError(f"累计序列数必须 >0，得到 {n_sequences}")
+    inv = 1.0 / float(n_sequences)
+    for p in parameters:
+        if p.grad is not None:
+            p.grad.mul_(inv)
+
+
+def new_step_metrics() -> dict:
+    """一个 optimizer step（可含多个 micro-batch）的无偏监控累加器。"""
+    return {
+        "n_seq": 0, "micro_batches": 0, "audio_sec": 0.0,
+        "loss_sum": 0.0,
+        "sem_sum": 0.0, "n_sem": 0,
+        "ts_sum": 0.0, "n_ts": 0,
+        "pitch_sum": 0.0, "n_pitch": 0,
+        "dialect_sem": {},
+    }
+
+
+def accumulate_step_metrics(state: dict, parts: dict):
+    """把一个 micro-batch 汇入 optimizer-step 口径；返回同一个 state。"""
+    b = int(parts.get("batch_size", 0))
+    if b <= 0:
+        raise ValueError(f"training_step 未报告有效 batch_size: {b}")
+    state["n_seq"] += b
+    state["micro_batches"] += 1
+    state["audio_sec"] += float(parts.get("batch_audio_sec", 0.0))
+    state["loss_sum"] += float(parts["loss"].detach()) * b
+    for value_key, count_key, sum_key in (
+            ("semantic_loss", "n_sem", "sem_sum"),
+            ("ts_loss", "n_ts", "ts_sum"),
+            ("pitch_loss", "n_pitch", "pitch_sum")):
+        n = int(parts.get(count_key, 0) or 0)
+        value = parts.get(value_key)
+        if n and value is not None:
+            state[sum_key] += float(value) * n
+            state[count_key] += n
+    for d, (v, n) in (parts.get("dialect_sem") or {}).items():
+        old_sum, old_n = state["dialect_sem"].get(d, (0.0, 0))
+        state["dialect_sem"][d] = (old_sum + float(v) * int(n), old_n + int(n))
+    return state
+
+
+def finalize_step_metrics(state: dict) -> dict:
+    """把累加器化成日志/止损用的完整 optimizer-step 指标。"""
+    n_seq = int(state["n_seq"])
+    if n_seq <= 0:
+        raise ValueError("空 optimizer step 不能汇总")
+    return {
+        "loss": state["loss_sum"] / n_seq,
+        "semantic_loss": state["sem_sum"] / max(int(state["n_sem"]), 1),
+        "ts_loss": state["ts_sum"] / max(int(state["n_ts"]), 1),
+        "pitch_loss": (state["pitch_sum"] / state["n_pitch"]
+                       if state["n_pitch"] else None),
+        "dialect_sem": {d: (s / n, n) for d, (s, n) in state["dialect_sem"].items()
+                        if n},
+        "batch_audio_sec": float(state["audio_sec"]),
+        "batch_size": n_seq,
+        "micro_batches": int(state["micro_batches"]),
+    }
+
+
 # ---------------------------------------------------------------- 动态 bucketing(R-S11.4)
 
 def bucket_batches(samples: list[dict], max_batch_sec: float = 560.0,
@@ -113,7 +182,11 @@ def bucket_batches(samples: list[dict], max_batch_sec: float = 560.0,
     ordered = sorted(samples, key=lambda s: s.get("dur_s", 0))
     batches, cur, cur_sec, cur_lmax = [], [], 0.0, 0
     for s in ordered:
-        d = s.get("dur_s", 0)
+        d = float(s.get("dur_s", 0))
+        if d > max_batch_sec:
+            raise ValueError(
+                f"单样本 {s.get('utt_id', '?')}/{s.get('dialect', '?')} 时长 {d:.3f}s "
+                f"> max_batch_sec={max_batch_sec:.3f}s；调用方必须先显式隔离并记账")
         L = int(s.get("tok", 0) or 0)
         new_lmax = max(cur_lmax, L)
         over_sec = cur and cur_sec + d > max_batch_sec
@@ -255,6 +328,7 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         "dialect_sem": {d: (sum(v) / len(v), len(v)) for d, v in dialect_sem.items()},
         "dialect_ts": {d: (sum(v) / len(v), len(v)) for d, v in dialect_ts.items()},
         "batch_audio_sec": float(audio_len.sum().item()) / 16000.0,
+        "batch_size": int(labels.shape[0]),
         "seq_lengths": batch.get("seq_lengths", loss_mask.sum(-1)),
     }
 
@@ -346,7 +420,8 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     labels = labels or {}
     metrics = {"parseable_rate": 0.0, "val_omr_ned": None,
                "a2s_note_f1": None, "maestro_amt_f1": None,
-               "empty_rate": None, "n_eval_nasap": 0, "n_eval_maestro": 0}
+               "empty_rate": None, "n_eval_nasap": 0, "n_eval_maestro": 0,
+               "n_omr_scored": 0, "omr_coverage": 0.0}
 
     # 证据行:打印 + 缓存,eval 末尾原样追加进 autolog 文件(git 里的报告由代码写,
     # 执行端只 commit 不编辑 —— 人肉摘录三次丢失/删改证据后,把这一步从人手里拿走)。
@@ -535,6 +610,8 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     metrics["empty_rate"] = (n_empty / n_total) if n_total else None
     metrics["n_eval_nasap"] = n_total
     metrics["eval_truncated"] = truncated
+    metrics["n_omr_scored"] = len(omr_scores)
+    metrics["omr_coverage"] = len(omr_scores) / max(n_total, 1)
     for k, p in enumerate(sample_preds):
         _p(f"  eval 样本预测[{k}]: {p!r}")
     if ok_pred is not None:
@@ -600,7 +677,8 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         metrics["maestro_amt_f1"] = 100.0 * sum(f1s) / len(f1s)
     _p(f"  eval 指标: parseable={metrics['parseable_rate']:.2f} "
        f"amt_f1={metrics['maestro_amt_f1']} omr_ned={metrics['val_omr_ned']} "
-       f"n_nasap={metrics['n_eval_nasap']} n_maestro={metrics['n_eval_maestro']}")
+       f"omr_scored={metrics['n_omr_scored']}/{metrics['n_eval_nasap']} "
+       f"n_maestro={metrics['n_eval_maestro']}")
 
     # 证据自动落盘(追加,不覆盖):报告由代码写,执行端只 commit —— 摘录/删改这一步收走
     if autolog and _lines:
@@ -620,15 +698,25 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     return metrics
 
 
+def omr_metric_eligible(metrics: dict, min_scored: int = 12,
+                        min_coverage: float = 0.80) -> bool:
+    """OMR 指标是否足以驱动 best/收敛/回滚，而不只是少数容易样本的条件均值。"""
+    return (
+        metrics.get("val_omr_ned") is not None
+        and not metrics.get("eval_truncated", False)
+        and int(metrics.get("n_omr_scored", 0)) >= min_scored
+        and float(metrics.get("omr_coverage", 0.0)) >= min_coverage)
+
+
 # ---------------------------------------------------------------- 断点续训(长跑生死线)
 
-def _mp_producer(dm, epoch, q):
+def _mp_producer(dm, epoch, start_batch, q):
     """预取子进程入口(必须模块级:Windows spawn 按引用导入)。纯 CPU,永不碰 CUDA。"""
     try:
         import os
         import pickle as _pk
         os.environ["CUDA_VISIBLE_DEVICES"] = ""     # 防御:子进程绝不许抢显存/初始化 CUDA
-        for b in dm.train_batches(epoch):
+        for b in dm.train_batches(epoch, start_batch=start_batch):
             # 按值序列化:mp 队列对 torch 张量默认走共享内存【引用】,子进程一死引用即失效
             # (实测 ConnectionReset/FileNotFound)。显式 pickle 成字节 = 生命周期完全解耦。
             q.put(("batch", _pk.dumps(b, protocol=4)))
@@ -641,7 +729,7 @@ def _mp_producer(dm, epoch, q):
             pass
 
 
-def prefetch_batches(dm, epoch: int, depth: int = 3,
+def prefetch_batches(dm, epoch: int, depth: int = 3, start_batch: int = 0,
                      first_timeout_s: float = 1800.0, steady_timeout_s: float = 600.0):
     """
     【进程级】预取:子进程跑同一个 train_batches 生成器,批经进程队列传回,主进程只喂 GPU。
@@ -651,11 +739,11 @@ def prefetch_batches(dm, epoch: int, depth: int = 3,
     语义保证不变:同一生成器、同一调用顺序,批内容/顺序与串行逐字节相同(tests_prefetch)。
 
     无人值守兜底(27h 约束):启动失败(不可 pickle)/子进程死亡/超时/异常 → 打印完整现场
-    (行首统一「预取:」,贴回可 grep),【自动退回串行装批】重放本 epoch —— 最坏 = 修复前
-    速度,绝不停训;已消费的前 n 批会重复训练一遍(无害,现场行记录 n)。depth<=0 = 串行。
+    (行首统一「预取:」,贴回可 grep),【自动退回串行装批】从尚未消费的 cursor 继续，
+    不重复训练已消费批。depth<=0 = 串行。
     """
     if depth <= 0:
-        yield from dm.train_batches(epoch)
+        yield from dm.train_batches(epoch, start_batch=start_batch)
         return
     import multiprocessing as _mp
     import queue as _q
@@ -663,12 +751,12 @@ def prefetch_batches(dm, epoch: int, depth: int = 3,
     ctx = _mp.get_context("spawn")                  # 与执行端 Windows 同语义;沙盒测的就是它
     q = ctx.Queue(maxsize=max(1, int(depth)))
     try:
-        p = ctx.Process(target=_mp_producer, args=(dm, epoch, q),
+        p = ctx.Process(target=_mp_producer, args=(dm, epoch, start_batch, q),
                         daemon=True, name="batch-producer")
         p.start()
     except Exception as e:
         print(f"预取: 进程起不来({type(e).__name__}: {e})→ 本 epoch 串行装批", flush=True)
-        yield from dm.train_batches(epoch)
+        yield from dm.train_batches(epoch, start_batch=start_batch)
         return
     import pickle as _pk
     n = 0
@@ -681,19 +769,20 @@ def prefetch_batches(dm, epoch: int, depth: int = 3,
                     payload = _pk.loads(payload)
             except _q.Empty:
                 if not p.is_alive():                # 静默死亡(pickle 失败/被杀/OOM):秒级发现
-                    print(f"预取: 子进程死亡且队列已空(已收 {n} 批)→ 本 epoch 串行从头重放"
-                          f"(前 {n} 批重复训练,无害)", flush=True)
-                    yield from dm.train_batches(epoch)
+                    print(f"预取: 子进程死亡且队列已空(已收 {n} 批)→ 从 "
+                          f"batch_cursor={start_batch + n} 串行续跑", flush=True)
+                    yield from dm.train_batches(epoch, start_batch=start_batch + n)
                     return
                 if _time.time() > deadline:         # 活着但卡死:超时止损
-                    print(f"预取: 子进程超时(已收 {n} 批)→ 杀之,本 epoch 串行从头重放", flush=True)
-                    yield from dm.train_batches(epoch)
+                    print(f"预取: 子进程超时(已收 {n} 批)→ 杀之，从 "
+                          f"batch_cursor={start_batch + n} 串行续跑", flush=True)
+                    yield from dm.train_batches(epoch, start_batch=start_batch + n)
                     return
                 continue
             except Exception as e:                  # 主侧接收/反序列化故障:同样不许停训
                 print(f"预取: 主侧接收异常({type(e).__name__}: {e},已收 {n} 批)"
-                      f"→ 本 epoch 串行从头重放", flush=True)
-                yield from dm.train_batches(epoch)
+                      f"→ 从 batch_cursor={start_batch + n} 串行续跑", flush=True)
+                yield from dm.train_batches(epoch, start_batch=start_batch + n)
                 return
             deadline = _time.time() + steady_timeout_s
             if kind == "batch":
@@ -702,9 +791,10 @@ def prefetch_batches(dm, epoch: int, depth: int = 3,
             elif kind == "end":
                 return
             else:                                   # "error":子进程完整栈带回
-                print(f"预取: 子进程异常(已收 {n} 批)→ 本 epoch 串行从头重放;现场:\n"
+                print(f"预取: 子进程异常(已收 {n} 批)→ 从 "
+                      f"batch_cursor={start_batch + n} 串行续跑;现场:\n"
                       f"{payload}", flush=True)
-                yield from dm.train_batches(epoch)
+                yield from dm.train_batches(epoch, start_batch=start_batch + n)
                 return
     finally:
         try:
@@ -734,11 +824,13 @@ def timed_iter(gen, stat: dict):
         except StopIteration:
             return
         last_out = _time.perf_counter()
-        stat["data"] = stat.get("data", 0.0) + (last_out - t0)
+        stat["last_data"] = last_out - t0
+        stat["data"] = stat.get("data", 0.0) + stat["last_data"]
         yield b
 
 
-def save_snapshot(path, model, opt, sched, step: int, epoch: int):
+def save_snapshot(path, model, opt, sched, step: int, epoch: int,
+                  batch_cursor: int = 0):
     """全状态快照(模型+优化器+调度器+进度),原子替换写。为什么必须有:执行端 16GB 卡
     余量 45MiB,数周长跑必然中途崩;只存模型权重的 ckpt 恢复不了 Adam 动量和 lr 进度,
     崩一次等于从头再来。"""
@@ -747,12 +839,17 @@ def save_snapshot(path, model, opt, sched, step: int, epoch: int):
     path = _P(path)
     tmp = path.with_suffix(".tmp")
     torch.save({"model": model.state_dict(), "optimizer": opt.state_dict(),
-                "scheduler": sched.state_dict(), "step": step, "epoch": epoch}, tmp)
+                "scheduler": sched.state_dict(), "step": step, "epoch": epoch,
+                "batch_cursor": int(batch_cursor), "snapshot_version": 2}, tmp)
     tmp.replace(path)                          # 原子:写一半崩不会毁掉上一份
 
 
-def load_snapshot(path, model, opt, sched):
-    """恢复快照 → (step, epoch);文件不存在/损坏 → None(从头开始,打印原因)。"""
+def load_snapshot(path, model, opt, sched, allow_legacy_cursor: bool = False):
+    """恢复快照 → (step, epoch, next_batch_cursor)。
+
+    文件不存在才返回 None；存在但损坏必须中止，绝不能伪装成“从头训练”。v1 快照没有
+    epoch 内 cursor，只有显式 ``allow_legacy_cursor`` 才允许从该 epoch 头重放。
+    """
     import torch
     from pathlib import Path as _P
     path = _P(path)
@@ -760,13 +857,22 @@ def load_snapshot(path, model, opt, sched):
         return None
     try:
         snap = torch.load(str(path), map_location="cpu")
+        if "batch_cursor" not in snap and not allow_legacy_cursor:
+            raise RuntimeError(
+                "旧版快照缺 batch_cursor，无法保证不重复训练整个 epoch。"
+                "如确认接受一次从 epoch 开头重放，请显式加 "
+                "--allow-legacy-resume-from-epoch-start")
         model.load_state_dict(snap["model"])
         opt.load_state_dict(snap["optimizer"])     # state 张量随参数设备自动就位
         sched.load_state_dict(snap["scheduler"])
-        return int(snap.get("step", 0)), int(snap.get("epoch", 0))
+        cursor = int(snap.get("batch_cursor", 0))
+        if "batch_cursor" not in snap:
+            print("⚠ 显式允许旧版快照：本次将从保存 epoch 的开头重放", flush=True)
+        return int(snap.get("step", 0)), int(snap.get("epoch", 0)), cursor
     except Exception as e:
-        print(f"⚠ 快照恢复失败({type(e).__name__}: {e}),从头开始")
-        return None
+        raise RuntimeError(
+            f"快照存在但恢复失败，已中止以防静默从 step 0 重训：{path} "
+            f"({type(e).__name__}: {e})") from e
 
 
 # ---------------------------------------------------------------- 主循环(R-S11.6/11.7)
@@ -801,6 +907,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
     recent, recent_sem, recent_ts = [], [], []      # 近 50 步窗口(日志 + final_* 判据)
     recent_pv: list = []                            # 音高 CE 滚动窗(D82,训练侧"听没听"直读)
     recent_gn: list = []                            # 裁剪前梯度范数(有效 lr 是否被裁剪吃掉)
+    recent_td: list = []                            # 完整 optimizer-step 的装批等待
+    recent_tc: list = []                            # 完整 optimizer-step 的计算墙钟
     recent_dia: dict = {}                           # {dialect: [近 200 条 seq sem]}(各自学习曲线)
     report = {"stop_events": [], "eval_history": []}
 
@@ -837,16 +945,19 @@ def train(model, datamodule, cfg: dict, tokenizer,
           "③ 跑 1 小时后:连续 5 行带 td=/tc= 的日志(不含 eval 的窗口) "
           "④ 任务管理器→详细信息→python.exe 的「专用 GPU 内存」和「共享 GPU 内存」两个数(必贴)", flush=True)
 
-    # 断点续训:last.pt 存在且未禁用 → 全状态恢复(所在 epoch 从头重放,至多重复
-    # save_every-1 步的样本 —— 每 epoch 采样确定,重复无害,远好于从 step 0 重来)
+    # 断点续训:last.pt 存在且未禁用 → 全状态 + epoch 内下一批 cursor 精确恢复。
     # (_finish 定义必须在前:曾在"续训即达 max_steps"的分支上先调后定义 → UnboundLocalError)
     last_pt = ckpt_dir / "last.pt"
+    resume_batch_cursor = 0
     if cfg.get("resume", True):
-        got = load_snapshot(last_pt, model, opt, sched)
+        got = load_snapshot(
+            last_pt, model, opt, sched,
+            allow_legacy_cursor=bool(cfg.get("allow_legacy_resume_from_epoch_start", False)))
         if got:
-            step, start_epoch = got
+            step, start_epoch, resume_batch_cursor = got
             applied = apply_cfg_lrs(opt, sched, cfg)   # CLI 改 lr 必须能穿透快照,见函数注释
-            print(f"续训:恢复 step={step} epoch={start_epoch}(优化器/调度器状态一并恢复;"
+            print(f"续训:恢复 step={step} epoch={start_epoch} "
+                  f"batch_cursor={resume_batch_cursor}(优化器/调度器状态一并恢复;"
                   f"lr 按当前配置重刷 enc={applied[0]:.2e} dec={applied[1]:.2e})")
             if step >= max_steps:
                 return _finish("max_steps_reached")
@@ -871,24 +982,35 @@ def train(model, datamodule, cfg: dict, tokenizer,
     model.train()
     opt.zero_grad()
     accum_sec = 0.0
+    step_stats = new_step_metrics()
+    step_data_sec = 0.0
+    step_comp_sec = 0.0
     tstat = {"data": 0.0, "comp": 0.0}
-    t_last_step = step          # 断点续训从恢复步起算,否则首行 td/tc 分母错拿总步数显示 0.0
+    import time as _time
     for epoch in range(start_epoch, cfg.get("max_epochs", 1000)):
-        for batch in timed_iter(prefetch_batches(datamodule, epoch,
-                                                 depth=int(cfg.get("prefetch_batches", 0))),
-                                tstat):
+        epoch_cursor = resume_batch_cursor if epoch == start_epoch else 0
+        stream = prefetch_batches(datamodule, epoch,
+                                  depth=int(cfg.get("prefetch_batches", 0)),
+                                  start_batch=epoch_cursor)
+        for batch_idx, batch in enumerate(timed_iter(stream, tstat), start=epoch_cursor):
+            next_batch_cursor = batch_idx + 1
+            step_data_sec += float(tstat.get("last_data", 0.0))
+            _micro_t0 = _time.perf_counter()
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,
                                             ts_token_ids=ts_token_ids, loss_cfg=loss_cfg,
                                             guards=cfg.get("guards"))
             batch_sec = parts.get("batch_audio_sec", accum_target_sec)
-            # R-S11.4:梯度累积至有效 ≈2000 audio-sec/步;按音频秒数等比缩放各 micro-batch
-            scale = min(1.0, batch_sec / max(accum_target_sec, 1e-6))
-            (parts["loss"] * scale).backward()
+            # 累积边界按音频秒数，但损失严格按“有效 batch 内每条序列等权平均”。
+            # micro-batch mean × B 先求和；到边界再除总序列数，切批方式不会改变梯度。
+            batch_nseq = int(parts["batch_size"])
+            (parts["loss"] * batch_nseq).backward()
             accum_sec += batch_sec
+            accumulate_step_metrics(step_stats, parts)
             if accum_sec < accum_target_sec:
+                step_comp_sec += _time.perf_counter() - _micro_t0
                 continue
-            accum_sec = 0.0
+            normalize_accumulated_gradients(model.parameters(), step_stats["n_seq"])
             # 裁剪前范数必须可见:论文序列损失 ΣCE×T^{-½} 的量纲 ≈65(常规逐 token 平均 ≈3),
             # 梯度天然大 ~20×;若范数长期 >> clip 阈值,每步被等比压回 = 有效 lr 缩几十倍 ——
             # "前 2000 步猛降后爬行"的头号机械嫌疑,gn 数字直接定罪或排除。
@@ -901,20 +1023,24 @@ def train(model, datamodule, cfg: dict, tokenizer,
             opt.step()
             sched.step()
             opt.zero_grad()
+            step_comp_sec += _time.perf_counter() - _micro_t0
             step += 1
 
             # 训练可观测性:没有这几行,执行端只能对着黑屏猜收敛(冒烟判据也取自这窗口)
-            _pv = parts.get("pitch_loss")
-            for buf, v in ((recent, float(parts["loss"])),
-                           (recent_sem, float(parts["semantic_loss"])),
-                           (recent_ts, float(parts["ts_loss"])),
-                           (recent_pv, float(_pv) if _pv is not None else None)):
+            step_m = finalize_step_metrics(step_stats)
+            _pv = step_m.get("pitch_loss")
+            for buf, v in ((recent, step_m["loss"]),
+                           (recent_sem, step_m["semantic_loss"]),
+                           (recent_ts, step_m["ts_loss"]),
+                           (recent_pv, _pv),
+                           (recent_td, step_data_sec),
+                           (recent_tc, step_comp_sec)):
                 if v is None:
                     continue
                 buf.append(v)
                 if len(buf) > 50:
                     buf.pop(0)
-            for d, (v, n) in (parts.get("dialect_sem") or {}).items():
+            for d, (v, n) in (step_m.get("dialect_sem") or {}).items():
                 buf = recent_dia.setdefault(d, [])
                 buf.extend([v] * n)              # 按条数计权,批间混比不歪
                 if len(buf) > 200:
@@ -923,12 +1049,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
             if len(recent_gn) > 50:
                 recent_gn.pop(0)
             if step % log_every == 0 or step == 1:
-                # td/tc:自上条日志以来【每优化步】平均的装批等待/计算墙钟(timed_iter 分账)。
-                # 这两个数是提速决策的唯一依据(D41);含 eval 的窗口 tc 会虚高,跳过该行判读。
-                _nw = max(step - t_last_step, 1)
-                _td, _tc = tstat["data"] / _nw, tstat["comp"] / _nw
-                tstat["data"] = tstat["comp"] = 0.0
-                t_last_step = step
+                # td/tc 左值=本 optimizer step（含它的全部 micro-batch），avg=近50步。
+                # 不再用“下次 next() 才补记上一批”的延迟口径。
                 print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
                       + (f"pv={sum(recent_pv)/len(recent_pv):.3f} " if recent_pv else "")
@@ -936,10 +1058,20 @@ def train(model, datamodule, cfg: dict, tokenizer,
                       f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
                       f"enc={gn_groups[0]:.1f} dec={gn_groups[1]:.1f} "
                       f"lrE={opt.param_groups[0]['lr']:.2e} lrD={opt.param_groups[-1]['lr']:.2e} "
-                      f"audio={batch_sec:.0f}s td={_td:.1f}s tc={_tc:.1f}s"
+                      f"audio={step_m['batch_audio_sec']:.0f}s "
+                      f"micro={step_m['micro_batches']} seq={step_m['batch_size']} "
+                      f"td={step_data_sec:.1f}s/avg{sum(recent_td)/len(recent_td):.1f} "
+                      f"tc={step_comp_sec:.1f}s/avg{sum(recent_tc)/len(recent_tc):.1f}"
                       f" | {_dia_line()}", flush=True)
             if step % save_every == 0:
-                save_snapshot(last_pt, model, opt, sched, step, epoch)
+                save_snapshot(last_pt, model, opt, sched, step, epoch,
+                              batch_cursor=next_batch_cursor)
+
+            # 下个 optimizer step 从干净的完整-step统计开始。
+            accum_sec = 0.0
+            step_stats = new_step_metrics()
+            step_data_sec = 0.0
+            step_comp_sec = 0.0
 
             # 评测 + 止损(D77 双节奏:探针每 eval_every 跑;解码腿按 eval_decode_every 稀疏)
             if step % eval_every_steps == 0:
@@ -964,9 +1096,11 @@ def train(model, datamodule, cfg: dict, tokenizer,
                         return _finish("max_steps_reached")
                     continue               # 仅探针:不进止损器/不评 best.pt(不是坏 eval)
 
+                best_eligible = omr_metric_eligible(m)
                 action = stopper.update(
                     step, m["parseable_rate"], m.get("maestro_amt_f1"),
-                    m.get("val_omr_ned"), recent_loss=float(parts["loss"]))
+                    m.get("val_omr_ned") if best_eligible else None,
+                    recent_loss=recent[-1])
                 report["stop_events"].append({"step": step, **action})
 
                 # ckpt(滚动 6)
@@ -976,10 +1110,17 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 if len(ckpt_ring) > 6:
                     old = ckpt_ring.pop(0)
                     old.unlink(missing_ok=True)
-                if m.get("val_omr_ned") is not None and m["val_omr_ned"] < best_omr:
+                # OMR-NED 只对“可解析且有参照”的样本有定义。旧逻辑可凭 1 个容易样本
+                # 刷新 best.pt；现在只有完整、样本量足够且覆盖率达标的 eval 才有资格。
+                if best_eligible and m["val_omr_ned"] < best_omr:
                     best_omr = m["val_omr_ned"]
                     torch.save({"model": model.state_dict(), "step": step},
                                ckpt_dir / "best.pt")
+                elif m.get("val_omr_ned") is not None and not best_eligible:
+                    print("  best.pt 不更新:OMR eval 未满足完整性门槛"
+                          f"(scored={m.get('n_omr_scored')}/{m.get('n_eval_nasap')}, "
+                          f"coverage={m.get('omr_coverage', 0):.2f}, "
+                          f"truncated={m.get('eval_truncated')})", flush=True)
 
                 # 处理止损动作
                 act = action["action"]
@@ -999,19 +1140,16 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 if act == "converged":
                     return _finish(f"converged:{action['reason']}")
                 if act == "rollback_lr":
-                    # 回滚上一 ckpt + lr×0.5。
-                    # 注意:LambdaLR 每步用 base_lrs×lambda(step) 重算 lr,直接改
-                    # param_groups["lr"] 会在下一次 sched.step() 被覆盖 —— 必须改 base_lrs。
-                    if len(ckpt_ring) >= 2:
-                        prev = torch.load(ckpt_ring[-2])
-                        model.load_state_dict(prev["model"])
-                    sched.base_lrs = [b * 0.5 for b in sched.base_lrs]
-                    for g in opt.param_groups:
-                        g["lr"] *= 0.5
+                    # 旧实现只回滚模型、保留 Adam 动量/调度器，得到彼此不匹配的状态。
+                    # 当前 step ring 是模型-only，不能伪造“安全回滚”；明确停下交由完整
+                    # snapshot 恢复，胜过继续训练一套不可解释的混合状态。
+                    return _finish(f"stopped:rollback_requires_full_snapshot:"
+                                   f"{action['reason']}")
 
                 model.train()
 
             if step >= max_steps:
                 return _finish("max_steps_reached")
+        resume_batch_cursor = 0
 
     return _finish("max_epochs_reached")

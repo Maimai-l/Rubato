@@ -398,8 +398,9 @@ class RubatoDataModule:
         self.pad_id = pad_id
         self.max_batch_sec = max_batch_sec
         self.max_attn_sq = max_attn_sq      # B×Lmax² 预算(≈8 条满长 1024 文本/批)
+        self.last_oversize_report = {}
 
-    def train_batches(self, epoch: int):
+    def train_batches(self, epoch: int, start_batch: int = 0):
         self.train_ds.set_epoch(epoch)
         meta = self.train_ds.sample_meta()
         idx_of = {(u, d): i for i, (u, d) in enumerate(self.train_ds._plan)}
@@ -413,13 +414,39 @@ class RubatoDataModule:
                 if (self.train_ds.train and self.train_ds.augment) else 0.0
             samples.append({"utt_id": u, "dialect": d, "dur_s": dur + t0,
                             "tok": self.train_ds.tok_len(u, d)})
+        # bucket_batches 的“≤max_batch_sec”必须是硬不变量。旧逻辑会把单条超限样本
+        # 作为 singleton 放行（现役缓存中确有百秒级段），既会 OOM，也会让日志中
+        # audio=131s 这类最后 micro-batch 冒充完整有效步。这里显式隔离并逐 epoch 记账。
+        oversized = [s for s in samples if float(s["dur_s"]) > self.max_batch_sec]
+        self.last_oversize_report = {
+            "epoch": epoch,
+            "count": len(oversized),
+            "max_sec": max((float(s["dur_s"]) for s in oversized), default=0.0),
+            "examples": [
+                {"utt_id": s["utt_id"], "dialect": s["dialect"],
+                 "dur_s": round(float(s["dur_s"]), 3)}
+                for s in sorted(oversized, key=lambda x: float(x["dur_s"]), reverse=True)[:5]
+            ],
+        }
+        if oversized:
+            print(f"  epoch{epoch} 超 batch 上限隔离: {len(oversized)} 对 "
+                  f"(max={self.last_oversize_report['max_sec']:.1f}s > "
+                  f"{self.max_batch_sec:.1f}s; 样例={self.last_oversize_report['examples']})",
+                  flush=True)
+            samples = [s for s in samples if float(s["dur_s"]) <= self.max_batch_sec]
         batches = bucket_batches(samples, self.max_batch_sec, self.max_attn_sq)
         # bucket_batches 按时长排序装桶,返回顺序恒为短→长。若照此逐 epoch 产出,
         # 等于固定的长度课程且跨 epoch 零随机 —— 会给优化引入方向性偏置。
         # 桶【内部】保持长度同质(算力效率),只把桶的【顺序】按 epoch 确定性打乱。
         rng = random.Random((self.train_ds.seed ^ (epoch * 0x9E3779B1)) & 0xFFFFFFFF)
         rng.shuffle(batches)
-        for batch_samples in batches:
+        if start_batch < 0 or start_batch > len(batches):
+            raise ValueError(f"epoch{epoch} 恢复 batch_cursor={start_batch} 越界；"
+                             f"本 epoch 只有 {len(batches)} 批")
+        if start_batch:
+            print(f"  epoch{epoch} 精确续跑:跳过已完成 {start_batch}/{len(batches)} 批"
+                  "(只跳 metadata，不重复读音频)", flush=True)
+        for batch_samples in batches[start_batch:]:
             items = []
             for s in batch_samples:
                 i = idx_of[(s["utt_id"], s["dialect"])]

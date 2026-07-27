@@ -232,28 +232,30 @@ def _pdmx_row_fn():
     import json as _json
     m = {}
     mani = WORK / "manifest_pieces.jsonl"
-    if mani.exists():
-        with open(mani, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = _json.loads(line)
-                except Exception:
-                    continue
-                if r.get("piece_id"):
-                    m[r["piece_id"]] = (r.get("split"), r.get("work_key"))
-    bl = set()
+    if not mani.exists():
+        raise FileNotFoundError(
+            f"PDMX manifest 缺失：{mani}。不能把全部样本静默当 train。")
+    with open(mani, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = _json.loads(line)
+            except Exception:
+                continue
+            if r.get("piece_id"):
+                m[r["piece_id"]] = (r.get("split"), r.get("work_key"))
+    if not m:
+        raise RuntimeError(f"PDMX manifest 为空或没有有效 piece_id：{mani}")
     try:
         from scripts.s3_filter_pdmx import get_nasap_test_works, get_beyer_work_keys
         from rubato.data.pdmx import build_blacklist
         bl = build_blacklist(get_nasap_test_works(WORK),
                              get_beyer_work_keys(ROOT / "asap-dataset" / "asap-dataset" / "asap_annotations.json"))
     except Exception as e:
-        print(f"  ⚠ 黑名单构建失败({type(e).__name__}),本次不过滤 —— 训练前必须解决,别静默带病训")
-    if not m:
-        print("  ⚠ manifest 缺失,PDMX split/work_key 无法注入(全体将默认 train)")
+        raise RuntimeError(
+            f"PDMX 泄漏黑名单构建失败，拒绝在不过滤的情况下训练：{type(e).__name__}: {e}") from e
 
     duration_quarantine = set()
     qpath = Path(__file__).resolve().parent.parent / "configs" / "pdmx_duration_quarantine.jsonl"
@@ -293,6 +295,9 @@ def main():
     ap.add_argument("--nemo", default=str(ROOT / "canary-180m-flash.nemo"))
     ap.add_argument("--vocab-spec", default="configs/vocab_spec.json")
     ap.add_argument("--from-scratch", action="store_true")
+    ap.add_argument("--allow-legacy-resume-from-epoch-start", action="store_true",
+                    help="仅兼容旧版 last.pt（缺 epoch 内 batch_cursor）：明确接受从该 epoch "
+                         "开头重放。新版快照不需要；默认拒绝不精确续跑。")
     ap.add_argument("--smoke", type=int, default=0, metavar="N",
                     help="过拟合冒烟:N 条 utt 小集反复过拟合,验证【代码链路】(模型/损失/"
                          "tokenizer/数据管线)没 bug —— 判据 final_sem<0.05(关标签平滑跑,"
@@ -688,6 +693,8 @@ def main():
         "pitch_loss_weight": args.pitch_loss_weight,
         "dialect_mix": dialect_mix,                # None=D2 纸面;设了 --amt-mix 则为换算后的四元组(回显自证)
         "prefetch_batches": args.prefetch,         # 预取深度;0=串行直迭代(对照)
+        "allow_legacy_resume_from_epoch_start":
+            args.allow_legacy_resume_from_epoch_start,
         "eval_max": args.eval_max,                 # 每次 eval 抽的 val 子集(逐 token 生成,大了小时级)
         "eval_time_budget_s": 1200,                # eval 硬时限:超时截断按已评样本出指标,不再"疑似卡死"
         # eval 证据自动落盘到 repo 内(追加式);执行端上报 = git add reports/eval_autolog.md

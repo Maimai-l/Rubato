@@ -5,7 +5,7 @@ import time
 
 import torch
 
-from rubato.model.train import viol_tally
+from rubato.model.train import viol_tally, omr_metric_eligible
 from rubato.model.infer import _probe_from_logprobs
 
 
@@ -29,6 +29,16 @@ def test_viol_tally_categories():
 
 def test_viol_tally_empty():
     assert viol_tally([]) == {}
+
+
+def test_omr_metric_requires_representative_coverage():
+    good = {"val_omr_ned": 0.4, "n_omr_scored": 40,
+            "omr_coverage": 0.83, "eval_truncated": False}
+    assert omr_metric_eligible(good)
+    assert not omr_metric_eligible({**good, "n_omr_scored": 1})
+    assert not omr_metric_eligible({**good, "omr_coverage": 0.79})
+    assert not omr_metric_eligible({**good, "eval_truncated": True})
+    assert not omr_metric_eligible({**good, "val_omr_ned": None})
 
 
 class PitchTok:
