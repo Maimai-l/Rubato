@@ -13,16 +13,58 @@ import argparse
 import json
 import sys
 import time
+from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import partitura
 
 from rubato.data.pdmx import near_dup_ids, piece_signature
-from rubato.intermo.partitura_adapter import part_to_ir
+from rubato.intermo.partitura_adapter import AdapterError, part_to_ir
 from scripts.build_dataset import (
     ROOT, SOURCES, _file_fingerprint, active_pdmx_manifest_paths)
+
+
+def _quarter_fraction(value) -> Fraction:
+    """Partitura's quarter-map float → exact-enough whole-note fraction."""
+    return Fraction(str(float(value))).limit_denominator(1_000_000) / 4
+
+
+def _variable_division_signature_ir(part):
+    """Minimal IR for MinHash when MusicXML changes ``divisions`` mid-score.
+
+    Training serialization deliberately rejects changing divisions because its
+    measure/time assumptions are stricter. Leakage detection only consumes
+    pitch and duration, so use Partitura's normalized quarter map and reproduce
+    the adapter's tied-note/strict-overlap merge without weakening training.
+    """
+    grouped: dict[tuple[int, int], list[list[Fraction]]] = {}
+    for note in part.notes_tied:
+        staff = int(getattr(note, "staff", None) or 1)
+        pitch = int(note.midi_pitch)
+        on = _quarter_fraction(part.quarter_map(note.start.t))
+        off = _quarter_fraction(part.quarter_map(note.end_tied.t))
+        if off > on:
+            grouped.setdefault((staff, pitch), []).append([on, off])
+    notes = []
+    for (_staff, pitch), intervals in grouped.items():
+        intervals.sort()
+        current = intervals[0]
+        for interval in intervals[1:]:
+            if interval[0] < current[1]:
+                current[1] = max(current[1], interval[1])
+            else:
+                notes.append(SimpleNamespace(
+                    pitch=pitch, onset=current[0],
+                    dur=current[1] - current[0]))
+                current = interval
+        notes.append(SimpleNamespace(
+            pitch=pitch, onset=current[0], dur=current[1] - current[0]))
+    if not notes:
+        raise AdapterError("变 divisions 谱没有可用于泄漏签名的音符")
+    return SimpleNamespace(notes=notes)
 
 
 def _score_ir(path: Path):
@@ -37,7 +79,12 @@ def _score_ir(path: Path):
                 part = score
             else:
                 raise ValueError("score has neither parts nor notes")
-            return part_to_ir(part)
+            try:
+                return part_to_ir(part)
+            except AdapterError as exc:
+                if not str(exc).startswith("变 divisions:"):
+                    raise
+                return _variable_division_signature_ir(part)
         except Exception as e:
             first_error = first_error or e
     raise RuntimeError(
@@ -106,8 +153,39 @@ def main(argv=None):
             ref_sigs.append(piece_signature(_score_ir(path)))
         except Exception as e:
             ref_fail.append({"path": str(path), "error": f"{type(e).__name__}: {e}"})
+            print(f"REF_FAIL {path}: {type(e).__name__}: {e}", flush=True)
         if i % 25 == 0:
             print(f"refs {i}/{len(refs)} failed={len(ref_fail)}", flush=True)
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if ref_fail or len(ref_sigs) != len(refs):
+        cert = {
+            "schema": 1,
+            "status": "fail",
+            "reason": "reference_parse_failure",
+            "method": "MinHash Jaccard on 8-gram (pitch,duration)",
+            "threshold": args.threshold,
+            "manifests": manifest_records,
+            "target_unique_train": len(targets),
+            "target_signatures": 0,
+            "target_parse_failed": 0,
+            "target_failures": [],
+            "target_scan_skipped": True,
+            "reference_root": str(Path(args.asap_root).resolve()),
+            "reference_scores": len(refs),
+            "reference_signatures": len(ref_sigs),
+            "reference_parse_failed": len(ref_fail),
+            "reference_failures": ref_fail,
+            "leaked_count": 0,
+            "leaked_piece_ids": [],
+            "elapsed_s": 0.0,
+        }
+        out.write_text(json.dumps(cert, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        print(f"DONE status=fail leaked=0 target_fail=0 "
+              f"ref_fail={len(ref_fail)} → {out}", flush=True)
+        return 2
 
     target_sigs, target_fail = {}, []
     started = time.time()
@@ -119,6 +197,9 @@ def main(argv=None):
             target_fail.append({
                 "piece_id": row["piece_id"], "xml_raw": row["xml_raw"],
                 "error": f"{type(e).__name__}: {e}"})
+            if len(target_fail) <= 20:
+                print(f"TARGET_FAIL {row['piece_id']} {row['xml_raw']}: "
+                      f"{type(e).__name__}: {e}", flush=True)
         if i % 500 == 0:
             rate = i / max(time.time() - started, 1e-6)
             eta = (len(targets) - i) / max(rate, 1e-6)
@@ -151,8 +232,6 @@ def main(argv=None):
         "leaked_piece_ids": sorted(leaked),
         "elapsed_s": round(time.time() - started, 1),
     }
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(cert, ensure_ascii=False, indent=2),
                    encoding="utf-8")
     print(f"DONE status={cert['status']} leaked={len(leaked)} "

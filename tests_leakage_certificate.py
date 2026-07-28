@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.build_dataset import (
     _file_fingerprint, verify_pdmx_leakage_certificate)
+from scripts.certify_pdmx_leakage import _variable_division_signature_ir
 
 
 def write_cert(path: Path, manifests: list[Path], status="pass"):
@@ -62,6 +64,31 @@ def test_manifest_set_and_failed_status_fail_closed():
             raise AssertionError("failed certificate was accepted")
         except ValueError as e:
             assert "未通过" in str(e)
+
+
+def test_variable_divisions_use_normalized_quarter_map_only_for_signature():
+    class FakePart:
+        def __init__(self):
+            self.notes_tied = [
+                SimpleNamespace(
+                    staff=1, midi_pitch=60,
+                    start=SimpleNamespace(t=0),
+                    end_tied=SimpleNamespace(t=1)),
+                SimpleNamespace(
+                    staff=1, midi_pitch=60,
+                    start=SimpleNamespace(t=1),
+                    end_tied=SimpleNamespace(t=4)),
+            ]
+
+        @staticmethod
+        def quarter_map(t):
+            # Simulates a divisions change: raw durations 1 then 3 both mean
+            # one quarter note in normalized musical time.
+            return {0: 0.0, 1: 1.0, 4: 2.0}[t]
+
+    ir = _variable_division_signature_ir(FakePart())
+    assert len(ir.notes) == 2, "touching re-articulations must not merge"
+    assert [str(note.dur) for note in ir.notes] == ["1/4", "1/4"]
 
 
 if __name__ == "__main__":
