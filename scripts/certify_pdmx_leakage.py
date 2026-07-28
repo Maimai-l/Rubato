@@ -2,7 +2,8 @@
 
 The certificate is bound to the exact manifest bytes.  A passing certificate
 requires every ASAP reference score and every unique PDMX train score to parse,
-and requires zero MinHash near-duplicates.  Parse failures never pass open.
+and requires zero near-duplicates by exact Jaccard on the established
+(pitch, duration) 8-grams.  Parse failures never pass open.
 
 Run when the current training job is idle (the full scan is CPU/IO heavy):
   python scripts/certify_pdmx_leakage.py
@@ -11,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
+import os
 import re
 import sys
 import tempfile
@@ -24,10 +27,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import partitura
 
-from rubato.data.pdmx import near_dup_ids, piece_signature
+from rubato.data.pdmx import ir_to_pitch_dur_seq, ngram_set
 from rubato.intermo.partitura_adapter import AdapterError, part_to_ir
 from scripts.build_dataset import (
     ROOT, SOURCES, _file_fingerprint, active_pdmx_manifest_paths)
+
+
+_CERT_REFS: tuple[frozenset, ...] = ()
+_CERT_INDEX: dict[tuple, tuple[int, ...]] = {}
+_CERT_THRESHOLD = 0.7
 
 
 def _quarter_fraction(value) -> Fraction:
@@ -135,6 +143,54 @@ def _score_ir(path: Path):
         " | ".join(errors[:3]))
 
 
+def _score_grams(path: Path, n: int = 8) -> frozenset:
+    return ngram_set(ir_to_pitch_dur_seq(_score_ir(path)), n)
+
+
+def _build_ref_index(ref_grams: list[frozenset]) -> dict[tuple, tuple[int, ...]]:
+    index: dict[tuple, list[int]] = {}
+    for ref_id, grams in enumerate(ref_grams):
+        for gram in grams:
+            index.setdefault(gram, []).append(ref_id)
+    return {gram: tuple(ids) for gram, ids in index.items()}
+
+
+def _cert_worker_init(ref_grams: list[frozenset], threshold: float) -> None:
+    global _CERT_REFS, _CERT_INDEX, _CERT_THRESHOLD
+    _CERT_REFS = tuple(ref_grams)
+    _CERT_INDEX = _build_ref_index(ref_grams)
+    _CERT_THRESHOLD = float(threshold)
+
+
+def _is_leaked_grams(grams: frozenset) -> bool:
+    """Exact Jaccard gate, with an exact inverted-index candidate reduction."""
+    candidates: set[int] = set()
+    for gram in grams:
+        candidates.update(_CERT_INDEX.get(gram, ()))
+    for ref_id in candidates:
+        ref = _CERT_REFS[ref_id]
+        union = len(grams | ref)
+        score = len(grams & ref) / union if union else 1.0
+        if score > _CERT_THRESHOLD:
+            return True
+    return False
+
+
+def _cert_target_worker(row: dict) -> dict:
+    try:
+        grams = _score_grams(Path(row["xml_raw"]))
+        return {
+            "piece_id": row["piece_id"], "ok": True,
+            "leaked": _is_leaked_grams(grams), "error": None,
+        }
+    except Exception as exc:
+        return {
+            "piece_id": row["piece_id"], "xml_raw": row["xml_raw"],
+            "ok": False, "leaked": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def _read_manifests(paths: list[Path]) -> tuple[list[dict], list[dict]]:
     records = []
     train_by_id: dict[str, dict] = {}
@@ -175,6 +231,9 @@ def main(argv=None):
         "--out",
         default=str(ROOT / "reports" / "pdmx_leakage_certificate.json"))
     ap.add_argument("--threshold", type=float, default=0.7)
+    ap.add_argument(
+        "--workers", type=int, default=min(8, os.cpu_count() or 4),
+        help="Parallel MusicXML parsers; default min(8, logical CPUs).")
     args = ap.parse_args(argv)
     paths = ([Path(p).resolve() for p in args.manifest]
              if args.manifest else active_pdmx_manifest_paths(SOURCES))
@@ -183,6 +242,8 @@ def main(argv=None):
         raise FileNotFoundError(f"active PDMX manifests missing:{missing}")
     if not 0.0 < args.threshold < 1.0:
         raise ValueError("--threshold must be between 0 and 1")
+    if args.workers <= 0:
+        raise ValueError("--workers must be positive")
 
     manifest_records, targets = _read_manifests(paths)
     refs = sorted(Path(args.asap_root).glob("**/xml_score.musicxml"))
@@ -191,10 +252,10 @@ def main(argv=None):
     print(f"certificate scope: manifests={len(paths)} "
           f"unique_train={len(targets)} refs={len(refs)}", flush=True)
 
-    ref_sigs, ref_fail = [], []
+    ref_grams, ref_fail = [], []
     for i, path in enumerate(refs, 1):
         try:
-            ref_sigs.append(piece_signature(_score_ir(path)))
+            ref_grams.append(_score_grams(path))
         except Exception as e:
             ref_fail.append({"path": str(path), "error": f"{type(e).__name__}: {e}"})
             print(f"REF_FAIL {path}: {type(e).__name__}: {e}", flush=True)
@@ -203,12 +264,12 @@ def main(argv=None):
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    if ref_fail or len(ref_sigs) != len(refs):
+    if ref_fail or len(ref_grams) != len(refs):
         cert = {
             "schema": 1,
             "status": "fail",
             "reason": "reference_parse_failure",
-            "method": "MinHash Jaccard on 8-gram (pitch,duration)",
+            "method": "Exact Jaccard on 8-gram (pitch,duration), inverted reference index",
             "threshold": args.threshold,
             "manifests": manifest_records,
             "target_unique_train": len(targets),
@@ -218,7 +279,7 @@ def main(argv=None):
             "target_scan_skipped": True,
             "reference_root": str(Path(args.asap_root).resolve()),
             "reference_scores": len(refs),
-            "reference_signatures": len(ref_sigs),
+            "reference_signatures": len(ref_grams),
             "reference_parse_failed": len(ref_fail),
             "reference_failures": ref_fail,
             "leaked_count": 0,
@@ -231,45 +292,66 @@ def main(argv=None):
               f"ref_fail={len(ref_fail)} → {out}", flush=True)
         return 2
 
-    target_sigs, target_fail = {}, []
+    target_ok = 0
+    target_fail = []
+    leaked: set[str] = set()
     started = time.time()
-    for i, row in enumerate(targets, 1):
-        try:
-            target_sigs[row["piece_id"]] = piece_signature(
-                _score_ir(Path(row["xml_raw"])))
-        except Exception as e:
-            target_fail.append({
-                "piece_id": row["piece_id"], "xml_raw": row["xml_raw"],
-                "error": f"{type(e).__name__}: {e}"})
-            if len(target_fail) <= 20:
-                print(f"TARGET_FAIL {row['piece_id']} {row['xml_raw']}: "
-                      f"{type(e).__name__}: {e}", flush=True)
-        if i % 500 == 0:
-            rate = i / max(time.time() - started, 1e-6)
-            eta = (len(targets) - i) / max(rate, 1e-6)
-            print(f"targets {i}/{len(targets)} sigs={len(target_sigs)} "
-                  f"failed={len(target_fail)} rate={rate:.1f}/s "
-                  f"ETA={eta/60:.1f}m", flush=True)
+    print(f"targets: workers={args.workers} exact_jaccard "
+          f"ref_index_grams={sum(len(g) for g in ref_grams)}", flush=True)
 
-    leaked = (near_dup_ids(target_sigs, ref_sigs, threshold=args.threshold)
-              if ref_sigs and target_sigs else set())
+    def consume(results):
+        nonlocal target_ok
+        for i, result in enumerate(results, 1):
+            if result["ok"]:
+                target_ok += 1
+                if result["leaked"]:
+                    leaked.add(result["piece_id"])
+            else:
+                target_fail.append({
+                    "piece_id": result["piece_id"],
+                    "xml_raw": result["xml_raw"],
+                    "error": result["error"],
+                })
+                if len(target_fail) <= 20:
+                    print(f"TARGET_FAIL {result['piece_id']} "
+                          f"{result['xml_raw']}: {result['error']}", flush=True)
+            if i % 500 == 0:
+                rate = i / max(time.time() - started, 1e-6)
+                eta = (len(targets) - i) / max(rate, 1e-6)
+                print(f"targets {i}/{len(targets)} sigs={target_ok} "
+                      f"failed={len(target_fail)} leaked={len(leaked)} "
+                      f"rate={rate:.1f}/s ETA={eta/60:.1f}m", flush=True)
+
+    if args.workers == 1:
+        _cert_worker_init(ref_grams, args.threshold)
+        consume(map(_cert_target_worker, targets))
+    else:
+        context = mp.get_context("spawn")
+        with context.Pool(
+                processes=args.workers,
+                initializer=_cert_worker_init,
+                initargs=(ref_grams, args.threshold),
+                maxtasksperchild=250) as pool:
+            consume(pool.imap_unordered(
+                _cert_target_worker, targets, chunksize=4))
+
     passed = not ref_fail and not target_fail and not leaked \
-        and len(ref_sigs) == len(refs) and len(target_sigs) == len(targets)
+        and len(ref_grams) == len(refs) and target_ok == len(targets)
     cert = {
         "schema": 1,
         "status": "pass" if passed else "fail",
         "reason": ("all_active_train_scores_checked_zero_near_duplicates"
                    if passed else "parse_failure_or_leak_detected"),
-        "method": "MinHash Jaccard on 8-gram (pitch,duration)",
+        "method": "Exact Jaccard on 8-gram (pitch,duration), inverted reference index",
         "threshold": args.threshold,
         "manifests": manifest_records,
         "target_unique_train": len(targets),
-        "target_signatures": len(target_sigs),
+        "target_signatures": target_ok,
         "target_parse_failed": len(target_fail),
         "target_failures": target_fail[:100],
         "reference_root": str(Path(args.asap_root).resolve()),
         "reference_scores": len(refs),
-        "reference_signatures": len(ref_sigs),
+        "reference_signatures": len(ref_grams),
         "reference_parse_failed": len(ref_fail),
         "reference_failures": ref_fail,
         "leaked_count": len(leaked),

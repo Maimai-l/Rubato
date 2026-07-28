@@ -8,7 +8,10 @@ from types import SimpleNamespace
 
 from scripts.build_dataset import (
     _file_fingerprint, verify_pdmx_leakage_certificate)
-from scripts.certify_pdmx_leakage import _signature_only_ir
+from scripts.certify_pdmx_leakage import (
+    _build_ref_index, _cert_worker_init, _is_leaked_grams,
+    _signature_only_ir,
+)
 
 
 def write_cert(path: Path, manifests: list[Path], status="pass"):
@@ -89,6 +92,18 @@ def test_variable_divisions_use_normalized_quarter_map_only_for_signature():
     ir = _signature_only_ir(FakePart())
     assert len(ir.notes) == 2, "touching re-articulations must not merge"
     assert [str(note.dur) for note in ir.notes] == ["1/4", "1/4"]
+
+
+def test_inverted_index_keeps_exact_jaccard_semantics():
+    ref = frozenset({("a",), ("b",), ("c",), ("d",)})
+    _cert_worker_init([ref], threshold=0.7)
+    assert _is_leaked_grams(
+        frozenset({("a",), ("b",), ("c",), ("d",), ("e",)}))
+    assert not _is_leaked_grams(
+        frozenset({("a",), ("x",), ("y",), ("z",)}))
+    assert not _is_leaked_grams(frozenset({("x",), ("y",)}))
+    index = _build_ref_index([ref])
+    assert index[("a",)] == (0,)
 
 
 if __name__ == "__main__":
