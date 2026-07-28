@@ -66,10 +66,20 @@ edge = RubatoDataset(
     edge_utts, edge_labels, Tok(), train=False, max_target_len=9)
 check("exact_decoder_limit_kept",
       edge._available().get("u_edge") == ["A2S"], edge.len_filter_report)
+edge_item = edge[0]
+check("exact_decoder_limit_getitem",
+      len(edge_item["input_ids"]) == 9, len(edge_item["input_ids"]))
+
+over_labels = {"u_over": {"A2S": "abcd"}}
+over_utts = [{**edge_utts[0], "utt_id": "u_over"}]
+over = RubatoDataset(
+    over_utts, over_labels, Tok(), train=False, max_target_len=9)
+check("one_over_decoder_limit_rejected",
+      "u_over" not in over._available(), over.len_filter_report)
 
 print("[2] __getitem__ 正常取样(保留项),长度守卫不误伤")
 item = ds[0]
-check("getitem_ok", len(item["input_ids"]) + 1 <= 64, len(item["input_ids"]))
+check("getitem_ok", len(item["input_ids"]) <= 64, len(item["input_ids"]))
 check("audio_loaded", len(item["audio"]) == 16000)
 
 print("[3] 不限长(None):行为与从前完全一致")

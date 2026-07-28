@@ -361,11 +361,13 @@ class RubatoDataset:
                             sample=self.train and self.augment,
                             alpha=self.alpha, domain=u.get("domain"))
         # alpha 采样切分可能比确定性切分更长 → 超上限就退回确定性切分(预过滤保证它必然合规)
-        if self.max_target_len and len(enc["input_ids"]) + 1 > self.max_target_len:
+        # decoder 位置表实际索引的是 input_ids=seq[:-1]；不能把被右移掉的
+        # 最后一个 token 再加回来。_build_len_filter 同样按 len(seq)-1 计算。
+        if self.max_target_len and len(enc["input_ids"]) > self.max_target_len:
             enc = encode_target(self.tok, dialect, text, sample=False, domain=u.get("domain"))
-            if len(enc["input_ids"]) + 1 > self.max_target_len:
+            if len(enc["input_ids"]) > self.max_target_len:
                 raise ValueError(f"目标序列超长(预过滤应已拦下):{uid}/{dialect} "
-                                 f"{len(enc['input_ids']) + 1} > {self.max_target_len}")
+                                 f"{len(enc['input_ids'])} > {self.max_target_len}")
         enc["audio"] = load_audio(u["audio_path"], self.sr, tile_pad_s=t0_s,
                                   win=u.get("win"))  # LOCAL;win=窗内 utt 只读整曲的 [t0,t1]
         if self.train and self.acoustic_aug:
