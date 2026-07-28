@@ -267,6 +267,34 @@ def _load_pdmx_eval_blacklist() -> set[str]:
     return blacklist
 
 
+def _load_pdmx_content_quarantine() -> set[str]:
+    """Load score-level exclusions proven unsafe by strict content audit."""
+    path = REPO_ROOT / "configs" / "pdmx_content_quarantine.jsonl"
+    if not path.exists():
+        return set()
+    quarantined = set()
+    with path.open(encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+                piece_id = str(row["piece_id"])
+                reason = str(row["reason"])
+            except Exception as e:
+                raise ValueError(
+                    f"PDMX 内容隔离清单第 {line_no} 行无效:"
+                    f"{type(e).__name__}: {e}") from e
+            if not piece_id or not reason:
+                raise ValueError(
+                    f"PDMX 内容隔离清单第 {line_no} 行缺 piece_id/reason")
+            if piece_id in quarantined:
+                raise ValueError(
+                    f"PDMX 内容隔离清单 piece_id 重复:{piece_id}")
+            quarantined.add(piece_id)
+    return quarantined
+
+
 def _pdmx_row_fn(manifest_paths=None, quarantine_unmapped: bool = False,
                  blacklist: set[str] | None = None):
     """PDMX 行注入:manifest 的 split/work_key(标签行不带,P8 实测全体默认 train、val/test≈0);
@@ -336,6 +364,10 @@ def _pdmx_row_fn(manifest_paths=None, quarantine_unmapped: bool = False,
                         f"{type(e).__name__}: {e}") from e
                 duration_quarantine.add(uid)
         print(f"  [INFO] PDMX duration quarantine utt_ids: {len(duration_quarantine)}")
+    content_quarantine = _load_pdmx_content_quarantine()
+    if content_quarantine:
+        print(f"  [INFO] PDMX content quarantine piece_ids: "
+              f"{len(content_quarantine)}")
 
     audit = {"unmapped_piece_ids": set(),
              "manifests": [str(x) for x in manifest_paths]}
@@ -356,6 +388,8 @@ def _pdmx_row_fn(manifest_paths=None, quarantine_unmapped: bool = False,
                 f"PDMX 标签 {uid or '<unknown>'} 的 piece_id={piece_id} 不在 manifest；"
                 "拒绝按默认 train 静默放行")
         split, wk = info
+        if split == "train" and str(piece_id) in content_quarantine:
+            return None                # 严格内容审计确认泄漏/不可签名，只隔离 train
         if split == "train" and wk in bl:
             return None                # 外部评测作品只禁止进入 train
         if split and not row.get("split"):
@@ -387,18 +421,42 @@ def attach_pdmx_row_fns(sources: list[dict]) -> None:
         src["row_fn"] = cache[key]
 
 
+def pdmx_source_manifest_paths(src: dict) -> list[Path]:
+    """Resolve the manifest set used by one PDMX label source."""
+    manifests = src.get("manifests") or [
+        src.get("manifest") or (WORK / "manifest_pieces.jsonl")]
+    return [Path(raw).resolve() for raw in manifests]
+
+
 def active_pdmx_manifest_paths(sources: list[dict]) -> list[Path]:
     """Return the exact manifest set that supplies split metadata this run."""
     paths: dict[str, Path] = {}
     for src in sources:
         if src.get("kind") != "pdmx":
             continue
-        manifests = src.get("manifests") or [
-            src.get("manifest") or (WORK / "manifest_pieces.jsonl")]
-        for raw in manifests:
-            p = Path(raw).resolve()
+        for p in pdmx_source_manifest_paths(src):
             paths[str(p).lower()] = p
     return [paths[k] for k in sorted(paths)]
+
+
+def active_pdmx_label_paths(sources: list[dict]) -> list[Path]:
+    """Return the exact PDMX label files armed for this assembly."""
+    paths: dict[str, Path] = {}
+    for src in sources:
+        if src.get("kind") != "pdmx":
+            continue
+        p = Path(src["path"]).resolve()
+        paths[str(p).lower()] = p
+    return [paths[k] for k in sorted(paths)]
+
+
+def active_pdmx_filter_paths() -> list[Path]:
+    """Files whose exact bytes alter the certified PDMX train scope."""
+    candidates = [
+        REPO_ROOT / "configs" / "pdmx_duration_quarantine.jsonl",
+        REPO_ROOT / "configs" / "pdmx_content_quarantine.jsonl",
+    ]
+    return [path.resolve() for path in candidates if path.is_file()]
 
 
 def _file_fingerprint(path: Path) -> tuple[str, int]:
@@ -415,8 +473,10 @@ def _file_fingerprint(path: Path) -> tuple[str, int]:
 def verify_pdmx_leakage_certificate(
         manifest_paths: list[str | Path],
         certificate_path: str | Path = ROOT / "reports" /
-        "pdmx_leakage_certificate.json") -> dict:
-    """Verify that content-level leakage audit covers these exact bytes."""
+        "pdmx_leakage_certificate.json",
+        label_sources: list[dict] | None = None,
+        filter_paths: list[str | Path] | None = None) -> dict:
+    """Verify that the audit covers the exact manifests and armed labels."""
     cp = Path(certificate_path)
     if not cp.is_file():
         raise FileNotFoundError(
@@ -459,6 +519,75 @@ def verify_pdmx_leakage_certificate(
                 f"PDMX 内容泄漏证书过期:{path} "
                 f"sha={sha[:12]}/{str(rec.get('sha256'))[:12]} "
                 f"rows={rows}/{rec.get('rows')}")
+    if label_sources is not None:
+        expected_sources = {}
+        for src in label_sources:
+            if src.get("kind") != "pdmx":
+                continue
+            path = Path(src["path"]).resolve()
+            key = str(path).lower()
+            if key in expected_sources:
+                raise ValueError(f"重复 PDMX labels source:{path}")
+            expected_sources[key] = {
+                "path": path,
+                "manifests": [
+                    str(p).lower() for p in pdmx_source_manifest_paths(src)],
+                "quarantine_unmapped": bool(
+                    src.get("quarantine_unmapped", False)),
+            }
+        label_records = cert.get("label_sources")
+        if not isinstance(label_records, list) or not label_records:
+            raise ValueError("PDMX 内容泄漏证书缺 label_sources")
+        certified_sources = {}
+        for rec in label_records:
+            if not isinstance(rec, dict) or not rec.get("path"):
+                continue
+            key = str(Path(rec["path"]).resolve()).lower()
+            certified_sources[key] = rec
+        if set(certified_sources) != set(expected_sources):
+            missing = sorted(set(expected_sources) - set(certified_sources))
+            stale = sorted(set(certified_sources) - set(expected_sources))
+            raise ValueError(
+                f"PDMX 内容泄漏证书 labels 集合不匹配:"
+                f"未认证={missing} 多余={stale}")
+        for key, expected in expected_sources.items():
+            path = expected["path"]
+            if not path.is_file():
+                raise FileNotFoundError(f"PDMX labels 不存在:{path}")
+            sha, rows = _file_fingerprint(path)
+            rec = certified_sources[key]
+            certified_manifests = [
+                str(Path(p).resolve()).lower()
+                for p in rec.get("manifests", [])]
+            if (sha != rec.get("sha256")
+                    or rows != int(rec.get("rows", -1))
+                    or certified_manifests != expected["manifests"]
+                    or bool(rec.get("quarantine_unmapped", False))
+                    != expected["quarantine_unmapped"]):
+                raise ValueError(
+                    f"PDMX 内容泄漏证书 labels/source 过期:{path}")
+    if filter_paths is not None:
+        expected_filters = {
+            str(Path(path).resolve()).lower(): Path(path).resolve()
+            for path in filter_paths
+        }
+        records = cert.get("filter_files")
+        if not isinstance(records, list):
+            raise ValueError("PDMX 内容泄漏证书缺 filter_files")
+        certified_filters = {
+            str(Path(rec["path"]).resolve()).lower(): rec
+            for rec in records
+            if isinstance(rec, dict) and rec.get("path")
+        }
+        if set(certified_filters) != set(expected_filters):
+            raise ValueError("PDMX 内容泄漏证书过滤清单集合不匹配")
+        for key, path in expected_filters.items():
+            sha, rows = _file_fingerprint(path)
+            rec = certified_filters[key]
+            if sha != rec.get("sha256") \
+                    or rows != int(rec.get("rows", -1)):
+                raise ValueError(
+                    f"PDMX 内容泄漏证书过滤清单过期:{path}")
     if int(cert.get("target_parse_failed", -1)) != 0 \
             or int(cert.get("reference_parse_failed", -1)) != 0:
         raise ValueError("PDMX 内容泄漏证书存在未解析目标/参考，不能 fail open")
@@ -783,7 +912,9 @@ def main():
 
     active_manifests = active_pdmx_manifest_paths(SOURCES)
     try:
-        leak_cert = verify_pdmx_leakage_certificate(active_manifests)
+        leak_cert = verify_pdmx_leakage_certificate(
+            active_manifests, label_sources=SOURCES,
+            filter_paths=active_pdmx_filter_paths())
         print("  PDMX 内容泄漏证书: PASS "
               f"(train_unique={leak_cert.get('target_unique_train')} "
               f"refs={leak_cert.get('reference_signatures')})")

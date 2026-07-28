@@ -27,10 +27,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import partitura
 
+from rubato.data.assemble import normalize_row
 from rubato.data.pdmx import ir_to_pitch_dur_seq, ngram_set
 from rubato.intermo.partitura_adapter import AdapterError, part_to_ir
 from scripts.build_dataset import (
-    ROOT, SOURCES, _file_fingerprint, active_pdmx_manifest_paths)
+    ROOT, SOURCES, _file_fingerprint, _load_pdmx_eval_blacklist,
+    _pdmx_row_fn, active_pdmx_filter_paths, active_pdmx_manifest_paths,
+    pdmx_source_manifest_paths)
 
 
 _CERT_REFS: tuple[frozenset, ...] = ()
@@ -79,13 +82,15 @@ def _signature_only_ir(part):
     return SimpleNamespace(notes=notes)
 
 
-def _load_without_display_accidentals(path: Path):
-    """Parse a temporary XML copy without ``<accidental>`` display glyphs.
+def _load_without_display_notation(path: Path):
+    """Parse a temporary XML copy without unsupported display-only notation.
 
     PDMX includes SMuFL names such as ``slash-flat`` that older Partitura
     versions do not recognize and raise ``KeyError`` for.  The sounding pitch
     is carried by ``<pitch>/<alter>``; ``<accidental>`` only controls the
-    engraved glyph.  Removing it in a temporary copy preserves pitch semantics
+    engraved glyph.  Likewise, ``<type>512th</type>`` is a display value while
+    the performed duration is carried by ``<duration>`` and ``<divisions>``.
+    Removing these tags in a temporary copy preserves pitch/duration semantics
     and never mutates the dataset.
     """
     path = Path(path)
@@ -104,8 +109,11 @@ def _load_without_display_accidentals(path: Path):
     cleaned = re.sub(
         rb"<(?:\w+:)?accidental\b[^>]*>.*?</(?:\w+:)?accidental\s*>",
         b"", data, flags=re.DOTALL)
+    cleaned = re.sub(
+        rb"<(?:\w+:)?type\b[^>]*>.*?</(?:\w+:)?type\s*>",
+        b"", cleaned, flags=re.DOTALL)
     if cleaned == data:
-        raise ValueError("no display accidental tags available to sanitize")
+        raise ValueError("no display notation tags available to sanitize")
     tmp_name = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -123,7 +131,7 @@ def _score_ir(path: Path):
     errors = []
     for loader in (
             partitura.load_score, partitura.load_musicxml,
-            _load_without_display_accidentals):
+            _load_without_display_notation):
         try:
             score = loader(str(path))
             if hasattr(score, "parts") and score.parts:
@@ -220,6 +228,118 @@ def _read_manifests(paths: list[Path]) -> tuple[list[dict], list[dict]]:
     return records, [train_by_id[k] for k in sorted(train_by_id)]
 
 
+def _manifest_xml_map(paths: list[Path]) -> dict[str, str]:
+    """Load the source-local piece→XML mapping with conflict checks."""
+    mapping: dict[str, str] = {}
+    for path in paths:
+        with path.open(encoding="utf-8") as handle:
+            for line_no, line in enumerate(handle, 1):
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                pid = str(row.get("piece_id") or "")
+                xml = str(row.get("xml_raw") or "")
+                if not pid:
+                    raise ValueError(f"{path}:{line_no} missing piece_id")
+                if not xml:
+                    raise ValueError(f"{path}:{line_no} missing xml_raw")
+                old = mapping.get(pid)
+                if old and Path(old).resolve() != Path(xml).resolve():
+                    raise ValueError(
+                        f"piece_id {pid} maps to conflicting XML paths")
+                mapping[pid] = xml
+    return mapping
+
+
+def _read_active_training_scope(
+        sources: list[dict], manifest_paths: list[Path],
+        blacklist: set[str] | None = None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Select only score pieces referenced by labels that can enter train.
+
+    This deliberately reuses ``_pdmx_row_fn`` and ``normalize_row`` so the
+    certificate cannot silently drift from assembly split/blacklist/quarantine
+    rules.  Audio availability is not part of score leakage, so a referenced
+    piece is conservatively certified even if its current audio is absent.
+    """
+    manifest_records, _unused_all_train = _read_manifests(manifest_paths)
+    if blacklist is None:
+        blacklist = _load_pdmx_eval_blacklist()
+    targets: dict[str, dict] = {}
+    label_records = []
+    seen_label_paths: set[str] = set()
+    for src in sources:
+        if src.get("kind") != "pdmx":
+            continue
+        label_path = Path(src["path"]).resolve()
+        label_key = str(label_path).lower()
+        if label_key in seen_label_paths:
+            raise ValueError(f"duplicate PDMX label source:{label_path}")
+        seen_label_paths.add(label_key)
+        if not label_path.is_file():
+            raise FileNotFoundError(f"active PDMX labels missing:{label_path}")
+        source_manifests = pdmx_source_manifest_paths(src)
+        xml_by_id = _manifest_xml_map(source_manifests)
+        row_filter = _pdmx_row_fn(
+            source_manifests,
+            quarantine_unmapped=bool(src.get("quarantine_unmapped", False)),
+            blacklist=blacklist)
+        sha, rows = _file_fingerprint(label_path)
+        train_label_rows = 0
+        train_piece_ids: set[str] = set()
+        with label_path.open(encoding="utf-8") as handle:
+            for line_no, line in enumerate(handle, 1):
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                row = row_filter(row)
+                if row is None:
+                    continue
+                normalized = normalize_row(row, "pdmx")
+                if normalized is None or not normalized[1]:
+                    continue
+                if (normalized[2] or "train").lower() != "train":
+                    continue
+                pid = str(row.get("piece_id") or "")
+                xml = xml_by_id.get(pid)
+                if not pid or not xml:
+                    raise ValueError(
+                        f"{label_path}:{line_no} train row has no mapped XML")
+                train_label_rows += 1
+                train_piece_ids.add(pid)
+                old = targets.get(pid)
+                if old and Path(old["xml_raw"]).resolve() != Path(xml).resolve():
+                    raise ValueError(
+                        f"piece_id {pid} maps to conflicting XML paths")
+                targets[pid] = {"piece_id": pid, "xml_raw": xml}
+        label_records.append({
+            "path": str(label_path),
+            "sha256": sha,
+            "rows": rows,
+            "train_label_rows": train_label_rows,
+            "train_piece_ids": len(train_piece_ids),
+            "manifests": [str(path) for path in source_manifests],
+            "quarantine_unmapped": bool(
+                src.get("quarantine_unmapped", False)),
+        })
+    if not label_records:
+        raise RuntimeError("no active PDMX label sources")
+    return (
+        manifest_records,
+        label_records,
+        [targets[pid] for pid in sorted(targets)],
+    )
+
+
+def _fingerprint_records(paths: list[Path]) -> list[dict]:
+    records = []
+    for path in paths:
+        sha, rows = _file_fingerprint(path)
+        records.append({
+            "path": str(path.resolve()), "sha256": sha, "rows": rows})
+    return records
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--manifest", action="append", default=[],
@@ -245,11 +365,21 @@ def main(argv=None):
     if args.workers <= 0:
         raise ValueError("--workers must be positive")
 
-    manifest_records, targets = _read_manifests(paths)
+    if args.manifest:
+        manifest_records, targets = _read_manifests(paths)
+        label_records = []
+        filter_records = []
+        scope = "all_manifest_train"
+    else:
+        manifest_records, label_records, targets = \
+            _read_active_training_scope(SOURCES, paths)
+        filter_records = _fingerprint_records(active_pdmx_filter_paths())
+        scope = "active_label_referenced_train"
     refs = sorted(Path(args.asap_root).glob("**/xml_score.musicxml"))
     if not refs:
         raise FileNotFoundError(f"no ASAP reference scores under {args.asap_root}")
-    print(f"certificate scope: manifests={len(paths)} "
+    print(f"certificate scope: {scope} manifests={len(paths)} "
+          f"labels={len(label_records)} "
           f"unique_train={len(targets)} refs={len(refs)}", flush=True)
 
     ref_grams, ref_fail = [], []
@@ -271,7 +401,10 @@ def main(argv=None):
             "reason": "reference_parse_failure",
             "method": "Exact Jaccard on 8-gram (pitch,duration), inverted reference index",
             "threshold": args.threshold,
+            "scope": scope,
             "manifests": manifest_records,
+            "label_sources": label_records,
+            "filter_files": filter_records,
             "target_unique_train": len(targets),
             "target_signatures": 0,
             "target_parse_failed": 0,
@@ -344,7 +477,10 @@ def main(argv=None):
                    if passed else "parse_failure_or_leak_detected"),
         "method": "Exact Jaccard on 8-gram (pitch,duration), inverted reference index",
         "threshold": args.threshold,
+        "scope": scope,
         "manifests": manifest_records,
+        "label_sources": label_records,
+        "filter_files": filter_records,
         "target_unique_train": len(targets),
         "target_signatures": target_ok,
         "target_parse_failed": len(target_fail),
