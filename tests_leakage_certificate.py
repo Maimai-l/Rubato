@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from scripts.build_dataset import (
     _file_fingerprint, verify_pdmx_leakage_certificate)
-from scripts.certify_pdmx_leakage import _variable_division_signature_ir
+from scripts.certify_pdmx_leakage import _signature_only_ir
 
 
 def write_cert(path: Path, manifests: list[Path], status="pass"):
@@ -86,7 +86,7 @@ def test_variable_divisions_use_normalized_quarter_map_only_for_signature():
             # one quarter note in normalized musical time.
             return {0: 0.0, 1: 1.0, 4: 2.0}[t]
 
-    ir = _variable_division_signature_ir(FakePart())
+    ir = _signature_only_ir(FakePart())
     assert len(ir.notes) == 2, "touching re-articulations must not merge"
     assert [str(note.dur) for note in ir.notes] == ["1/4", "1/4"]
 

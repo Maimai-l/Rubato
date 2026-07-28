@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+import tempfile
 import time
+import zipfile
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,13 +35,14 @@ def _quarter_fraction(value) -> Fraction:
     return Fraction(str(float(value))).limit_denominator(1_000_000) / 4
 
 
-def _variable_division_signature_ir(part):
-    """Minimal IR for MinHash when MusicXML changes ``divisions`` mid-score.
+def _signature_only_ir(part):
+    """Minimal IR for MinHash when strict training serialization is inapplicable.
 
     Training serialization deliberately rejects changing divisions because its
-    measure/time assumptions are stricter. Leakage detection only consumes
-    pitch and duration, so use Partitura's normalized quarter map and reproduce
-    the adapter's tied-note/strict-overlap merge without weakening training.
+    measure/time assumptions are stricter; it also requires a time signature
+    before the first measure. Leakage detection consumes only pitch/duration,
+    so use Partitura's normalized quarter map and reproduce the adapter's
+    tied-note/strict-overlap merge without weakening any training rule.
     """
     grouped: dict[tuple[int, int], list[list[Fraction]]] = {}
     for note in part.notes_tied:
@@ -63,14 +67,55 @@ def _variable_division_signature_ir(part):
         notes.append(SimpleNamespace(
             pitch=pitch, onset=current[0], dur=current[1] - current[0]))
     if not notes:
-        raise AdapterError("变 divisions 谱没有可用于泄漏签名的音符")
+        raise AdapterError("没有可用于泄漏签名的音符")
     return SimpleNamespace(notes=notes)
+
+
+def _load_without_display_accidentals(path: Path):
+    """Parse a temporary XML copy without ``<accidental>`` display glyphs.
+
+    PDMX includes SMuFL names such as ``slash-flat`` that older Partitura
+    versions do not recognize and raise ``KeyError`` for.  The sounding pitch
+    is carried by ``<pitch>/<alter>``; ``<accidental>`` only controls the
+    engraved glyph.  Removing it in a temporary copy preserves pitch semantics
+    and never mutates the dataset.
+    """
+    path = Path(path)
+    if path.suffix.lower() == ".mxl":
+        with zipfile.ZipFile(path) as archive:
+            candidates = [
+                name for name in archive.namelist()
+                if name.lower().endswith((".xml", ".musicxml"))
+                and not name.replace("\\", "/").startswith("META-INF/")
+            ]
+            if not candidates:
+                raise ValueError("MXL contains no score XML")
+            data = archive.read(candidates[0])
+    else:
+        data = path.read_bytes()
+    cleaned = re.sub(
+        rb"<(?:\w+:)?accidental\b[^>]*>.*?</(?:\w+:)?accidental\s*>",
+        b"", data, flags=re.DOTALL)
+    if cleaned == data:
+        raise ValueError("no display accidental tags available to sanitize")
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                suffix=".musicxml", delete=False) as handle:
+            handle.write(cleaned)
+            tmp_name = handle.name
+        return partitura.load_musicxml(tmp_name)
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
 
 
 def _score_ir(path: Path):
     """Parse MusicXML/MXL using both Partitura entrypoints, then select a part."""
-    first_error = None
-    for loader in (partitura.load_score, partitura.load_musicxml):
+    errors = []
+    for loader in (
+            partitura.load_score, partitura.load_musicxml,
+            _load_without_display_accidentals):
         try:
             score = loader(str(path))
             if hasattr(score, "parts") and score.parts:
@@ -81,14 +126,13 @@ def _score_ir(path: Path):
                 raise ValueError("score has neither parts nor notes")
             try:
                 return part_to_ir(part)
-            except AdapterError as exc:
-                if not str(exc).startswith("变 divisions:"):
-                    raise
-                return _variable_division_signature_ir(part)
+            except AdapterError:
+                return _signature_only_ir(part)
         except Exception as e:
-            first_error = first_error or e
+            errors.append(f"{getattr(loader, '__name__', type(loader).__name__)}:"
+                          f"{type(e).__name__}: {e}")
     raise RuntimeError(
-        f"{type(first_error).__name__}: {first_error}") from first_error
+        " | ".join(errors[:3]))
 
 
 def _read_manifests(paths: list[Path]) -> tuple[list[dict], list[dict]]:
