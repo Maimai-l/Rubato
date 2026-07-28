@@ -244,7 +244,11 @@ def resize_decoder_vocab(model, new_vocab: int, old_vocab: int | None = None) ->
     NeMo 内部 tokenizer —— 只需把词表相关权重换形。此函数通用遍历:
       nn.Embedding(num_embeddings==old_vocab) → 换 new_vocab 行
       nn.Linear(out_features==old_vocab)      → 换 new_vocab 行(输出投影)
-    返回 {replaced_embeddings, replaced_linears, old_vocab}。
+    新 embedding / 输出头独立初始化(untied)，与既有 Rubato checkpoint 架构一致。
+    Canary 原始两层共享同一 Parameter，因此参数增量不能按“逐模块新减旧”相加：
+    旧矩阵在 model.parameters() 只计一次，新矩阵计两次。这里按唯一 Parameter
+    identity 计算被移除/新增量，既允许这次有意解绑，也能严格守恒。
+    返回 {replaced_embeddings, replaced_linears, old_vocab, param_growth}。
     """
     import torch.nn as nn
 
@@ -255,32 +259,66 @@ def resize_decoder_vocab(model, new_vocab: int, old_vocab: int | None = None) ->
             raise RuntimeError("模型内无 nn.Embedding,无法推断旧词表")
         old_vocab = max(embs)
 
-    n_emb = n_lin = 0
-    param_growth = 0
-    for parent in model.modules():
+    replacements = []
+    for parent in list(model.modules()):
         for name, child in parent.named_children():
-            if isinstance(child, nn.Embedding) and child.num_embeddings == old_vocab:
-                new = nn.Embedding(new_vocab, child.embedding_dim,
-                                   padding_idx=child.padding_idx)
-                param_growth += sum(p.numel() for p in new.parameters()) \
-                    - sum(p.numel() for p in child.parameters())
-                setattr(parent, name, new)
-                n_emb += 1
-            elif isinstance(child, nn.Linear) and child.out_features == old_vocab:
-                new = nn.Linear(child.in_features, new_vocab,
-                                bias=child.bias is not None)
-                param_growth += sum(p.numel() for p in new.parameters()) \
-                    - sum(p.numel() for p in child.parameters())
-                setattr(parent, name, new)
-                n_lin += 1
+            if isinstance(child, nn.Embedding) \
+                    and child.num_embeddings == old_vocab:
+                replacements.append((parent, name, child, "embedding"))
+            elif isinstance(child, nn.Linear) \
+                    and child.out_features == old_vocab:
+                replacements.append((parent, name, child, "linear"))
+    n_emb = sum(kind == "embedding" for *_rest, kind in replacements)
+    n_lin = sum(kind == "linear" for *_rest, kind in replacements)
     if n_emb == 0:
         raise RuntimeError(f"未找到 num_embeddings=={old_vocab} 的 Embedding —— "
                            "old_vocab 传错或模型结构不符")
     if n_lin == 0:
         raise RuntimeError(f"未找到 out_features=={old_vocab} 的输出 Linear —— "
                            "输出头可能未替换；拒绝只换 embedding 后开训")
+
+    total_before = sum(p.numel() for p in model.parameters())
+    old_params = {id(p): p for p in model.parameters()}
+    target_modules = {id(child) for _, _, child, _ in replacements}
+    target_param_ids = {
+        id(p) for _, _, child, _ in replacements
+        for p in child.parameters(recurse=False)}
+    non_target_param_ids = {
+        id(p) for module in model.modules()
+        if id(module) not in target_modules
+        for p in module.parameters(recurse=False)}
+    removed_ids = target_param_ids - non_target_param_ids
+    removed_numel = sum(old_params[pid].numel() for pid in removed_ids)
+    old_weight_refs = {}
+    new_params = {}
+    for parent, name, child, kind in replacements:
+        old_weight_refs[id(child.weight)] = \
+            old_weight_refs.get(id(child.weight), 0) + 1
+        if kind == "embedding":
+            new = nn.Embedding(new_vocab, child.embedding_dim,
+                               padding_idx=child.padding_idx)
+        else:
+            new = nn.Linear(child.in_features, new_vocab,
+                            bias=child.bias is not None)
+        new = new.to(device=child.weight.device, dtype=child.weight.dtype)
+        for param in new.parameters(recurse=False):
+            new_params[id(param)] = param
+        setattr(parent, name, new)
+
+    added_numel = sum(param.numel() for param in new_params.values())
+    param_growth = added_numel - removed_numel
+    total_after = sum(p.numel() for p in model.parameters())
+    if total_after != total_before + param_growth:
+        raise RuntimeError(
+            "词表换形内部参数守恒失败:"
+            f"before={total_before} removed={removed_numel} "
+            f"added={added_numel} actual_after={total_after}")
+    untied_groups = sum(1 for count in old_weight_refs.values() if count > 1)
     return {"replaced_embeddings": n_emb, "replaced_linears": n_lin,
             "old_vocab": old_vocab, "new_vocab": new_vocab,
+            "shared_weight_groups_untied": untied_groups,
+            "removed_unique_params": removed_numel,
+            "added_unique_params": added_numel,
             "param_growth": param_growth}
 
 

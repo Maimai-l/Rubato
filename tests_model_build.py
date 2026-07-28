@@ -104,6 +104,21 @@ after = sum(p.numel() for p in vm.parameters())
 check("embedding_and_head_replaced",
       swap["replaced_embeddings"] == 1 and swap["replaced_linears"] == 1, swap)
 check("param_growth_exact", after == before + swap["param_growth"], (before, after, swap))
+
+# Canary 原始 token embedding 与 log-softmax tied；Rubato 的两层独立初始化，
+# 并且既有 checkpoint 已训练成两份不同权重。解绑必须显式且精确计入参数增量。
+tied_vm = _VocabModel()
+tied_vm.head.weight = tied_vm.emb.weight
+tied_before = sum(p.numel() for p in tied_vm.parameters())
+tied_swap = resize_decoder_vocab(tied_vm, 13, old_vocab=10)
+tied_after = sum(p.numel() for p in tied_vm.parameters())
+check("tied_embedding_head_intentionally_untied",
+      tied_vm.head.weight is not tied_vm.emb.weight
+      and tied_swap["shared_weight_groups_untied"] == 1,
+      tied_swap)
+check("tied_param_growth_exact",
+      tied_after == tied_before + tied_swap["param_growth"],
+      (tied_before, tied_after, tied_swap))
 try:
     resize_decoder_vocab(_VocabModel(with_head=False), 13, old_vocab=10)
     missing_head_rejected = False
