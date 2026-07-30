@@ -44,14 +44,30 @@ unobservable.
 - PyTorch 2.11 accepted the configured allocator string in a GPU-hidden parser
   check.
 
-## Rollout
+## Rollout result
 
 PID 33424 was started from the step-29600 complete snapshot before this patch
-was imported, solely to restore useful training throughput while the fix was
-implemented. Let it reach the next complete 200-step snapshot, then perform one
-short restart with the same command. The replacement process must show both:
+was imported, solely to restore useful throughput while the fix was implemented.
+It recovered to `tc avg=8.4s`, reached step 29800, and atomically replaced
+`last.pt` at 21:08:37.
 
-1. `CUDA allocator 预配置: ... expandable_segments:True`
-2. training config echo with `allocator=...` followed by `CUDA_MEM` telemetry
+The patched process (PID 30344) then resumed the exact step-29800 snapshot with
+the same training arguments. Both wiring gates appeared:
 
-Only the replacement process validates the long-running fix.
+1. `CUDA allocator 预配置: PYTORCH_ALLOC_CONF=expandable_segments:True`
+2. config echo `allocator=expandable_segments:True mem_check=200step/1024MiB`
+
+Its initial in-process baseline was:
+
+```text
+CUDA_MEM reason=train_start action=observe alloc=2245MiB reserved=2246MiB
+cached=1MiB inactive_split=1MiB driver_free=12763MiB
+driver_untracked=1294MiB peak_reserved=2246MiB released=0MiB
+retries=0 ooms=0 backend=native
+```
+
+The first completed 50-step window was step 29850 at `tc=7.3s/avg7.6s` and
+`td=1.2s/avg1.2s`. This verifies the restart, exact resume, allocator wiring,
+telemetry and immediate throughput. Long-horizon causal confirmation still
+comes from subsequent `CUDA_MEM` lines: the patch must not be described as
+proving fragmentation unless those counters support it.
