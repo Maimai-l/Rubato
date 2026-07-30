@@ -12,6 +12,8 @@ S11 训练主循环装配。规格见 SPEC.md R-S11.1~11.7 + 验收 A-S11.1。
   train()           — 装 optimizer(R-S11.4)、schedule、止损回调,启动
 """
 from __future__ import annotations
+import gc
+import os
 from pathlib import Path
 
 from rubato.model.sampling import dialect_sampler, tiling_offset, DIALECT_MIX
@@ -188,6 +190,117 @@ def finalize_step_metrics(state: dict) -> dict:
         "batch_size": n_seq,
         "micro_batches": int(state["micro_batches"]),
     }
+
+
+# ---------------------------------------------------------------- CUDA memory health
+
+_MIB = 1024 ** 2
+
+
+def cuda_memory_snapshot(torch_module=None) -> dict | None:
+    """Return allocator + driver counters without synchronizing the device."""
+    if torch_module is None:
+        import torch as torch_module
+    cuda = torch_module.cuda
+    if not cuda.is_available():
+        return None
+    stats = cuda.memory_stats()
+    try:
+        free_b, total_b = cuda.mem_get_info()
+    except (RuntimeError, AttributeError):
+        free_b, total_b = None, None
+    try:
+        backend = cuda.get_allocator_backend()
+    except (RuntimeError, AttributeError):
+        backend = "unknown"
+    return {
+        "allocated": int(cuda.memory_allocated()),
+        "reserved": int(cuda.memory_reserved()),
+        "peak_allocated": int(cuda.max_memory_allocated()),
+        "peak_reserved": int(cuda.max_memory_reserved()),
+        "inactive_split": int(
+            stats.get("inactive_split_bytes.all.current", 0)),
+        "alloc_retries": int(stats.get("num_alloc_retries", 0)),
+        "ooms": int(stats.get("num_ooms", 0)),
+        "driver_free": int(free_b) if free_b is not None else None,
+        "driver_total": int(total_b) if total_b is not None else None,
+        # Global driver usage minus this process's PyTorch reservation.  It can
+        # include cuDNN/third-party allocations and other GPU processes, so do
+        # not mislabel it as a Python leak.
+        "driver_untracked": (
+            max(int(total_b) - int(free_b) - int(cuda.memory_reserved()), 0)
+            if free_b is not None and total_b is not None else None),
+        "backend": str(backend),
+    }
+
+
+def maintain_cuda_memory(reason: str, *, force: bool = False,
+                         min_free_mb: float = 1024,
+                         min_reclaimable_mb: float = 512,
+                         torch_module=None, collect_cycles=None) -> dict | None:
+    """Observe memory and release unused cache only at a caller-safe boundary.
+
+    ``empty_cache`` cannot release live tensors and is therefore gated by both
+    low driver headroom and allocator cache.  Evaluation may force a release
+    because its temporary allocation shapes differ substantially from training.
+    The caller must first drop its batch/loss references.
+    """
+    if torch_module is None:
+        import torch as torch_module
+    before = cuda_memory_snapshot(torch_module)
+    if before is None:
+        return None
+    free_b = before["driver_free"]
+    low_free = free_b is not None and free_b < float(min_free_mb) * _MIB
+    # A full Python GC walk is expensive with the 700k+ sample object graph.
+    # Only scan when pressure is real or when eval has just created a distinct
+    # set of temporary objects.
+    if force or low_free:
+        (gc.collect if collect_cycles is None else collect_cycles)()
+        after_gc = cuda_memory_snapshot(torch_module)
+    else:
+        after_gc = before
+    cached_b = max(after_gc["reserved"] - after_gc["allocated"], 0)
+    enough_cache = cached_b >= float(min_reclaimable_mb) * _MIB
+    release = bool((force or low_free) and enough_cache)
+    if release:
+        torch_module.cuda.empty_cache()
+    after = cuda_memory_snapshot(torch_module)
+    try:
+        torch_module.cuda.reset_peak_memory_stats()
+    except (RuntimeError, AttributeError):
+        pass
+    return {
+        "reason": str(reason),
+        "action": "empty_cache" if release else "observe",
+        "low_free": low_free,
+        "cached_before_release": cached_b,
+        "before": before,
+        "after_gc": after_gc,
+        "after": after,
+    }
+
+
+def format_cuda_memory_event(event: dict | None) -> str | None:
+    """Compact, grep-friendly production log line for memory maintenance."""
+    if event is None:
+        return None
+    before, after = event["after_gc"], event["after"]
+
+    def mb(value):
+        return "?" if value is None else f"{value / _MIB:.0f}"
+
+    released = max(before["reserved"] - after["reserved"], 0)
+    return (
+        f"CUDA_MEM reason={event['reason']} action={event['action']} "
+        f"alloc={mb(after['allocated'])}MiB reserved={mb(after['reserved'])}MiB "
+        f"cached={mb(max(after['reserved'] - after['allocated'], 0))}MiB "
+        f"inactive_split={mb(after['inactive_split'])}MiB "
+        f"driver_free={mb(after['driver_free'])}MiB "
+        f"driver_untracked={mb(after['driver_untracked'])}MiB "
+        f"peak_reserved={mb(before['peak_reserved'])}MiB "
+        f"released={mb(released)}MiB retries={after['alloc_retries']} "
+        f"ooms={after['ooms']} backend={after['backend']}")
 
 
 # ---------------------------------------------------------------- 动态 bucketing(R-S11.4)
@@ -1102,6 +1215,19 @@ def train(model, datamodule, cfg: dict, tokenizer,
     max_steps = cfg.get("max_steps", 100000)
     log_every = int(cfg.get("log_every", 50))
     save_every = int(cfg.get("save_every_steps", 200))
+    memory_cfg = dict(cfg.get("cuda_memory") or {})
+    memory_check_every = int(memory_cfg.get("check_every_steps", save_every))
+    memory_min_free_mb = float(memory_cfg.get("min_free_mb", 1024))
+    memory_min_reclaimable_mb = float(
+        memory_cfg.get("min_reclaimable_mb", 512))
+    memory_cleanup_after_eval = bool(
+        memory_cfg.get("cleanup_after_eval", True))
+    if (memory_check_every <= 0 or memory_min_free_mb <= 0
+            or memory_min_reclaimable_mb <= 0):
+        raise ValueError(
+            "CUDA memory 配置非法:"
+            f"check_every={memory_check_every} min_free={memory_min_free_mb} "
+            f"min_reclaimable={memory_min_reclaimable_mb}")
     selection_metric = str(cfg.get("selection_metric", "text_ned_proxy"))
     if selection_metric != "text_ned_proxy":
         raise ValueError(
@@ -1142,7 +1268,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
           + ("mix=D2纸面(.35/.15/.20/.30)" if not cfg.get("dialect_mix") else
              "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items())))
           + f" prefetch={'proc:' + str(int(cfg.get('prefetch_batches', 0))) if int(cfg.get('prefetch_batches', 0)) > 0 else '关'}"
-          + f" aug_acoustic={'开' if getattr(getattr(datamodule, 'train_ds', None), 'acoustic_aug', False) else '关'}",
+          + f" aug_acoustic={'开' if getattr(getattr(datamodule, 'train_ds', None), 'acoustic_aug', False) else '关'}"
+          + f" allocator={os.environ.get('PYTORCH_ALLOC_CONF', '<unset>')}"
+          + f" mem_check={memory_check_every}step/{memory_min_free_mb:g}MiB",
           flush=True)
     # 指令随日志走(执行端只看日志不看文档的现实约束):贴回要求印在产物里
     print("【执行端贴回】① 上面的配置回显行(应含 prefetch=关) ② 续训:恢复… 行 "
@@ -1206,7 +1334,14 @@ def train(model, datamodule, cfg: dict, tokenizer,
     ckpt_ring = existing_steps[-ckpt_keep:]
 
     model.train()
-    opt.zero_grad()
+    opt.zero_grad(set_to_none=True)
+    _memory_event = maintain_cuda_memory(
+        "train_start", min_free_mb=memory_min_free_mb,
+        min_reclaimable_mb=memory_min_reclaimable_mb,
+        torch_module=torch)
+    _memory_line = format_cuda_memory_event(_memory_event)
+    if _memory_line:
+        print(_memory_line, flush=True)
     accum_sec = 0.0
     step_stats = new_step_metrics()
     step_data_sec = 0.0
@@ -1235,6 +1370,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
             accumulate_step_metrics(step_stats, parts)
             if accum_sec < accum_target_sec:
                 step_comp_sec += _time.perf_counter() - _micro_t0
+                # Do not keep the completed graph/batch alive while constructing
+                # the next variable-shaped micro-batch.
+                del parts, batch
                 continue
             normalize_accumulated_gradients(model.parameters(), step_stats["n_seq"])
             # 裁剪前范数必须可见:论文序列损失 ΣCE×T^{-½} 的量纲 ≈65(常规逐 token 平均 ≈3),
@@ -1247,12 +1385,15 @@ def train(model, datamodule, cfg: dict, tokenizer,
             gn = clip_gradients(model.parameters(), float(cfg.get("clip_norm", 1.0)))
             opt.step()
             sched.step()
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=True)
             step_comp_sec += _time.perf_counter() - _micro_t0
             step += 1
 
             # 训练可观测性:没有这几行,执行端只能对着黑屏猜收敛(冒烟判据也取自这窗口)
             step_m = finalize_step_metrics(step_stats)
+            # Everything below is a safe boundary: optimizer/metrics no longer
+            # need the final micro-batch or its loss graph.
+            del parts, batch
             _pv = step_m.get("pitch_loss")
             for buf, v in ((recent, step_m["loss"]),
                            (recent_sem, step_m["semantic_loss"]),
@@ -1316,9 +1457,17 @@ def train(model, datamodule, cfg: dict, tokenizer,
                                        eval_max=int(cfg.get("eval_max", 128)),
                                        time_budget_s=float(cfg.get("eval_time_budget_s", 1200)),
                                        autolog=cfg.get("eval_autolog"), step=step,
-                                       probe_utts=getattr(datamodule, "probe_utts", None),
-                                       decode_legs=_full)
+                                        probe_utts=getattr(datamodule, "probe_utts", None),
+                                        decode_legs=_full)
                 report["eval_history"].append({"step": step, **m})
+                _memory_event = maintain_cuda_memory(
+                    f"eval_step{step}", force=memory_cleanup_after_eval,
+                    min_free_mb=memory_min_free_mb,
+                    min_reclaimable_mb=memory_min_reclaimable_mb,
+                    torch_module=torch)
+                _memory_line = format_cuda_memory_event(_memory_event)
+                if _memory_line:
+                    print(_memory_line, flush=True)
                 if m.get("probe_only"):
                     model.train()
                     if step >= max_steps:              # continue 会跳过循环尾检查,此处补上
@@ -1390,6 +1539,14 @@ def train(model, datamodule, cfg: dict, tokenizer,
                                    f"{action['reason']}")
 
                 model.train()
+            elif step % memory_check_every == 0:
+                _memory_event = maintain_cuda_memory(
+                    f"step{step}", min_free_mb=memory_min_free_mb,
+                    min_reclaimable_mb=memory_min_reclaimable_mb,
+                    torch_module=torch)
+                _memory_line = format_cuda_memory_event(_memory_event)
+                if _memory_line:
+                    print(_memory_line, flush=True)
 
             if step >= max_steps:
                 return _finish("max_steps_reached")

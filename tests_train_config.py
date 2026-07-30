@@ -9,7 +9,7 @@ import yaml
 
 from scripts.build_dataset import (
     DEFAULT_TRAIN_CONFIG, DEFAULT_VOCAB_SPEC,
-    apply_train_config_defaults, load_train_config)
+    apply_train_config_defaults, configure_cuda_allocator, load_train_config)
 
 
 PASS = 0
@@ -54,6 +54,10 @@ check("eval_from_yaml", (a.eval_every, a.eval_max) == (1000, 48),
       (a.eval_every, a.eval_max))
 check("hot_encoder_lr", a.lr_enc == 1e-4, a.lr_enc)
 check("decoder_lr", a.lr_dec == 5e-4, a.lr_dec)
+check("memory_policy_loaded",
+      cfg["memory"]["allocator_conf"] == "expandable_segments:True"
+      and cfg["memory"]["check_every_steps"] == 200,
+      cfg["memory"])
 
 print("[2] from-scratch 不得误用热启动 encoder 学习率")
 b = apply_train_config_defaults(args(from_scratch=True), cfg)
@@ -107,5 +111,39 @@ with tempfile.TemporaryDirectory() as td:
             check(name, needle in str(e), str(e))
         else:
             check(name, False, "未抛错")
+
+print("[6] CUDA allocator 必须早于 torch 初始化，且显式环境优先")
+env = {}
+effective = configure_cuda_allocator(cfg, environ=env, loaded_modules={})
+check("allocator_installed_early",
+      effective == "expandable_segments:True"
+      and env["PYTORCH_ALLOC_CONF"] == effective, env)
+env2 = {"PYTORCH_ALLOC_CONF": "backend:cudaMallocAsync"}
+check("operator_env_wins",
+      configure_cuda_allocator(cfg, environ=env2, loaded_modules={"torch": object()})
+      == "backend:cudaMallocAsync")
+legacy_env = {"PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512"}
+check("legacy_operator_env_wins",
+      configure_cuda_allocator(
+          cfg, environ=legacy_env, loaded_modules={"torch": object()})
+      == "max_split_size_mb:512"
+      and legacy_env["PYTORCH_ALLOC_CONF"] == "max_split_size_mb:512",
+      legacy_env)
+try:
+    configure_cuda_allocator(
+        cfg,
+        environ={"PYTORCH_ALLOC_CONF": "expandable_segments:True",
+                 "PYTORCH_CUDA_ALLOC_CONF": "backend:cudaMallocAsync"},
+        loaded_modules={})
+except RuntimeError as e:
+    check("allocator_alias_conflict_rejected", "冲突" in str(e), str(e))
+else:
+    check("allocator_alias_conflict_rejected", False, "未抛错")
+try:
+    configure_cuda_allocator(cfg, environ={}, loaded_modules={"torch": object()})
+except RuntimeError as e:
+    check("late_config_rejected", "import torch" in str(e), str(e))
+else:
+    check("late_config_rejected", False, "未抛错")
 
 print(f"\n全部通过: {PASS} 项")

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -30,6 +31,43 @@ ROOT = Path(r"D:\vscode_projects\ee_download")
 WORK = ROOT / "work"
 DEFAULT_TRAIN_CONFIG = REPO_ROOT / "configs" / "train.yaml"
 DEFAULT_VOCAB_SPEC = REPO_ROOT / "configs" / "vocab_spec.json"
+
+
+def configure_cuda_allocator(train_spec: dict, environ=None,
+                             loaded_modules=None) -> str:
+    """Install the production CUDA allocator policy before importing torch.
+
+    Variable-duration batches repeatedly request nearby-but-different allocation
+    sizes.  PyTorch's expandable segments are designed for that pattern and
+    avoid accumulating unusable slivers.  An operator-provided environment value
+    wins, but a late configuration is rejected instead of being logged as if it
+    had taken effect.
+    """
+    environ = os.environ if environ is None else environ
+    loaded_modules = sys.modules if loaded_modules is None else loaded_modules
+    requested = str((train_spec.get("memory") or {}).get(
+        "allocator_conf", "expandable_segments:True")).strip()
+    if not requested:
+        raise ValueError("memory.allocator_conf 不能为空")
+    existing = environ.get("PYTORCH_ALLOC_CONF")
+    legacy = environ.get("PYTORCH_CUDA_ALLOC_CONF")
+    if existing and legacy and str(existing) != str(legacy):
+        raise RuntimeError(
+            "PYTORCH_ALLOC_CONF 与旧别名 PYTORCH_CUDA_ALLOC_CONF 冲突；"
+            "拒绝猜测 allocator 策略")
+    if existing:
+        return str(existing)
+    if legacy:
+        # PyTorch still accepts the old alias. Mirror it into the canonical
+        # variable so the config echo states the allocator that actually wins.
+        environ["PYTORCH_ALLOC_CONF"] = str(legacy)
+        return str(legacy)
+    if "torch" in loaded_modules:
+        raise RuntimeError(
+            "PYTORCH_ALLOC_CONF 必须在 import torch/CUDA 初始化前设置；"
+            "当前入口配置过晚，拒绝静默失效")
+    environ["PYTORCH_ALLOC_CONF"] = requested
+    return requested
 
 # labels.jsonl 来源(与 s5/s5_vn/s7/gen_amt 的输出对齐)。
 #   pdmx_perf(s5_vn_render):表现性音频 + TAST,行内带 audio_path。← 有它就优先,含 TAST。
@@ -660,14 +698,14 @@ def load_train_config(path: str | Path) -> dict:
         raise ValueError(f"训练配置根节点必须是 mapping:{path}")
     allowed_top = {
         "tokenizer", "data", "optim", "max_steps", "max_epochs",
-        "precision", "loss", "specaugment", "eval", "ckpt", "seed",
+        "precision", "loss", "specaugment", "eval", "ckpt", "memory", "seed",
     }
     unknown_top = set(cfg) - allowed_top
     if unknown_top:
         raise ValueError(
             f"训练配置含未消费的顶层键:{sorted(unknown_top)}；"
             "拒绝把拼错/写了未调用的配置静默忽略")
-    for section in ("tokenizer", "data", "optim", "loss", "eval", "ckpt"):
+    for section in ("tokenizer", "data", "optim", "loss", "eval", "ckpt", "memory"):
         if not isinstance(cfg.get(section), dict):
             raise ValueError(f"训练配置缺 mapping 节:{section}")
     allowed_sections = {
@@ -683,6 +721,10 @@ def load_train_config(path: str | Path) -> dict:
         "eval": {"every_steps", "decode_every_steps",
                  "max_samples_per_source"},
         "ckpt": {"keep", "save_every_steps", "select_by"},
+        "memory": {
+            "allocator_conf", "check_every_steps", "min_free_mb",
+            "min_reclaimable_mb", "cleanup_after_eval",
+        },
     }
     for section, allowed in allowed_sections.items():
         unknown = set(cfg[section]) - allowed
@@ -724,6 +766,10 @@ def load_train_config(path: str | Path) -> dict:
             cfg["eval"].get("max_samples_per_source"),
         "ckpt.keep": cfg["ckpt"].get("keep"),
         "ckpt.save_every_steps": cfg["ckpt"].get("save_every_steps"),
+        "memory.check_every_steps": cfg["memory"].get("check_every_steps"),
+        "memory.min_free_mb": cfg["memory"].get("min_free_mb"),
+        "memory.min_reclaimable_mb":
+            cfg["memory"].get("min_reclaimable_mb"),
     }
     bad = [f"{k}={v}" for k, v in positives.items()
            if v is None or float(v) <= 0]
@@ -732,6 +778,11 @@ def load_train_config(path: str | Path) -> dict:
     if cfg.get("specaugment") not in (False, None):
         raise ValueError(
             "specaugment=true 尚无生产实现；拒绝把写了但未调用的配置当作已生效")
+    allocator_conf = str(cfg["memory"].get("allocator_conf", "")).strip()
+    if not allocator_conf:
+        raise ValueError("memory.allocator_conf 不能为空")
+    if not isinstance(cfg["memory"].get("cleanup_after_eval"), bool):
+        raise ValueError("memory.cleanup_after_eval 必须是 bool")
     return cfg
 
 
@@ -861,6 +912,8 @@ def main():
                          "精确 Python 栈 + 肇事索引。配 --smoke 用,慢但一锤定音")
     args = ap.parse_args()
     train_spec = load_train_config(args.train_config)
+    allocator_conf = configure_cuda_allocator(train_spec)
+    print(f"CUDA allocator 预配置: PYTORCH_ALLOC_CONF={allocator_conf}", flush=True)
     apply_train_config_defaults(args, train_spec)
     validate_cli_args(args)
 
@@ -1228,6 +1281,7 @@ def main():
         dm.probe_utts.append(_good)
     optim_cfg = train_spec["optim"]
     loss_spec = train_spec["loss"]
+    memory_spec = train_spec["memory"]
     ts_smooth = loss_spec.get("ts_smooth") or {}
     ckpt_cfg = train_spec["ckpt"]
     cfg = {
@@ -1252,6 +1306,7 @@ def main():
         "pitch_loss_weight": args.pitch_loss_weight,
         "dialect_mix": dialect_mix,                # None=D2 纸面;设了 --amt-mix 则为换算后的四元组(回显自证)
         "prefetch_batches": args.prefetch,         # 预取深度;0=串行直迭代(对照)
+        "cuda_memory": dict(memory_spec),
         "allow_legacy_resume_from_epoch_start":
             args.allow_legacy_resume_from_epoch_start,
         # --from-scratch 若仍自动读 last.pt，就会把随机初始化和旧 optimizer 全部覆盖。
