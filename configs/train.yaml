@@ -22,12 +22,12 @@ max_epochs: 1000
 precision: bf16
 # Windows/WDDM 16GB 卡的生产显存策略。变长音频 batch 会产生相邻但不同大小的
 # allocation；expandable segments 用可增长段降低碎片。Windows/WDDM 实测 cache 在
-# 约 100 step 内可把 16GB 显存推到分页区(tc 8s→137s)，因此每 50 optimizer step
+# 约 50 step 内可把 16GB 显存推到分页区(tc 8s→137s)，因此每 25 optimizer step
 # 在无活跃计算图的安全边界记录水位，仅在低余量且确有可回收 cache 时释放。
 memory:
   allocator_conf: expandable_segments:True
-  check_every_steps: 50
-  min_free_mb: 2048
+  check_every_steps: 25
+  min_free_mb: 4096
   min_reclaimable_mb: 512
   cleanup_after_eval: true
 loss:

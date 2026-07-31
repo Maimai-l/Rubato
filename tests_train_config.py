@@ -61,8 +61,8 @@ check("hot_encoder_lr", a.lr_enc == 1e-4, a.lr_enc)
 check("decoder_lr", a.lr_dec == 5e-4, a.lr_dec)
 check("memory_policy_loaded",
       cfg["memory"]["allocator_conf"] == "expandable_segments:True"
-      and cfg["memory"]["check_every_steps"] == 50
-      and cfg["memory"]["min_free_mb"] == 2048,
+      and cfg["memory"]["check_every_steps"] == 25
+      and cfg["memory"]["min_free_mb"] == 4096,
       cfg["memory"])
 
 print("[2] from-scratch 不得误用热启动 encoder 学习率")
