@@ -161,7 +161,13 @@ Artifacts (outside Git):
 2. A short run ending between regular 200-step save boundaries returned
    without saving its final state.  It now atomically saves before the
    `stop_after_step_reached` return.
-3. The pre-existing production process spent more than 34 minutes in active
-   GPU compute on the first optimizer step after 35500, versus a 7.6-second
-   recent average.  The gate was deliberately stopped at 35500 so that this
-   separate pathological-batch defect could not contaminate either arm.
+3. The pre-existing long-lived process spent more than 34 minutes without a
+   new log after step 35500, while CPU and GPU remained active.  An isolated
+   exact resume from the control step-35500 snapshot disproved the initial
+   "deterministic pathological batch" hypothesis: step 35501 completed
+   normally with 45 micro-batches, 8.731 seconds summed compute time, and
+   per-micro times of 0.133–0.919 seconds.  No utterance should be quarantined
+   from this evidence.  The event was a transient process/runtime slowdown,
+   not a reproducible data defect.  Optional tracing is now available with
+   `RUBATO_TRACE_MICROBATCH=1`; it logs each micro-batch identity and tensor
+   lengths before forward, then its elapsed time after backward.

@@ -1529,6 +1529,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     step_data_sec = 0.0
     step_comp_sec = 0.0
     tstat = {"data": 0.0, "comp": 0.0}
+    trace_micro = os.environ.get("RUBATO_TRACE_MICROBATCH", "").strip() == "1"
     import time as _time
     for epoch in range(start_epoch, cfg.get("max_epochs", 1000)):
         epoch_cursor = resume_batch_cursor if epoch == start_epoch else 0
@@ -1539,6 +1540,18 @@ def train(model, datamodule, cfg: dict, tokenizer,
             next_batch_cursor = batch_idx + 1
             step_data_sec += float(tstat.get("last_data", 0.0))
             _micro_t0 = _time.perf_counter()
+            if trace_micro:
+                _audio_s = [
+                    round(float(x) / 16000.0, 3)
+                    for x in batch["audio_lens"].tolist()]
+                print(
+                    f"MICRO_BEGIN step={step + 1} batch_idx={batch_idx} "
+                    f"accum_before={accum_sec:.3f}s "
+                    f"utts={batch.get('utt_ids')} "
+                    f"dialects={batch.get('dialects')} "
+                    f"audio_s={_audio_s} "
+                    f"tokens={batch['input_lens'].tolist()}",
+                    flush=True)
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,
                                             ts_token_ids=ts_token_ids, loss_cfg=loss_cfg,
@@ -1550,6 +1563,13 @@ def train(model, datamodule, cfg: dict, tokenizer,
             (parts["loss"] * batch_nseq).backward()
             accum_sec += batch_sec
             accumulate_step_metrics(step_stats, parts)
+            if trace_micro:
+                print(
+                    f"MICRO_END step={step + 1} batch_idx={batch_idx} "
+                    f"elapsed={_time.perf_counter() - _micro_t0:.3f}s "
+                    f"batch_audio={float(batch_sec):.3f}s "
+                    f"accum_after={accum_sec:.3f}s",
+                    flush=True)
             if accum_sec < accum_target_sec:
                 step_comp_sec += _time.perf_counter() - _micro_t0
                 # Do not keep the completed graph/batch alive while constructing

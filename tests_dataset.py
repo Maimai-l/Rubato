@@ -120,6 +120,7 @@ check("production_builder_called",
 print("[6] collate:padding + batch 契约键")
 def mk_item(L, S):
     return {"audio": np.ones(S, dtype="float32"),
+            "utt_id": f"u{L}",
             "input_ids": list(range(1, L + 1)), "labels": list(range(2, L + 2)),
             "token_types": [0] * L, "loss_mask": [True] * L, "ts_bins": [0] * L}
 batch = collate_batch([mk_item(5, 100), mk_item(8, 160), mk_item(3, 80)])
@@ -131,6 +132,7 @@ check("batch_B", batch["input_ids"].shape[0] == 3)
 check("batch_Lmax", batch["input_ids"].shape[1] == 8, batch["input_ids"].shape)
 check("audio_Smax", batch["audio"].shape[1] == 160)
 check("input_lens", batch["input_lens"].tolist() == [5, 8, 3])
+check("utt_ids_preserved", batch["utt_ids"] == ["u5", "u8", "u3"])
 # padding 位 loss_mask=False
 check("pad_masked", not batch["loss_mask"][2, 3:].any())
 check("input_labels_same_shape", batch["input_ids"].shape == batch["labels"].shape)

@@ -210,6 +210,9 @@ def collate_batch(items: list[dict], pad_id: int = 0) -> dict:
            "input_ids": input_ids, "input_lens": input_lens,
            "labels": labels, "token_types": token_types,
            "loss_mask": loss_mask, "ts_bins": ts_bins,
+           # Keep identities on CPU for optional slow-batch tracing.  Extra
+           # metadata is ignored by the model/loss path.
+           "utt_ids": [it.get("utt_id") for it in items],
            # 逐条 dialect(list,非张量):训练步据此聚合出 A2S/A2S_lite/TAST/AMT 各自曲线
            "dialects": [it.get("dialect") for it in items]}
     if any("acoustic_ref" in it for it in items):
