@@ -1367,7 +1367,15 @@ def train(model, datamodule, cfg: dict, tokenizer,
 
     step = 0
     start_epoch = 0
-    max_steps = cfg.get("max_steps", 100000)
+    max_steps = int(cfg.get("max_steps", 100000))
+    stop_after_step = int(cfg.get("stop_after_step") or max_steps)
+    if stop_after_step <= 0 or stop_after_step > max_steps:
+        raise ValueError(
+            f"stop_after_step 必须在 (0, max_steps] 内:"
+            f"{stop_after_step} vs {max_steps}")
+    stop_tag = ("max_steps_reached"
+                if stop_after_step == max_steps
+                else "stop_after_step_reached")
     log_every = int(cfg.get("log_every", 50))
     save_every = int(cfg.get("save_every_steps", 200))
     memory_cfg = dict(cfg.get("cuda_memory") or {})
@@ -1427,6 +1435,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
           f"accum={float(cfg.get('grad_accum_to_audio_sec', 2000)):.0f}s "
           f"batch_sec={getattr(datamodule, 'max_batch_sec', '?')} "
           f"precision={cfg.get('precision') or 'fp32'} max_steps={max_steps} "
+          f"stop_after={stop_after_step} "
           f"eval_every={eval_every_steps} eval_max={cfg.get('eval_max', 128)} "
           f"eval_decode_every={int(cfg.get('eval_decode_every') or 0) or eval_every_steps} "
           + ("mix=D2纸面(.35/.15/.20/.30)" if not cfg.get("dialect_mix") else
@@ -1469,8 +1478,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                     f"{k}:{len(v)}" for k, v in stopper.metric_history.items())
                 print(f"  训练控制状态已恢复:best={best_eval_metric} "
                       f"metric_histories={{{hist_sizes}}}", flush=True)
-            if step >= max_steps:
-                return _finish("max_steps_reached")
+            if step >= stop_after_step:
+                return _finish(stop_tag)
 
     # 一次性预备:时间戳 id 映射 / 梯度累积额度 / bf16
     ts_token_ids = build_ts_token_ids(tokenizer)
@@ -1650,8 +1659,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                     print(_memory_line, flush=True)
                 if m.get("probe_only"):
                     model.train()
-                    if step >= max_steps:              # continue 会跳过循环尾检查,此处补上
-                        return _finish("max_steps_reached")
+                    if step >= stop_after_step:       # continue 会跳过循环尾检查,此处补上
+                        return _finish(stop_tag)
                     continue               # 仅探针:不进止损器/不评 best.pt(不是坏 eval)
 
                 proxy_eligible = proxy_metric_eligible(m)
@@ -1728,8 +1737,15 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 if _memory_line:
                     print(_memory_line, flush=True)
 
-            if step >= max_steps:
-                return _finish("max_steps_reached")
+            if step >= stop_after_step:
+                # Short A/B gates often end between the production 200-step
+                # save boundaries. Returning without a final snapshot makes
+                # the trained arm impossible to probe and silently leaves an
+                # older checkpoint behind.
+                if step % save_every != 0:
+                    save_snapshot(last_pt, model, opt, sched, step, epoch,
+                                  batch_cursor=next_batch_cursor)
+                return _finish(stop_tag)
         resume_batch_cursor = 0
 
     return _finish("max_epochs_reached")

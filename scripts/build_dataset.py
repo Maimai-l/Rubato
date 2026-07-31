@@ -676,6 +676,12 @@ def validate_cli_args(args) -> None:
         bad.append(f"amt_align_weight={args.amt_align_weight}")
     if args.amt_align_margin < 0:
         bad.append(f"amt_align_margin={args.amt_align_margin}")
+    if args.stop_after_step is not None and args.stop_after_step <= 0:
+        bad.append(f"stop_after_step={args.stop_after_step}")
+    if (args.stop_after_step is not None
+            and args.stop_after_step > args.max_steps):
+        bad.append(
+            f"stop_after_step={args.stop_after_step}>max_steps={args.max_steps}")
     if args.lr_enc is not None and args.lr_enc <= 0:
         bad.append(f"lr_enc={args.lr_enc}")
     if args.lr_dec is not None and args.lr_dec <= 0:
@@ -932,7 +938,9 @@ def main():
     ap.add_argument("--amt-align-margin", type=float, default=None,
                     help="正确音频事件损失优于批内错配事件损失的目标 margin")
     ap.add_argument("--max-steps", type=int, default=None,
-                    help="覆盖训练终止步；短 A/B 实验设为起始 checkpoint step + 实验步数")
+                    help="覆盖 cosine 学习率调度总步数及生产训练上限；短 A/B 不应修改它")
+    ap.add_argument("--stop-after-step", type=int, default=None,
+                    help="仅覆盖本进程停止步，不改变 cosine 学习率调度；用于短 A/B")
     ap.add_argument("--ckpt-dir", default=None,
                     help="覆盖 checkpoint 目录；实验必须使用独立目录，避免覆盖主线")
     ap.add_argument("--augment-acoustic", action="store_true",
@@ -1367,6 +1375,9 @@ def main():
         "warmup_steps": int(optim_cfg.get("warmup_steps", 1500)),
         "min_lr_ratio": float(optim_cfg.get("min_lr_ratio", 0.1)),
         "max_steps": int(args.max_steps),
+        "stop_after_step": (
+            int(args.stop_after_step)
+            if args.stop_after_step is not None else None),
         "max_epochs": int(train_spec.get("max_epochs", 1000)),
         "grad_accum_to_audio_sec": float(
             optim_cfg.get("grad_accum_to_audio_sec", 2000)),

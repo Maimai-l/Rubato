@@ -168,7 +168,9 @@ from types import SimpleNamespace
 _cli = SimpleNamespace(
     max_batch_sec=60, clip_norm=1, eval_max=48, eval_every=1000,
     smoke_steps=800, probe_n=8, abtest_n=48, smoke=0, prefetch=0,
-    eval_decode_every=0, pitch_loss_weight=1, lr_enc=None, lr_dec=None)
+    eval_decode_every=0, pitch_loss_weight=1,
+    amt_aux_weight=0, amt_align_weight=0.25, amt_align_margin=0.1,
+    max_steps=100000, stop_after_step=None, lr_enc=None, lr_dec=None)
 validate_cli_args(_cli)
 check("valid_cli_passes", True)
 try:
@@ -177,5 +179,12 @@ try:
 except ValueError:
     _cli_gate = True
 check("zero_eval_every_rejected", _cli_gate)
+try:
+    validate_cli_args(SimpleNamespace(
+        **{**vars(_cli), "stop_after_step": 100001}))
+    _stop_gate = False
+except ValueError:
+    _stop_gate = True
+check("stop_after_cannot_extend_schedule", _stop_gate)
 
 print(f"\n全部通过: {PASS} 项")

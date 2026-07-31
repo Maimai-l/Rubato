@@ -1,6 +1,7 @@
 # Encoder AMT Auxiliary / Cross-Architecture Distillation Experiment
 
-Status: implementation validated on CPU; production A/B pending.
+Status: 100-step direction gate completed; encoder-head learning passed,
+decoder-transfer gate did not.
 
 ## Question
 
@@ -50,9 +51,18 @@ context.
   --amt-aux-weight 0.10
   --amt-align-weight 0.25
   --amt-align-margin 0.10
+  --stop-after-step 35500
   ```
 
-- First gate: 200 optimizer steps.  This is an engineering/convergence-direction
+  `max_steps` remains the production value (100000) in both arms.  Reusing
+  `max_steps` as a short-run stop would also compress the cosine schedule and
+  silently lower the resumed learning rates, invalidating the comparison.
+
+- First gate: 100 optimizer steps (35400→35500).  The original 200-step plan
+  was shortened after the production arm's first optimizer step after 35500
+  remained in active GPU compute for more than 34 minutes versus a 7.6-second
+  recent average.  Both arms therefore stop before that pathological batch.
+  This is an engineering/convergence-direction
   gate, not a paper-quality result.
 - Full decode is disabled during the short gate; cheap true/silence probes run
   at the end.
@@ -90,3 +100,68 @@ Safety:
 
 Only after stage 1 succeeds should TransKun pseudo-labeling be added for
 otherwise unlabeled real recordings.
+
+## 2026-07-31 result
+
+Both arms resumed the same atomic step-35400 snapshot (`epoch=4`,
+`batch_cursor=39613`) and used the production cosine horizon
+`max_steps=100000`, learning rates, dialect mix, acoustic augmentation, and
+pitch weighting.  Both stopped and atomically saved at step 35500.
+
+| readout (last 50 steps) | A: control | B: AMT aux | B - A |
+|---|---:|---:|---:|
+| total loss | 46.8815 | 46.8828 | +0.0013 |
+| semantic loss | 2.4540 | 2.4531 | -0.0009 |
+| timestamp loss | 2.2123 | 2.2104 | -0.0019 |
+| pitch CE (`pv`) | 2.809 | 2.806 | -0.003 |
+| compute time / optimizer step | 8.0 s | 8.4 s | +5.0% |
+| auxiliary BCE | — | 0.473 → 0.319 | -32.6% |
+| mismatch margin | — | 0.028 → 0.016 | -42.9% |
+| auxiliary frame F1 | — | 0.080 → 0.116 | +45.0% |
+
+The auxiliary objective clearly learned without an immediate main-task
+regression.  This passes the head-learning and overhead safety gates.
+
+The fixed three-source true-audio-vs-silence teacher-forced probe did **not**
+show decoder transfer:
+
+| aligned-sample mean Δsemantic accuracy | A | B |
+|---|---:|---:|
+| all sources | +0.07 | +0.06 |
+| nASAP | +0.10 | +0.09 |
+| MAESTRO | +0.02 | +0.01 |
+| PDMX | +0.15 | +0.14 |
+
+These rounded differences are small but consistently non-positive.  At this
+100-step horizon the intervention makes encoder states more event-decodable,
+but does not yet make the InterMo decoder depend more on audio.  Therefore:
+
+- do not claim that TransKun accelerates the current run;
+- do not merge pseudo-label generation into production training yet;
+- retain this implementation as the clean distillation interface;
+- the next bounded experiment should test a longer horizon or a direct
+  decoder/cross-attention audio-dependence objective, then repeat the identical
+  fixed probe.
+
+Artifacts (outside Git):
+
+- `work/amt_aux_A_control_s35400_35500_v2.out.log`
+- `work/amt_aux_B_w010_s35400_35500.out.log`
+- `work/amt_aux_probe_A_s35500.out.log`
+- `work/amt_aux_probe_B_s35500.out.log`
+- `outputs/experiments/amt_aux_control_s35400/last.pt`
+- `outputs/experiments/amt_aux_s35400_w010/last.pt`
+
+## Operational findings fixed during the gate
+
+1. `max_steps` was previously the only short-run stop knob, but it also sets
+   the cosine scheduler horizon.  Setting it to 35500 silently changed resumed
+   learning rates from `7.62e-5 / 2.28e-4` to `1e-5 / 3e-5`.  The new
+   `--stop-after-step` terminates a process without changing the LR schedule.
+2. A short run ending between regular 200-step save boundaries returned
+   without saving its final state.  It now atomically saves before the
+   `stop_after_step_reached` return.
+3. The pre-existing production process spent more than 34 minutes in active
+   GPU compute on the first optimizer step after 35500, versus a 7.6-second
+   recent average.  The gate was deliberately stopped at 35500 so that this
+   separate pathological-batch defect could not contaminate either arm.

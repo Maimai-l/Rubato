@@ -38,6 +38,7 @@ def args(**overrides):
         "amt_align_weight": None,
         "amt_align_margin": None,
         "max_steps": None,
+        "stop_after_step": None,
         "lr_enc": None,
         "lr_dec": None,
     }
@@ -73,10 +74,12 @@ check("scratch_explicit_yaml", c.lr_enc == 7e-4, c.lr_enc)
 print("[3] 显式 CLI 必须压过 YAML")
 d = apply_train_config_defaults(
     args(max_batch_sec=42, clip_norm=25, eval_every=77,
-         pitch_loss_weight=2.5, lr_enc=2e-4, lr_dec=3e-4), cfg)
+         pitch_loss_weight=2.5, stop_after_step=35500,
+         lr_enc=2e-4, lr_dec=3e-4), cfg)
 check("cli_wins", (
     d.max_batch_sec, d.clip_norm, d.eval_every, d.pitch_loss_weight,
-    d.lr_enc, d.lr_dec) == (42, 25, 77, 2.5, 2e-4, 3e-4))
+    d.stop_after_step, d.lr_enc, d.lr_dec
+) == (42, 25, 77, 2.5, 35500, 2e-4, 3e-4))
 
 print("[4] 写了但生产未实现的开关必须拒绝")
 with tempfile.TemporaryDirectory() as td:
