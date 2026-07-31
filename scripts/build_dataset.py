@@ -658,6 +658,7 @@ def validate_cli_args(args) -> None:
         "smoke_steps": args.smoke_steps,
         "probe_n": args.probe_n,
         "abtest_n": args.abtest_n,
+        "max_steps": args.max_steps,
     }
     bad = [f"{k}={v}" for k, v in positive.items() if v is None or float(v) <= 0]
     if args.smoke < 0 or args.prefetch < 0 or args.eval_decode_every < 0:
@@ -669,6 +670,12 @@ def validate_cli_args(args) -> None:
         ])
     if args.pitch_loss_weight <= 0:
         bad.append(f"pitch_loss_weight={args.pitch_loss_weight}")
+    if args.amt_aux_weight < 0:
+        bad.append(f"amt_aux_weight={args.amt_aux_weight}")
+    if args.amt_align_weight < 0:
+        bad.append(f"amt_align_weight={args.amt_align_weight}")
+    if args.amt_align_margin < 0:
+        bad.append(f"amt_align_margin={args.amt_align_margin}")
     if args.lr_enc is not None and args.lr_enc <= 0:
         bad.append(f"lr_enc={args.lr_enc}")
     if args.lr_dec is not None and args.lr_dec <= 0:
@@ -717,7 +724,7 @@ def load_train_config(path: str | Path) -> dict:
             "clip_norm", "grad_accum_to_audio_sec",
         },
         "loss": {"len_weight_pow", "sem_label_smooth", "ts_smooth",
-                 "pitch_weight"},
+                 "pitch_weight", "acoustic_aux"},
         "eval": {"every_steps", "decode_every_steps",
                  "max_samples_per_source"},
         "ckpt": {"keep", "save_every_steps", "select_by"},
@@ -738,6 +745,25 @@ def load_train_config(path: str | Path) -> dict:
     if float(cfg["loss"].get("len_weight_pow", 0.5)) != 0.5:
         raise ValueError(
             "生产 loss 固定使用 1/sqrt(T)，len_weight_pow 必须为 0.5")
+    acoustic = cfg["loss"].get("acoustic_aux") or {}
+    if not isinstance(acoustic, dict):
+        raise ValueError("loss.acoustic_aux 必须是 mapping")
+    allowed_acoustic = {
+        "weight", "alignment_weight", "alignment_margin",
+        "onset_radius", "hidden_dim", "dropout",
+    }
+    unknown_acoustic = set(acoustic) - allowed_acoustic
+    if unknown_acoustic:
+        raise ValueError(
+            f"训练配置 loss.acoustic_aux 含未消费键:"
+            f"{sorted(unknown_acoustic)}")
+    for key in ("weight", "alignment_weight", "alignment_margin",
+                "onset_radius", "hidden_dim", "dropout"):
+        value = float(acoustic.get(key, 0.0))
+        if value < 0:
+            raise ValueError(f"loss.acoustic_aux.{key} 必须非负")
+    if float(acoustic.get("dropout", 0.0)) >= 1:
+        raise ValueError("loss.acoustic_aux.dropout 必须 <1")
     if cfg["ckpt"].get("select_by") != "text_ned_proxy":
         raise ValueError(
             "当前训练期 best checkpoint 只支持 text_ned_proxy")
@@ -807,6 +833,15 @@ def apply_train_config_defaults(args, cfg: dict):
         args.eval_decode_every = int(ev.get("decode_every_steps", 0))
     if args.pitch_loss_weight is None:
         args.pitch_loss_weight = float(loss.get("pitch_weight", 1.0))
+    acoustic = dict(loss.get("acoustic_aux") or {})
+    if args.amt_aux_weight is None:
+        args.amt_aux_weight = float(acoustic.get("weight", 0.0))
+    if args.amt_align_weight is None:
+        args.amt_align_weight = float(acoustic.get("alignment_weight", 0.25))
+    if args.amt_align_margin is None:
+        args.amt_align_margin = float(acoustic.get("alignment_margin", 0.10))
+    if args.max_steps is None:
+        args.max_steps = int(cfg.get("max_steps") or 100000)
     if args.lr_enc is None:
         if args.from_scratch:
             # 热启动 encoder 的低学习率不能静默套到随机初始化模型上。若没有单列
@@ -889,6 +924,17 @@ def main():
     ap.add_argument("--pitch-loss-weight", type=float, default=None,
                     help="音高 piece 的 CE 权重(D82;均值归一,总量级不变只移内部占比;"
                          "1.0=仅监控 pv= 列)")
+    ap.add_argument("--amt-aux-weight", type=float, default=None,
+                    help="实验性 encoder AMT 辅助损失权重；0=关闭。使用现有 AMT/TAST "
+                         "精确事件目标，不在训练进程运行 TransKun")
+    ap.add_argument("--amt-align-weight", type=float, default=None,
+                    help="AMT 辅助头的错配目标 margin 权重；无需第二次 forward")
+    ap.add_argument("--amt-align-margin", type=float, default=None,
+                    help="正确音频事件损失优于批内错配事件损失的目标 margin")
+    ap.add_argument("--max-steps", type=int, default=None,
+                    help="覆盖训练终止步；短 A/B 实验设为起始 checkpoint step + 实验步数")
+    ap.add_argument("--ckpt-dir", default=None,
+                    help="覆盖 checkpoint 目录；实验必须使用独立目录，避免覆盖主线")
     ap.add_argument("--augment-acoustic", action="store_true",
                     help="C1a(D58):标签安全声学增广(增益/倾斜/噪声,无混响)。二轮启动配置开;"
                          "生效自证看回显 aug_acoustic= 字段")
@@ -916,6 +962,14 @@ def main():
     print(f"CUDA allocator 预配置: PYTORCH_ALLOC_CONF={allocator_conf}", flush=True)
     apply_train_config_defaults(args, train_spec)
     validate_cli_args(args)
+    runtime_ckpt_dir = (
+        Path(args.ckpt_dir).resolve()
+        if args.ckpt_dir else ROOT / "outputs" / "ckpt")
+    runtime_eval_autolog = (
+        runtime_ckpt_dir / "eval_autolog.md"
+        if args.ckpt_dir
+        else Path(__file__).resolve().parent.parent
+        / "reports" / "eval_autolog.md")
 
     attach_pdmx_row_fns(SOURCES)
     try:
@@ -1010,6 +1064,16 @@ def main():
         for p in pf["problems"]:
             print(f"  ✗ {p}")
         raise RuntimeError("模型词表/位置表体检不过，禁止开训")
+    if args.amt_aux_weight > 0:
+        from rubato.model.acoustic_aux import attach_amt_aux_head
+        _aux_head = attach_amt_aux_head(
+            model,
+            hidden_dim=int((train_spec["loss"].get("acoustic_aux") or {})
+                           .get("hidden_dim", 0)),
+            dropout=float((train_spec["loss"].get("acoustic_aux") or {})
+                          .get("dropout", 0.0)))
+        print(f"AMT 辅助头: input={_aux_head['input_dim']} "
+              f"params={_aux_head['n_params']:,}（训练专用）")
 
     if args.probe_only:
         # 诊断模式,不训练。v2(D27 后):三源探针 —— 对齐审计发现只有 nASAP 对齐故障,
@@ -1019,7 +1083,7 @@ def main():
         import numpy as np
         import time as _time
         import torch
-        last = ROOT / "outputs" / "ckpt" / "last.pt"
+        last = runtime_ckpt_dir / "last.pt"
         step0 = 0
         if last.exists():
             snap = torch.load(str(last), map_location="cpu")
@@ -1110,7 +1174,7 @@ def main():
             km, kn = _mean([r["ds"] for r in rows if r["kind"] == kind and r["cls"] == "OK"])
             bm, bn = _mean([r["ds"] for r in rows if r["kind"] == kind and r["cls"] != "OK"])
             _pp(f"  分源 {kind}: OK Δsem={_fmt(km)}(n={kn}) 错位 Δsem={_fmt(bm)}(n={bn})")
-        autolog = Path(__file__).resolve().parent.parent / "reports" / "eval_autolog.md"
+        autolog = runtime_eval_autolog
         autolog.parent.mkdir(parents=True, exist_ok=True)
         with open(autolog, "a", encoding="utf-8") as fh:
             fh.write(f"\n## probe-only 三源探针 @ step {step0} "
@@ -1130,7 +1194,7 @@ def main():
         import rubato.model.infer as _inf
         from rubato.model.infer import infer_a2s, _EMPTY_A2S
         from rubato.model.train import _eval_subset, _sample_audio, viol_tally
-        last = ROOT / "outputs" / "ckpt" / "last.pt"
+        last = runtime_ckpt_dir / "last.pt"
         step0 = 0
         if last.exists():
             snap = torch.load(str(last), map_location="cpu")
@@ -1180,7 +1244,7 @@ def main():
                 lines.extend(shows)
         for ln in lines:
             print(ln, flush=True)
-        autolog = Path(__file__).resolve().parent.parent / "reports" / "eval_autolog.md"
+        autolog = runtime_eval_autolog
         with open(autolog, "a", encoding="utf-8") as fh:
             fh.write(f"\n## prompt-abtest @ step {step0} "
                      f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n" + "\n".join(lines) + "\n")
@@ -1247,10 +1311,20 @@ def main():
     train_ds = RubatoDataset(train_utts, labels, tok, train=True, max_target_len=max_tgt,
                              augment=not args.smoke, dialect_mix=dialect_mix,
                              acoustic_aug=args.augment_acoustic,
+                             acoustic_targets=args.amt_aux_weight > 0,
                              seed=int(train_spec.get("seed", 20260706)),
                              alpha=float(tokenizer_cfg.get("spm_alpha", 0.25)))
     lf = train_ds.len_filter_report
     print(f"  超长过滤: 保留 {lf.get('kept_pairs')} 对,丢弃 {lf.get('dropped_by_dialect') or 0}")
+    if args.amt_aux_weight > 0:
+        available = train_ds._available()
+        n_aux = sum(
+            1 for uid in available
+            if labels.get(uid, {}).get("AMT")
+            or labels.get(uid, {}).get("TAST"))
+        print(f"  AMT 辅助目标覆盖: {n_aux}/{len(available)} utt "
+              f"({n_aux / max(len(available), 1):.1%});"
+              "优先 exact AMT，其次 time-aligned TAST，无时间戳样本不伪造")
     _dropped = sum((lf.get("dropped_by_dialect") or {}).values())
     if _dropped > 0.10 * max(lf.get("kept_pairs", 1), 1):
         print("  ⚠ 超长丢弃 >10% —— 值得扩位置表(resize position embedding)找回,贴回给规划端")
@@ -1292,18 +1366,30 @@ def main():
         "wd": float(optim_cfg.get("wd", 0.01)),
         "warmup_steps": int(optim_cfg.get("warmup_steps", 1500)),
         "min_lr_ratio": float(optim_cfg.get("min_lr_ratio", 0.1)),
-        "max_steps": int(train_spec.get("max_steps") or 100000),
+        "max_steps": int(args.max_steps),
         "max_epochs": int(train_spec.get("max_epochs", 1000)),
         "grad_accum_to_audio_sec": float(
             optim_cfg.get("grad_accum_to_audio_sec", 2000)),
         "precision": str(train_spec.get("precision", "bf16")),
-        "ckpt_dir": str(ROOT / "outputs" / "ckpt"),
+        "ckpt_dir": str(runtime_ckpt_dir),
         "save_every_steps": int(ckpt_cfg.get("save_every_steps", 200)),
         "ckpt_keep": int(ckpt_cfg.get("keep", 6)),
         "selection_metric": str(ckpt_cfg["select_by"]),
         "clip_norm": args.clip_norm,
         "eval_decode_every": args.eval_decode_every,
         "pitch_loss_weight": args.pitch_loss_weight,
+        "acoustic_aux": {
+            "weight": float(args.amt_aux_weight),
+            "alignment_weight": float(args.amt_align_weight),
+            "alignment_margin": float(args.amt_align_margin),
+            "onset_radius": int((loss_spec.get("acoustic_aux") or {})
+                                .get("onset_radius", 1)),
+            "hidden_dim": int((loss_spec.get("acoustic_aux") or {})
+                              .get("hidden_dim", 0)),
+            "dropout": float((loss_spec.get("acoustic_aux") or {})
+                             .get("dropout", 0.0)),
+            "sample_rate": 16000,
+        },
         "dialect_mix": dialect_mix,                # None=D2 纸面;设了 --amt-mix 则为换算后的四元组(回显自证)
         "prefetch_batches": args.prefetch,         # 预取深度;0=串行直迭代(对照)
         "cuda_memory": dict(memory_spec),
@@ -1315,7 +1401,7 @@ def main():
         "eval_time_budget_s": 1200,                # eval 硬时限:超时截断按已评样本出指标,不再"疑似卡死"
         # eval 证据自动落盘到 repo 内(追加式);执行端上报 = git add reports/eval_autolog.md
         # + commit + push,不再人肉摘录(三次摘录事故后收权)
-        "eval_autolog": str(Path(__file__).resolve().parent.parent / "reports" / "eval_autolog.md"),
+        "eval_autolog": str(runtime_eval_autolog),
         "loss": {
             "sem_label_smooth": float(loss_spec.get("sem_label_smooth", 0.1)),
             "p_center": float(ts_smooth.get("p_center", 0.9)),

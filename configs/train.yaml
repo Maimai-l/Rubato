@@ -34,6 +34,15 @@ loss:
   sem_label_smooth: 0.1
   ts_smooth: {p_center: 0.9, w: 5}      # 时间戳序数平滑核
   pitch_weight: 1.0
+  # Cross-architecture AMT distillation experiment.  Production default stays
+  # off; enable with --amt-aux-weight on an isolated checkpoint directory.
+  acoustic_aux:
+    weight: 0.0
+    alignment_weight: 0.25
+    alignment_margin: 0.10
+    onset_radius: 1
+    hidden_dim: 0
+    dropout: 0.0
 specaugment: false                     # 论文未提;真实录音掉分再开
 eval:
   every_steps: 1000

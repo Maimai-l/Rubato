@@ -206,12 +206,17 @@ def collate_batch(items: list[dict], pad_id: int = 0) -> dict:
         ts_bins[i, :L] = torch.tensor(it["ts_bins"], dtype=torch.long)
         # 填充位 loss_mask 已是 False,不计入 loss
 
-    return {"audio": audio, "audio_lens": audio_lens,
-            "input_ids": input_ids, "input_lens": input_lens,
-            "labels": labels, "token_types": token_types,
-            "loss_mask": loss_mask, "ts_bins": ts_bins,
-            # 逐条 dialect(list,非张量):训练步据此聚合出 A2S/A2S_lite/TAST/AMT 各自曲线
-            "dialects": [it.get("dialect") for it in items]}
+    out = {"audio": audio, "audio_lens": audio_lens,
+           "input_ids": input_ids, "input_lens": input_lens,
+           "labels": labels, "token_types": token_types,
+           "loss_mask": loss_mask, "ts_bins": ts_bins,
+           # 逐条 dialect(list,非张量):训练步据此聚合出 A2S/A2S_lite/TAST/AMT 各自曲线
+           "dialects": [it.get("dialect") for it in items]}
+    if any("acoustic_ref" in it for it in items):
+        # Sparse reference text stays on CPU.  training_step turns it into a
+        # frame grid only after the real encoder length is known.
+        out["acoustic_refs"] = [it.get("acoustic_ref") for it in items]
+    return out
 
 
 # ---------------------------------------------------------------- Dataset / DataModule
@@ -228,7 +233,8 @@ class RubatoDataset:
                  dialect_mix: dict | None = None,
                  max_target_len: int | None = None,
                  augment: bool | None = None,
-                 acoustic_aug: bool = False):
+                 acoustic_aug: bool = False,
+                 acoustic_targets: bool = False):
         ids = [u.get("utt_id") for u in utts]
         if any(not x for x in ids):
             raise ValueError("RubatoDataset: utt_id 不能为空")
@@ -252,6 +258,7 @@ class RubatoDataset:
         self.utts = {u["utt_id"]: u for u in utts}
         self.labels = labels
         self.acoustic_aug = bool(acoustic_aug)   # C1a(D58):声学增广旗,与 alpha/tiling 增广独立
+        self.acoustic_targets = bool(acoustic_targets)
         self.tok = tokenizer
         self.seed = seed
         self.sr = sr
@@ -373,6 +380,14 @@ class RubatoDataset:
         if self.train and self.acoustic_aug:
             # C1a(D58):标签安全声学增广,旗子门控(--augment-acoustic),二轮启动配置开
             enc["audio"] = acoustic_augment(enc["audio"], uid, self.epoch, self.seed)
+        if self.acoustic_targets:
+            # Exact timestamped references take precedence over a teacher:
+            # MAESTRO supplies AMT; nASAP/PDMX-performance supply TAST.  Both
+            # parse into the same time/pitch event space.  A2S-only rows remain
+            # unsupervised instead of inventing timestamps.
+            ref = self.labels[uid].get("AMT") or self.labels[uid].get("TAST")
+            enc["acoustic_ref"] = (
+                apply_tiling_text(ref, t0_bins) if ref else None)
         enc["utt_id"] = uid
         enc["dialect"] = dialect
         return enc

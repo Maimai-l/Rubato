@@ -34,6 +34,10 @@ def args(**overrides):
         "eval_every": None,
         "eval_decode_every": None,
         "pitch_loss_weight": None,
+        "amt_aux_weight": None,
+        "amt_align_weight": None,
+        "amt_align_margin": None,
+        "max_steps": None,
         "lr_enc": None,
         "lr_dec": None,
     }

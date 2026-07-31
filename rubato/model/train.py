@@ -145,6 +145,9 @@ def new_step_metrics() -> dict:
         "sem_sum": 0.0, "n_sem": 0,
         "ts_sum": 0.0, "n_ts": 0,
         "pitch_sum": 0.0, "n_pitch": 0,
+        "acoustic_aux_sum": 0.0, "acoustic_event_sum": 0.0,
+        "acoustic_align_sum": 0.0, "acoustic_f1_sum": 0.0,
+        "n_acoustic": 0,
         "dialect_sem": {},
     }
 
@@ -167,6 +170,15 @@ def accumulate_step_metrics(state: dict, parts: dict):
         if n and value is not None:
             state[sum_key] += float(value) * n
             state[count_key] += n
+    n_acoustic = int(parts.get("n_acoustic", 0) or 0)
+    if n_acoustic:
+        state["acoustic_aux_sum"] += float(parts["acoustic_aux_loss"]) * n_acoustic
+        state["acoustic_event_sum"] += float(parts["acoustic_event_loss"]) * n_acoustic
+        state["acoustic_align_sum"] += float(parts["acoustic_align_loss"]) * n_acoustic
+        if parts.get("acoustic_frame_f1") is not None:
+            state["acoustic_f1_sum"] += (
+                float(parts["acoustic_frame_f1"]) * n_acoustic)
+        state["n_acoustic"] += n_acoustic
     for d, (v, n) in (parts.get("dialect_sem") or {}).items():
         old_sum, old_n = state["dialect_sem"].get(d, (0.0, 0))
         state["dialect_sem"][d] = (old_sum + float(v) * int(n), old_n + int(n))
@@ -184,6 +196,19 @@ def finalize_step_metrics(state: dict) -> dict:
         "ts_loss": state["ts_sum"] / max(int(state["n_ts"]), 1),
         "pitch_loss": (state["pitch_sum"] / state["n_pitch"]
                        if state["n_pitch"] else None),
+        "acoustic_aux_loss": (
+            state["acoustic_aux_sum"] / state["n_acoustic"]
+            if state["n_acoustic"] else None),
+        "acoustic_event_loss": (
+            state["acoustic_event_sum"] / state["n_acoustic"]
+            if state["n_acoustic"] else None),
+        "acoustic_align_loss": (
+            state["acoustic_align_sum"] / state["n_acoustic"]
+            if state["n_acoustic"] else None),
+        "acoustic_frame_f1": (
+            state["acoustic_f1_sum"] / state["n_acoustic"]
+            if state["n_acoustic"] else None),
+        "n_acoustic": int(state["n_acoustic"]),
         "dialect_sem": {d: (s / n, n) for d, (s, n) in state["dialect_sem"].items()
                         if n},
         "batch_audio_sec": float(state["audio_sec"]),
@@ -495,6 +520,52 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         pitch_mask=cfg.get("pitch_mask"),
     )
     loss = parts["loss"]
+    aux_report = None
+    aux_cfg = dict(cfg.get("acoustic_aux") or {})
+    aux_weight = float(aux_cfg.get("weight", 0.0))
+    if aux_weight > 0:
+        if not isinstance(output, (tuple, list)) or len(output) < 4:
+            raise TypeError(
+                "AMT auxiliary loss requires Canary forward tuple "
+                "(log_probs, encoded_len, enc_states, enc_mask)")
+        encoded_len, enc_states = output[1], output[2]
+        if not isinstance(enc_states, torch.Tensor) or enc_states.dim() != 3:
+            raise ValueError(
+                f"AMT auxiliary encoder states must be (B,T,D), got "
+                f"{type(enc_states)} "
+                f"{getattr(enc_states, 'shape', None)}")
+        if not isinstance(encoded_len, torch.Tensor) \
+                or encoded_len.shape != audio_len.shape:
+            raise ValueError(
+                f"AMT auxiliary encoded lengths invalid: "
+                f"{getattr(encoded_len, 'shape', None)} vs "
+                f"{tuple(audio_len.shape)}")
+        refs = batch.get("acoustic_refs")
+        if refs is None or len(refs) != int(audio.shape[0]):
+            raise ValueError(
+                "AMT auxiliary enabled but batch has no aligned acoustic_refs; "
+                "construct RubatoDataset(acoustic_targets=True)")
+        head = getattr(model, "rubato_amt_aux_head", None)
+        if head is None:
+            raise RuntimeError(
+                "AMT auxiliary enabled but model.rubato_amt_aux_head is absent")
+        from rubato.model.acoustic_aux import (
+            acoustic_auxiliary_loss, build_acoustic_targets)
+        targets = build_acoustic_targets(
+            refs, encoded_len, int(enc_states.shape[1]), audio_len,
+            sample_rate=int(aux_cfg.get("sample_rate", 16000)),
+            onset_radius=int(aux_cfg.get("onset_radius", 1)))
+        aux_logits = head(enc_states)
+        aux_report = acoustic_auxiliary_loss(
+            aux_logits, targets,
+            alignment_weight=float(aux_cfg.get("alignment_weight", 0.25)),
+            alignment_margin=float(aux_cfg.get("alignment_margin", 0.10)))
+        # Main loss is a mean over B sequences.  Auxiliary loss is a mean over
+        # the supervised subset, so multiply by n_aux/B before the outer
+        # accumulation code multiplies the whole loss by B.
+        supervised_ratio = (
+            float(aux_report["n_supervised"]) / max(int(audio.shape[0]), 1))
+        loss = loss + aux_weight * aux_report["loss"] * supervised_ratio
     if not loss.requires_grad:
         raise RuntimeError("loss 无梯度 —— forward 图断了(检查 no_grad/detach)")
     if not bool(torch.isfinite(loss)):
@@ -511,7 +582,7 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
             dialect_sem.setdefault(d, []).append(float(parts["seq_sem"][i]))
             if bool(parts["seq_has_ts"][i]):
                 dialect_ts.setdefault(d, []).append(float(parts["seq_ts"][i]))
-    return {
+    result = {
         "loss": loss,
         "semantic_loss": parts["sem"],
         "ordinal_loss": parts["ts"],
@@ -524,6 +595,15 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         "batch_size": int(labels.shape[0]),
         "seq_lengths": batch.get("seq_lengths", loss_mask.sum(-1)),
     }
+    if aux_report is not None:
+        result.update({
+            "acoustic_aux_loss": aux_report["loss"].detach(),
+            "acoustic_event_loss": aux_report["event_loss"].detach(),
+            "acoustic_align_loss": aux_report["alignment_loss"].detach(),
+            "acoustic_frame_f1": aux_report["frame_f1"],
+            "n_acoustic": aux_report["n_supervised"],
+        })
+    return result
 
 
 # ---------------------------------------------------------------- 评测钩子(R-S11.5)
@@ -1094,7 +1174,48 @@ def save_snapshot(path, model, opt, sched, step: int, epoch: int,
     tmp.replace(path)                          # 原子:写一半崩不会毁掉上一份
 
 
-def load_snapshot(path, model, opt, sched, allow_legacy_cursor: bool = False):
+def _load_optimizer_allowing_appended_params(opt, saved_state: dict,
+                                             allow_append: bool = False) -> int:
+    """Load Adam state while allowing new parameters appended to an old group.
+
+    An auxiliary head added after a checkpoint has no Adam moments yet.  PyTorch
+    normally rejects the whole restore because the parameter count differs.
+    The base parameter order is unchanged and the head is registered last, so
+    extending the saved group's id list preserves every existing state exactly;
+    Adam initializes only the new tensors lazily on their first step.
+    """
+    import copy
+
+    current = opt.state_dict()
+    saved = copy.deepcopy(saved_state)
+    old_groups = saved.get("param_groups") or []
+    new_groups = current.get("param_groups") or []
+    if len(old_groups) != len(new_groups):
+        raise ValueError(
+            f"optimizer group count changed: {len(old_groups)} -> "
+            f"{len(new_groups)}")
+    appended = 0
+    for i, (old, new) in enumerate(zip(old_groups, new_groups)):
+        old_ids = list(old.get("params") or [])
+        new_ids = list(new.get("params") or [])
+        if len(old_ids) > len(new_ids):
+            raise ValueError(
+                f"optimizer group {i} shrank: {len(old_ids)} -> "
+                f"{len(new_ids)}")
+        extra = len(new_ids) - len(old_ids)
+        if extra:
+            if not allow_append or i != len(new_groups) - 1:
+                raise ValueError(
+                    f"optimizer group {i} gained {extra} parameters")
+            old["params"] = old_ids + new_ids[len(old_ids):]
+            appended += extra
+    opt.load_state_dict(saved)
+    return appended
+
+
+def load_snapshot(path, model, opt, sched, allow_legacy_cursor: bool = False,
+                  allow_new_model_prefixes: tuple[str, ...] = (),
+                  allow_optimizer_param_append: bool = False):
     """恢复快照 → (step, epoch, next_batch_cursor)。
 
     文件不存在才返回 None；存在但损坏必须中止，绝不能伪装成“从头训练”。v1 快照没有
@@ -1114,9 +1235,34 @@ def load_snapshot(path, model, opt, sched, allow_legacy_cursor: bool = False):
                 "旧版快照缺 batch_cursor，无法保证不重复训练整个 epoch。"
                 "如确认接受一次从 epoch 开头重放，请显式加 "
                 "--allow-legacy-resume-from-epoch-start")
-        model.load_state_dict(snap["model"])
-        opt.load_state_dict(snap["optimizer"])     # state 张量随参数设备自动就位
+        incompatible = model.load_state_dict(snap["model"], strict=False)
+        missing = list(incompatible.missing_keys)
+        unexpected = list(incompatible.unexpected_keys)
+        bad_missing = [
+            k for k in missing
+            if not any(k.startswith(prefix)
+                       for prefix in allow_new_model_prefixes)]
+        if bad_missing or unexpected:
+            raise RuntimeError(
+                f"model state mismatch: missing={bad_missing[:10]} "
+                f"unexpected={unexpected[:10]}")
+        appended = _load_optimizer_allowing_appended_params(
+            opt, snap["optimizer"],
+            allow_append=allow_optimizer_param_append)
+        if missing and appended != len(missing):
+            raise RuntimeError(
+                f"new model parameters and optimizer append differ: "
+                f"missing={len(missing)} appended={appended}")
+        if not missing and appended:
+            raise RuntimeError(
+                f"optimizer gained {appended} parameters without new model keys")
         sched.load_state_dict(snap["scheduler"])
+        if missing:
+            print(
+                f"  实验续训:旧快照无新模块参数 {len(missing)} 个，"
+                f"已随机初始化；旧 optimizer 状态完整恢复，新增参数 {appended} 个"
+                "由 Adam 首步初始化",
+                flush=True)
         rng = snap.get("rng_state")
         if rng:
             random.setstate(rng["python"])
@@ -1199,6 +1345,15 @@ def train(model, datamodule, cfg: dict, tokenizer,
     """
     import torch
     from rubato.model.losses import build_ts_token_ids
+    acoustic_cfg = dict(cfg.get("acoustic_aux") or {})
+    acoustic_enabled = float(acoustic_cfg.get("weight", 0.0)) > 0
+    acoustic_head_report = None
+    if acoustic_enabled:
+        from rubato.model.acoustic_aux import attach_amt_aux_head
+        acoustic_head_report = attach_amt_aux_head(
+            model,
+            hidden_dim=int(acoustic_cfg.get("hidden_dim", 0)),
+            dropout=float(acoustic_cfg.get("dropout", 0.0)))
     # 【必须在建 optimizer 前搬 GPU】build_model 是 map_location="cpu" 恢复的,谁都不搬的话
     # 整套训练【静默】跑 CPU(batch 张量跟着模型设备走,不报错,只是慢百倍)。
     # cfg["device"]="cpu" 是诊断模式:CUDA 的 device assert 是异步的、栈不可信,
@@ -1235,6 +1390,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
     best_eval_metric = {selection_metric: float("inf")}
     recent, recent_sem, recent_ts = [], [], []      # 近 50 步窗口(日志 + final_* 判据)
     recent_pv: list = []                            # 音高 CE 滚动窗(D82,训练侧"听没听"直读)
+    recent_aux: list = []                           # encoder AMT auxiliary BCE
+    recent_aux_align: list = []                     # correct-vs-mismatched margin
+    recent_aux_f1: list = []                        # encoder frame occupancy F1
     recent_gn: list = []                            # 裁剪前梯度范数(有效 lr 是否被裁剪吃掉)
     recent_td: list = []                            # 完整 optimizer-step 的装批等待
     recent_tc: list = []                            # 完整 optimizer-step 的计算墙钟
@@ -1249,6 +1407,12 @@ def train(model, datamodule, cfg: dict, tokenizer,
         report["final_loss"] = round(sum(recent) / len(recent), 4) if recent else None
         report["final_sem"] = round(sum(recent_sem) / len(recent_sem), 4) if recent_sem else None
         report["final_ts"] = round(sum(recent_ts) / len(recent_ts), 4) if recent_ts else None
+        report["final_acoustic_aux"] = (
+            round(sum(recent_aux) / len(recent_aux), 4)
+            if recent_aux else None)
+        report["final_acoustic_frame_f1"] = (
+            round(sum(recent_aux_f1) / len(recent_aux_f1), 4)
+            if recent_aux_f1 else None)
         report["final_sem_by_dialect"] = {d: round(sum(v) / len(v), 4)
                                           for d, v in recent_dia.items() if v}
         return report
@@ -1269,6 +1433,11 @@ def train(model, datamodule, cfg: dict, tokenizer,
              "mix=" + ",".join(f"{d}:{v:.3f}" for d, v in sorted(cfg["dialect_mix"].items())))
           + f" prefetch={'proc:' + str(int(cfg.get('prefetch_batches', 0))) if int(cfg.get('prefetch_batches', 0)) > 0 else '关'}"
           + f" aug_acoustic={'开' if getattr(getattr(datamodule, 'train_ds', None), 'acoustic_aug', False) else '关'}"
+          + (f" amt_aux=w{float(acoustic_cfg.get('weight')):g}"
+             f"/align{float(acoustic_cfg.get('alignment_weight', 0.25)):g}"
+             f"/margin{float(acoustic_cfg.get('alignment_margin', 0.10)):g}"
+             f"/params{acoustic_head_report['n_params']}"
+             if acoustic_enabled else " amt_aux=关")
           + f" allocator={os.environ.get('PYTORCH_ALLOC_CONF', '<unset>')}"
           + f" mem_check={memory_check_every}step/{memory_min_free_mb:g}MiB",
           flush=True)
@@ -1285,7 +1454,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
     if cfg.get("resume", True):
         got = load_snapshot(
             last_pt, model, opt, sched,
-            allow_legacy_cursor=bool(cfg.get("allow_legacy_resume_from_epoch_start", False)))
+            allow_legacy_cursor=bool(cfg.get("allow_legacy_resume_from_epoch_start", False)),
+            allow_new_model_prefixes=(
+                ("rubato_amt_aux_head.",) if acoustic_enabled else ()),
+            allow_optimizer_param_append=acoustic_enabled)
         if got:
             step, start_epoch, resume_batch_cursor = got
             applied = apply_cfg_lrs(opt, sched, cfg)   # CLI 改 lr 必须能穿透快照,见函数注释
@@ -1304,6 +1476,7 @@ def train(model, datamodule, cfg: dict, tokenizer,
     ts_token_ids = build_ts_token_ids(tokenizer)
     accum_target_sec = float(cfg.get("grad_accum_to_audio_sec", 2000))
     loss_cfg = dict(cfg.get("loss", {}))
+    loss_cfg["acoustic_aux"] = acoustic_cfg
     # 【D82】音高掩码常建(毫秒级):weight=1 时仅点亮 pv= 监控列,数值路径恒等;
     # weight≠1 时按 D82 加权(均值归一,总量级不变)。
     from rubato.model.losses import build_pitch_token_mask
@@ -1399,6 +1572,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
                            (recent_sem, step_m["semantic_loss"]),
                            (recent_ts, step_m["ts_loss"]),
                            (recent_pv, _pv),
+                           (recent_aux, step_m.get("acoustic_aux_loss")),
+                           (recent_aux_align, step_m.get("acoustic_align_loss")),
+                           (recent_aux_f1, step_m.get("acoustic_frame_f1")),
                            (recent_td, step_data_sec),
                            (recent_tc, step_comp_sec)):
                 if v is None:
@@ -1420,6 +1596,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 print(f"step {step} loss={recent[-1]:.4f} avg50={sum(recent)/len(recent):.4f} "
                       f"sem={recent_sem[-1]:.4f} ts={recent_ts[-1]:.4f} "
                       + (f"pv={sum(recent_pv)/len(recent_pv):.3f} " if recent_pv else "")
+                      + (f"aux={sum(recent_aux)/len(recent_aux):.3f} "
+                         f"axm={sum(recent_aux_align)/len(recent_aux_align):.3f} "
+                         f"af1={sum(recent_aux_f1)/len(recent_aux_f1):.3f} "
+                         if recent_aux else "")
                       +
                       f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
                       f"enc={gn_groups[0]:.1f} dec={gn_groups[1]:.1f} "
