@@ -66,11 +66,13 @@ est_short = project(ir_of("C"), "A2S")       # 1 小节
 ref_long = project(ir_of("CDEFGA"), "A2S")   # 6 小节
 check("merge_artifact_barcount", classify_failure(est_short, ref_long) == "merge_artifact",
       classify_failure(est_short, ref_long))
-# 合法、结构正常、但内容差(高 OMR-NED)→ content_error
+# 合法、结构正常、但内容差(百分制高 OMR-NED)→ content_error
 est_ok = project(ir_of("CDEF"), "A2S")
 ref_ok = project(ir_of("CDEF"), "A2S")
-check("content_error", classify_failure(est_ok, ref_ok, omr_ned=0.5) == "content_error",
-      classify_failure(est_ok, ref_ok, omr_ned=0.5))
+check("content_error", classify_failure(est_ok, ref_ok, omr_ned=50.0) == "content_error",
+      classify_failure(est_ok, ref_ok, omr_ned=50.0))
+check("low_ned_ok", classify_failure(est_ok, ref_ok, omr_ned=10.0) == "ok",
+      classify_failure(est_ok, ref_ok, omr_ned=10.0))
 
 print("[7] 重复小节检测(合并伪影)")
 dup = "|4/4k0PR:C4 1/1 |4/4k0c4C4 1/1 |4/4k0c4C4 1/1 |4/4k0c4"  # 重复小节
@@ -95,6 +97,15 @@ report = build_eval_report(metrics, failures)
 check("report_has_metrics", "maestro_amt_f1" in report and "论文" in report)
 check("report_has_attribution", "parse_fail" in report and "content_error" in report)
 check("report_distinguishes", "工程 bug" in report and "模型能力" in report)
+smoke_report = build_eval_report(metrics, failures, compare_to_paper=False)
+check("smoke_not_compared_to_paper",
+      "未认证为论文同口径" in smoke_report and "差距" not in smoke_report)
+mixed_report = build_eval_report(
+    metrics, failures, paper_comparable_metrics={"maestro_amt_f1"})
+check("per_metric_paper_gate",
+      "maestro_amt_f1: 94.0 (论文" in mixed_report
+      and "nasap_a2s_omr_ned: 89.0（本地指标" in mixed_report,
+      mixed_report)
 
 print(f"\n全部通过: {PASS} 项")
 print("注:OMR-NED 用 LEGATO 脚本(本地 U10 已验证)、人检渲染需 Verovio/MuseScore,本地跑;")

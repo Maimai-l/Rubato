@@ -1,0 +1,277 @@
+  [INFO] nASAP test work_keys (from TSV files): 1058
+  [INFO] ASAP-Beyer work_keys: 0
+=== 装配统计(每一步丢弃都计数,不静默)===
+  pdmx     rows= 171265 kept= 119106 no_audio=  37920 no_dialect=     0 bad_schema=    0 dup=14239
+  nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+  maestro  rows= 258658 kept= 258658 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0
+  TOTAL utts=384862 by_dialect={'A2S': 126204, 'A2S_lite': 126127, 'TAST': 29304, 'AMT': 258658}
+        by_kind={'pdmx': 119106, 'nasap': 7098, 'maestro': 258658} by_split={'train': 344847, 'test': 21224, 'val': 5461, 'validation': 13330}
+  ⚠ 撞名 utt_id 样本: ['pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_000', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_001', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_002', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_003', 'pdmx_QmYgjwZY5rA8cbpZmzdeTuP42DZHGz6VRWorf5fEdcNC9s_000', 'pdmx_QmYgjwZY5rA8cbpZmzdeTuP42DZHGz6VRWorf5fEdcNC9s_001', 'pdmx_QmYgFj1QfizKWfDyprpMff8fouzo5gNBAhLMCDQd8YoxiZ_000', 'pdmx_QmYgFj1QfizKWfDyprpMff8fouzo5gNBAhLMCDQd8YoxiZ_001', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_000', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_001', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_002', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_003', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_000', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_001', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_002', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_003', 'pdmx_QmYgD78XzmFp7wH1yt2Kh2LoZoBmB8Dqc8bk357uG4Evik_004', 'pdmx_QmYgD78XzmFp7wH1yt2Kh2LoZoBmB8Dqc8bk357uG4Evik_005', 'pdmx_QmYgjUdsTn9cod9QS7bf5msP2mnRKcXKNYT5C1TNQG12JB_000', 'pdmx_QmYgjUdsTn9cod9QS7bf5msP2mnRKcXKNYT5C1TNQG12JB_001']
+  train=344847 nasap_val=1142 maestro_val=28264
+[NeMo W 2026-07-21 22:19:18 megatron_init:62] Megatron num_microbatches_calculator not found, using Apex version.
+W0721 22:19:18.097000 26072 site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
+OneLogger: Setting error_handling_strategy to DISABLE_QUIETLY_AND_REPORT_METRIC_ERROR for rank (rank=0) with OneLogger disabled. To override: explicitly set error_handling_strategy parameter.
+No exporters were provided. This means that no telemetry data will be collected.
+W0721 22:19:20.334000 26072 site-packages\torch\utils\flop_counter.py:29] triton not found; flop counting will not work for triton kernels
+[NeMo I 2026-07-21 22:19:21 mixins:208] _setup_tokenizer: detected an aggregate tokenizer
+[NeMo I 2026-07-21 22:19:21 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1152 tokens
+[NeMo I 2026-07-21 22:19:21 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-07-21 22:19:21 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-07-21 22:19:21 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-07-21 22:19:21 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-07-21 22:19:21 aggregate_tokenizer:73] Aggregate vocab size: 5248
+[NeMo W 2026-07-21 22:19:21 modelPT:188] If you intend to do training or fine-tuning, please call the ModelPT.setup_training_data() method and provide a valid configuration file to setup the train data loader.
+    Train config : 
+    use_lhotse: true
+    input_cfg: null
+    tarred_audio_filepaths: null
+    manifest_filepath: null
+    sample_rate: 16000
+    shuffle: true
+    num_workers: 8
+    pin_memory: true
+    prompt_format: canary2
+    max_tps: 25
+    max_duration: 40.0
+    text_field: answer
+    lang_field: target_lang
+    use_bucketing: true
+    bucket_duration_bins:
+    - - 3.56
+      - 30
+    - - 3.56
+      - 77
+    - - 4.608
+      - 38
+    - - 4.608
+      - 88
+    - - 5.48
+      - 49
+    - - 5.48
+      - 106
+    - - 6.05
+      - 52
+    - - 6.05
+      - 109
+    - - 6.85
+      - 54
+    - - 6.85
+      - 124
+    - - 7.914
+      - 59
+    - - 7.914
+      - 137
+    - - 8.52
+      - 67
+    - - 8.52
+      - 158
+    - - 9.51
+      - 67
+    - - 9.51
+      - 153
+    - - 10.29
+      - 78
+    - - 10.29
+      - 202
+    - - 10.89
+      - 88
+    - - 10.89
+      - 197
+    - - 11.45
+      - 92
+    - - 11.45
+      - 217
+    - - 12.1
+      - 98
+    - - 12.1
+      - 222
+    - - 12.69
+      - 123
+    - - 12.69
+      - 257
+    - - 13.09
+      - 133
+    - - 13.09
+      - 245
+    - - 13.57
+      - 104
+    - - 13.57
+      - 225
+    - - 14.02
+      - 108
+    - - 14.02
+      - 238
+    - - 14.53
+      - 117
+    - - 14.53
+      - 235
+    - - 15.08
+      - 135
+    - - 15.08
+      - 253
+    - - 15.53
+      - 130
+    - - 15.53
+      - 273
+    - - 15.945
+      - 123
+    - - 15.945
+      - 270
+    - - 16.4
+      - 126
+    - - 16.4
+      - 284
+    - - 16.9
+      - 126
+    - - 16.9
+      - 294
+    - - 17.44
+      - 127
+    - - 17.44
+      - 296
+    - - 17.96
+      - 131
+    - - 17.96
+      - 290
+    - - 18.41
+      - 133
+    - - 18.41
+      - 308
+    - - 18.91
+      - 137
+    - - 18.91
+      - 320
+    - - 19.42
+      - 135
+    - - 19.42
+      - 313
+    - - 20.0
+      - 138
+    - - 20.0
+      - 311
+    - - 34.547
+      - 195
+    - - 34.547
+      - 434
+    - - 40.0
+      - 263
+    - - 40.0
+      - 381
+    bucket_batch_size:
+    - 1044
+    - 835
+    - 786
+    - 662
+    - 662
+    - 558
+    - 594
+    - 501
+    - 534
+    - 450
+    - 465
+    - 391
+    - 417
+    - 342
+    - 378
+    - 318
+    - 340
+    - 271
+    - 322
+    - 258
+    - 295
+    - 248
+    - 284
+    - 234
+    - 250
+    - 210
+    - 250
+    - 210
+    - 250
+    - 210
+    - 241
+    - 203
+    - 232
+    - 196
+    - 216
+    - 187
+    - 207
+    - 174
+    - 207
+    - 174
+    - 199
+    - 163
+    - 194
+    - 163
+    - 188
+    - 158
+    - 186
+    - 156
+    - 172
+    - 145
+    - 173
+    - 142
+    - 167
+    - 140
+    - 160
+    - 135
+    - 86
+    - 74
+    - 70
+    - 64
+    bucket_buffer_size: 40000
+    shuffle_buffer_size: 10000
+    concurrent_bucketing: false
+    augmentor: null
+    
+[NeMo W 2026-07-21 22:19:21 modelPT:195] If you intend to do validation, please call the ModelPT.setup_validation_data() or ModelPT.setup_multiple_validation_data() method and provide a valid configuration file to setup the validation data loader(s). 
+    Validation config : 
+    use_lhotse: true
+    prompt_format: canary2
+    manifest_filepath: /data/ASR/librispeech/test_other.json
+    sample_rate: 16000
+    batch_size: 32
+    shuffle: false
+    num_workers: 2
+    pin_memory: true
+    text_field: answer
+    lang_field: target_lang
+    tarred_audio_filepaths: null
+    
+Error getting class at nemo.collections.asr.modules.transformer.get_nemo_transformer: Located non-class of type 'function' while loading 'nemo.collections.asr.modules.transformer.get_nemo_transformer'
+[NeMo I 2026-07-21 22:19:22 save_restore_connector:285] Model EncDecMultiTaskModel was successfully restored from D:\vscode_projects\ee_download\canary-180m-flash.nemo.
+build_model: {'replaced_embeddings': 1, 'replaced_linears': 1, 'old_vocab': 5248, 'new_vocab': 8000} encoder_ok=True
+体检: tokenizer=8000 位置表最小=None
+  Embedding transf_decoder._embedding.token_embedding: 8000 × 1024
+  大 Linear transf_decoder._decoder.layers.0.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.1.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.2.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.3.third_sub_layer.dense_in: out=4096
+  大 Linear log_softmax.mlp.layer0: out=8000
+  · Linear transf_decoder._decoder.layers.0.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.1.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.2.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.3.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  目标序列上限 = 1024 tok(体检实测位置表);超长样本将丢弃并记账…
+  epoch0 混比报告: A2S[池108448 额118842 过采x1.1] A2S_lite[池109009 额50932 过采x0.47] AMT[池230394 额101865 过采x0.44] TAST[池20742 额67910 过采x3.27]
+  超长过滤: 保留 468593 对,丢弃 {'TAST': 5389, 'A2S': 6005, 'A2S_lite': 5369}
+训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48 mix=D2纸面(.35/.15/.20/.30) prefetch=关
+【执行端贴回】① 上面的配置回显行(应含 prefetch=关) ② 续训:恢复… 行 ③ 跑 1 小时后:连续 5 行带 td=/tc= 的日志(不含 eval 的窗口) ④ 任务管理器→详细信息→python.exe 的「专用 GPU 内存」和「共享 GPU 内存」两个数(必贴)
+续训:恢复 step=63600 epoch=13(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=3.71e-05 dec=1.11e-04)
+  epoch13 混比报告: A2S[池108448 额118842 过采x1.1] A2S_lite[池109009 额50932 过采x0.47] AMT[池230394 额101865 过采x0.44] TAST[池20742 额67910 过采x3.27]
+step 63650 loss=64.3350 avg50=50.1102 sem=2.5531 ts=0.0000 gn=24.2/avg27.6 enc=13.6 dec=20.0 lrE=3.70e-05 lrD=1.11e-04 audio=38s td=0.5s tc=7.8s | A2S=2.61 A2S_lite=2.73 AMT=2.34 TAST=2.04
+step 63700 loss=57.2510 avg50=52.0464 sem=1.8737 ts=1.8549 gn=26.1/avg21.3 enc=14.6 dec=21.6 lrE=3.69e-05 lrD=1.11e-04 audio=40s td=0.5s tc=7.6s | A2S=2.61 A2S_lite=2.72 AMT=2.27 TAST=2.04
+step 63750 loss=46.0193 avg50=49.8596 sem=2.3110 ts=1.7797 gn=31.4/avg26.2 enc=15.9 dec=27.1 lrE=3.69e-05 lrD=1.11e-04 audio=50s td=0.5s tc=7.6s | A2S=2.58 A2S_lite=2.67 AMT=2.28 TAST=2.05
+step 63800 loss=58.9802 avg50=52.5386 sem=3.4694 ts=0.0000 gn=30.8/avg26.0 enc=13.3 dec=27.8 lrE=3.68e-05 lrD=1.10e-04 audio=38s td=0.5s tc=7.7s | A2S=2.58 A2S_lite=2.66 AMT=2.29 TAST=2.07
+step 63850 loss=52.2478 avg50=47.6017 sem=2.6491 ts=0.0000 gn=19.3/avg26.9 enc=11.7 dec=15.3 lrE=3.67e-05 lrD=1.10e-04 audio=40s td=0.5s tc=7.6s | A2S=2.54 A2S_lite=2.61 AMT=2.28 TAST=2.13
+step 63900 loss=56.7566 avg50=49.1236 sem=2.8272 ts=0.0000 gn=41.4/avg30.4 enc=17.3 dec=37.7 lrE=3.67e-05 lrD=1.10e-04 audio=39s td=0.5s tc=7.6s | A2S=2.53 A2S_lite=2.61 AMT=2.27 TAST=2.12
+step 63950 loss=36.6039 avg50=50.8099 sem=1.8267 ts=1.4114 gn=16.6/avg25.3 enc=11.4 dec=12.0 lrE=3.66e-05 lrD=1.10e-04 audio=39s td=0.6s tc=7.6s | A2S=2.50 A2S_lite=2.60 AMT=2.26 TAST=2.12
+step 64000 loss=54.3606 avg50=48.1617 sem=2.1753 ts=1.7939 gn=14.6/avg24.2 enc=11.7 dec=8.8 lrE=3.65e-05 lrD=1.10e-04 audio=59s td=0.7s tc=7.8s | A2S=2.45 A2S_lite=2.60 AMT=2.27 TAST=2.12
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.32 Δts=+0.26 Δpitch=+0.57 真sem=0.76 静sem=0.44 真pitch=0.70 acc=0.64 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.07 Δts=-0.06 Δpitch=+0.00 真sem=0.73 静sem=0.65 真pitch=0.18 acc=0.62 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.22 Δts=+0.06 Δpitch=+0.54 真sem=0.71 静sem=0.48 真pitch=0.59 acc=0.60 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.38 Δts=+0.25 Δpitch=+0.37 真sem=0.74 静sem=0.36 真pitch=0.79 acc=0.68 n=724
+  eval nasap 0/48(1s)
+  eval nasap 8/48(149s)
+  eval nasap 16/48(288s)
+  eval nasap 24/48(433s)
+  eval nasap 32/48(561s)

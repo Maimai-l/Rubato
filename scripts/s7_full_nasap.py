@@ -11,7 +11,7 @@ import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 
-sys.path.insert(0, "D:\\vscode_projects\\ee_download\\rubato-repl")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import partitura
 import pandas as pd
@@ -22,9 +22,9 @@ from rubato.data.nasap import segment_score_overlap
 from rubato.data.segment import make_labels
 
 
-ASAP_ROOT = Path("D:\\vscode_projects\\ee_download\\asap-dataset\\asap-dataset")
+ASAP_ROOT = Path(r"D:\vscode_projects\ee_download\asap-dataset\asap-dataset")
 METADATA_CSV = ASAP_ROOT / "metadata.csv"
-REPORT_PATH = Path("D:\\vscode_projects\\ee_download\\reports\\s7_full_nasap.json")
+REPORT_PATH = Path(r"D:\vscode_projects\ee_download\reports\s7_full_nasap.json")
 
 
 def loader(p):
@@ -111,9 +111,15 @@ def process_piece(xml_path: str, alignment_rows: list[dict]) -> tuple[list[dict]
             score_offset = bounds[a] if a < len(bounds) else bounds[-1]
             labels, fails = make_labels(sub_ir, "nasap", tmap=tmap, score_offset=score_offset)
             if labels:
+                # 【win 必带】段在演奏音频里的窗口(绝对演奏秒)。行不带 win 时 assemble 会把
+                # 4–32 小节的段标签配上【整场演奏】的 FLAC(几分钟)且 dur_s 全错 —— 训练对
+                # 直接是毒药。TAST 戳经 _shift_tmap 已归零为段内相对秒,与窗读音频对齐。
+                seg_t0 = float(tmap(score_offset))
+                seg_t1 = float(tmap(score_offset + sub_ir.score_end))
                 label_rows.append({
                     "utt_id": f"nasap_{Path(xml_path).stem}_{si:03d}",
                     "measure_range": [a, b],
+                    "win": [round(seg_t0, 3), round(seg_t1, 3)],
                     **{k: labels.get(k) for k in ("A2S", "A2S_lite", "TAST")},
                     "AMT": None,
                 })
@@ -125,6 +131,31 @@ def process_piece(xml_path: str, alignment_rows: list[dict]) -> tuple[list[dict]
 
 
 def main():
+    import argparse
+    from rubato.platform import harden_stdout
+    harden_stdout()          # GBK 控制台/管道下打 ✗ 等字符不再崩(全库硬化此前漏了本脚本)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--offset", type=int, default=0)
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--out-labels", type=str, default="")
+    ap.add_argument("--out-corpus", type=str, default="")
+    ap.add_argument("--fresh", action="store_true",
+                    help="先删旧输出再写(输出是 append 模式,整轮重跑不删会二次追加)")
+    args = ap.parse_args()
+
+    # 输出句柄只开一次(在循环外)。append 模式:配合 --offset/--limit 分块累积;
+    # 整轮重跑前必须 --fresh(或手删旧文件),否则二次追加。--fresh 只许全量首块用。
+    if args.fresh:
+        if args.offset:
+            print("✗ --fresh 只能配 offset=0(分块跑会把前块删掉)")
+            raise SystemExit(1)
+        for f in (args.out_labels, args.out_corpus):
+            if f and Path(f).exists():
+                Path(f).unlink()
+                print(f"--fresh: 已删旧输出 {f}")
+    label_fh = open(args.out_labels, "a", encoding="utf-8") if args.out_labels else None
+    corpus_fh = open(args.out_corpus, "a", encoding="utf-8") if args.out_corpus else None
+
     print("=" * 70)
     print("S7 nASAP Full Dataset Processing")
     print("=" * 70)
@@ -138,6 +169,13 @@ def main():
     pieces = df[has_maestro].copy()
     print(f"Total rows: {len(df)}")
     print(f"Rows with maestro_audio_performance: {len(pieces)}")
+
+    # Apply offset/limit for parallel chunking
+    if args.offset or args.limit:
+        start = args.offset
+        end = args.offset + args.limit if args.limit else len(pieces)
+        pieces = pieces.iloc[start:end]
+        print(f"Chunk: rows {start}-{end} ({len(pieces)} pieces)")
 
     # Results tracking
     results = {
@@ -222,9 +260,48 @@ def main():
                     if k in tm:
                         results["timemap_stats"][k] += tm[k]
 
+            # 【配对必需,修 no_audio=11526 全灭】行内带演奏音频引用(resolve_audio 据此配
+            # work/maestro_audio/<base>.flac);utt_id 加演奏号 —— 同曲多演奏不再撞名互踢;
+            # work_key 带上供 s7_assign_split 做 R-S7.4 保守划分(ASAP metadata 没有 split 列,
+            # 不划分则 nASAP 全体默认 train → nasap_val=0,eval hook 无 nASAP 可评)。
+            _perf_ref = str(row.get("maestro_audio_performance") or "")
+            _perf_stem = Path(str(row.get("midi_performance") or _perf_ref or "p")).stem
+            from rubato.data.pdmx import work_key as _mk_wk
+            _wk = _mk_wk(str(row.get("composer") or ""), str(row.get("title") or ""))
+            # 【utt 必须含 hash(音频|work_key)】ASAP 每首曲的谱一律叫 xml_score.musicxml,
+            # 旧版 nasap_{演奏者}_xml_score_{段号} 在"同一演奏者的不同曲"上撞名(P5d 拦下
+            # 跨 split 泄漏 5 例);只 hash 音频仍不够 —— 一个 MAESTRO 录音是完整演出,
+            # 对应同一奏鸣曲的多个乐章条目(共用音频,靠 win 各取一段),乐章间照样撞
+            # (执行端实测 dup_after=584)。work_key 带乐章号,(音频, 乐章, 段号) 才唯一。
+            import hashlib as _hl
+            _tag = _hl.sha256(f"{_perf_ref}|{_wk}".encode()).hexdigest()[:8]
+            for lr in label_rows:
+                lr["perf_audio"] = _perf_ref
+                # 参考谱路径不仅供 S7 渲染时校验，也供后续 nASAP 校准
+                # (录音 → Transkun → M2ST) 与 ASAP 官方 MusicXML 配对。此前漏写，
+                # 会令所有已生成标签在 calib_pairs 中表现为 xml=''。
+                lr["xml_score"] = xml_rel
+                _si = lr["utt_id"].rsplit("_", 1)[1]
+                lr["utt_id"] = f"nasap_{_perf_stem}_{_tag}_{_si}"
+                lr["work_key"] = _wk
+                if row.get("split"):
+                    lr["split"] = str(row["split"])
             if label_rows and len(label_rows) > 0:
                 results["successful"] += 1
                 results["total_segments"] += len(label_rows)
+
+                # Write labels
+                if label_fh:
+                    for lr in label_rows:
+                        label_fh.write(json.dumps(lr, ensure_ascii=False) + "\n")
+
+                # Write corpus (A2S + A2S_lite only — tokenizer 语料按论文 §3.2)
+                if corpus_fh:
+                    for lr in label_rows:
+                        for d in ("A2S", "A2S_lite"):
+                            t = lr.get(d)
+                            if t and t.strip():
+                                corpus_fh.write(t.strip() + "\n")
 
                 # Count A2S chars
                 for lr in label_rows:
@@ -313,7 +390,18 @@ def main():
           f"(dropped_nomap={results['timemap_stats']['dropped_no_scorepos']}, "
           f"nonmonotone={results['timemap_stats']['dropped_nonmonotone']}, "
           f"anchors={results['timemap_stats']['anchors']})")
+    # Close file handles
+    if label_fh:
+        label_fh.close()
+    if corpus_fh:
+        corpus_fh.close()
+
     print(f"\nReport written to: {REPORT_PATH}")
+    if args.out_labels:
+        print(f"Labels written to: {args.out_labels}  (successful={results['successful']}, "
+              f"segments={results['total_segments']})")
+    if args.out_corpus:
+        print(f"Corpus (A2S+A2S_lite) written to: {args.out_corpus}")
 
 
 if __name__ == "__main__":

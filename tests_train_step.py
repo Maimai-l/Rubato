@@ -73,6 +73,10 @@ print("[5] resolve_log_probs:元组/dict/Tensor/未知")
 t = torch.randn(1, 2, V)
 check("tuple_first", resolve_log_probs((t, None, None, None)) is t)
 check("dict_logprobs", resolve_log_probs({"log_probs": t}) is t)
+raw = torch.randn(1, 2, V)
+check("dict_logits_normalized",
+      torch.allclose(resolve_log_probs({"logits": raw}).logsumexp(-1),
+                     torch.zeros(1, 2), atol=1e-6))
 check("bare_tensor", resolve_log_probs(t) is t)
 try:
     resolve_log_probs("garbage")
@@ -133,5 +137,26 @@ parts["loss"].backward()
 gnorm = sum(p.grad.abs().sum().item() for p in model.parameters() if p.grad is not None)
 check("gradients_flow", gnorm > 0, f"grad_norm={gnorm}")
 check("ts_counted", parts["n_ts"] == 2, parts["n_ts"])   # 每条序列 1 个时间戳位置
+
+print("[7] token type / timestamp 映射损坏必须在 forward 前失败")
+bad_type = {k: (v.clone() if isinstance(v, torch.Tensor) else v)
+            for k, v in batch.items()}
+bad_type["token_types"][0, 0] = 2
+try:
+    training_step_logic(model, bad_type, MockTok(), ts_token_ids=ts_ids)
+    bad_type_rejected = False
+except ValueError:
+    bad_type_rejected = True
+check("bad_token_type_rejected", bad_type_rejected)
+bad_ts = {k: (v.clone() if isinstance(v, torch.Tensor) else v)
+          for k, v in batch.items()}
+ts_pos = (bad_ts["token_types"] == 1).nonzero()[0]
+bad_ts["labels"][ts_pos[0], ts_pos[1]] = 1
+try:
+    training_step_logic(model, bad_ts, MockTok(), ts_token_ids=ts_ids)
+    bad_ts_rejected = False
+except ValueError:
+    bad_ts_rejected = True
+check("timestamp_mapping_rejected", bad_ts_rejected)
 
 print(f"\n全部通过: {PASS} 项")

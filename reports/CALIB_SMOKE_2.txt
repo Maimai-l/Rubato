@@ -1,0 +1,38 @@
+# CALIB_SMOKE_2 — 已获授权的 muster 安装尝试（2026-07-22）
+
+承接 `CALIB_SMOKE.txt`：用户已明确授权安装缺失的 `muster`，以继续 m2st
+MIDI→MusicXML 冒烟。
+
+## 执行的安装命令
+
+```powershell
+& 'D:\ProgramData\envs\nemo_test\python.exe' -m pip install 'muster @ git+https://github.com/TimFelixBeyer/amtevaluation.github.io'
+```
+
+原始输出（安装未开始写入环境）：
+
+```text
+Collecting muster @ git+https://github.com/TimFelixBeyer/amtevaluation.github.io
+  Cloning https://github.com/TimFelixBeyer/amtevaluation.github.io to C:\Users\Administrator\AppData\Local\Temp\pip-install-6r9du7cy\muster_e3782130526d44068f69779367ed23b6
+Could not fetch URL https://pypi.org/simple/pip/: There was a problem confirming the ssl certificate: HTTPSConnectionPool(host='pypi.org', port=443): Max retries exceeded with url: /simple/pip/ (Caused by SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1016))) - skipping
+  Running command git clone --filter=blob:none --quiet https://github.com/TimFelixBeyer/amtevaluation.github.io 'C:\Users\Administrator\AppData\Local\Temp\pip-install-6r9du7cy\muster_e3782130526d44068f69779367ed23b6'
+  fatal: unable to access 'https://github.com/TimFelixBeyer/amtevaluation.github.io/': schannel: failed to receive handshake, SSL/TLS connection failed
+ERROR: Failed to build 'muster' when git clone --filter=blob:none --quiet https://github.com/timfelixbeyer/amtevaluation.github.io 'c:\users\administrator\appdata\local\temp\pip-install-6r9du7cy\muster_e3782130526d44068f69779367ed23b6'
+```
+
+## README 手动方式复试
+
+```powershell
+git clone https://github.com/TimFelixBeyer/amtevaluation.github.io 'D:\vscode_projects\ee_download\m2st\muster'
+```
+
+原始输出：
+
+```text
+Cloning into 'D:\vscode_projects\ee_download\m2st\muster'...
+fatal: unable to access 'https://github.com/TimFelixBeyer/amtevaluation.github.io/': schannel: failed to receive handshake, SSL/TLS connection failed
+```
+
+本机的其他 Python 环境、pip cache 和当前工作区均没有 `muster` 副本可复用。未关闭
+TLS 校验、未更换第三方镜像、未手动伪造模块，也未修改任何 m2st/Rubato 代码；因此
+`rec1.xml`、`rec2.xml`、`rec3.xml` 仍未生成。

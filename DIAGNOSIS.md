@@ -75,7 +75,7 @@
 
 | # | 根因 | 修复 |
 |---|---|---|
-| **#16** Windows 混合斜杠 | `os.sep` 拼接 vs glob 正斜杠 | `platform.posix_path()`;`run()` 容忍 Path 对象 |
+| **#16** Windows 混合斜杠 | `os.sep` 拼接 vs glob 正斜杠 | 生产调用点统一用 `pathlib.Path`;`run()` 容忍 Path 对象 |
 | **#17** `platform.run()` 路径解析不稳 | `configs/project.yaml` 相对 CWD 解析 | 锚定仓库根,与 CWD 无关 |
 | **#18** render/core.py 本地改动未回传 | peak_normalize 等只在本地 | 已在提交的 core.py 中(peak 归一化位置正确:sfizz 后、噪底前) |
 | **#19** evaluate.py 从未跑真实评测 | 无 checkpoint;且 `PAPER_NUMBERS` 把 note F1 误标成 OMR-NED | 修正对照数字(真 OMR-NED 64.3/78.7/75.9);补 `amt_text_to_notes` 供 eval hook |

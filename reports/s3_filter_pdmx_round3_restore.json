@@ -1,0 +1,18 @@
+{
+  "stage": "S3",
+  "candidates_from_csv": 142346,
+  "all_pieces_kept": 142346,
+  "unique_work_keys": 135224,
+  "blacklist_size": 1058,
+  "restore_candidates": "D:\\vscode_projects\\ee_download\\work\\pdmx_dedup_restore_candidates.jsonl",
+  "restore_ids_supplied": 149595,
+  "restore_only": true,
+  "splits": {
+    "train": 128585,
+    "val": 6772,
+    "test": 6989
+  },
+  "acceptance": {
+    "A-S3.4": "pass (all valid piano pieces kept, no artificial cap)"
+  }
+}

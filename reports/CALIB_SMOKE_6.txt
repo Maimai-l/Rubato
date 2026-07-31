@@ -1,0 +1,47 @@
+# CALIB_SMOKE_6 — D56 离线依赖与 M2ST 冒烟（2026-07-22）
+
+`CALIB_SMOKE_3.txt` 已是历史报告，依“旧报告不覆盖”规则，本次使用下一个未占用编号。
+依 D56 全程使用 `D:\vscode_projects\ee_download\m2st\venv_m2st`；`nemo_test` 未改动，未启动训练。
+
+## pip 安装末尾
+
+基础依赖（TUNA 镜像）成功。末尾：
+
+```text
+Successfully installed ... torch-2.13.0 torchmetrics-1.9.0 tqdm-4.69.0
+transformers-5.14.1 typer-0.27.0 typing-extensions-4.16.0 tzdata-2026.3 yarl-1.24.5
+```
+
+仓库内 vendored zip 成功。末尾：
+
+```text
+Successfully installed chardet-7.4.3 charset_normalizer-3.4.9 contourpy-1.3.3
+cycler-0.12.1 fonttools-4.63.0 jsonpickle-4.1.2 kiwisolver-1.5.0
+matplotlib-3.11.1 more-itertools-11.1.0 music21-9.2.0b3 pillow-12.3.0
+pyparsing-3.3.2 requests-2.34.2 score_transformer-0.1 urllib3-2.7.0
+webcolors-25.10.0
+```
+
+## 包装脚本完整输出
+
+```text
+Traceback (most recent call last):
+  File "D:\vscode_projects\ee_download\Rubato\scripts\calib_m2st_infer.py", line 83, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "D:\vscode_projects\ee_download\Rubato\scripts\calib_m2st_infer.py", line 55, in main
+    from utils import quantize_path
+  File "D:\vscode_projects\ee_download\m2st\midi2scoretransformer\utils.py", line 6, in <module>
+    from score_transformer import score_similarity
+  File "D:\vscode_projects\ee_download\m2st\venv_m2st\Lib\site-packages\score_transformer\__init__.py", line 4, in <module>
+    from .tokenizer.score_to_tokens import MusicXML_to_tokens as score_to_tokens
+  File "D:\vscode_projects\ee_download\m2st\venv_m2st\Lib\site-packages\score_transformer\tokenizer\score_to_tokens.py", line 8, in <module>
+    from bs4 import BeautifulSoup
+ModuleNotFoundError: No module named 'bs4'
+```
+
+## 状态
+
+基础依赖及两个 vendored Git 依赖均安装成功；M2ST 在导入时因 `score_transformer` 的缺失
+`bs4` 依赖停止。D56 要求“报错原文、仍不自行修复”，所以没有安装额外包、没有改包装脚本，
+也没有将既有 XML 当成本轮 ✓。等待下一条书面修复指令。

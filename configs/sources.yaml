@@ -1,4 +1,4 @@
-# 音源清单 — 4 源池,全 sfizz 引擎。
+# 音源清单 — 6 源池,全 sfizz 引擎。
 # 权重依据: Salamander 是唯一已知力度层≥10 且 sfizz 兼容无误的主力;
 # Splendid / ExperienceNY 提供互补音色(明亮 vs. 中性大琴);
 # Kamoepiano 作为少量离群音色注入,避免音源过拟合。
@@ -38,6 +38,22 @@ sources:
     path: assets/soundfonts/Kamoepiano/kamoepiano301/kamoepiano301.sfz
     note: 212 MB,音色偏暗,少量注入增加音源多样性
     url: VERIFY
+  S5_abchase5:
+    engine: sfizz
+    ratio: 0.10
+    license: free
+    path: assets/soundfonts/ABChase5/ABChase_stretch-tuned.sfz
+    variants:
+      - assets/soundfonts/ABChase5/ABChase_stretch-tuned.sfz
+      - assets/soundfonts/ABChase5/ABChase_untuned.sfz
+    note: stretch-tuned / untuned 双变体,音色现代,与 Salamander 互补
+  S6_softify:
+    engine: sfizz
+    ratio: 0.10
+    license: free
+    path: assets/soundfonts/SoftifyPiano/SFZ/Softify Piano Vol 1 V1.1.sfz
+    note: 1.8 GB 高品质钢琴, SE8 ORTF 话筒位
+    url: https://www.softifymusic.com/
 render:
   sr_render: 44100
   sr_target: 16000

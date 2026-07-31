@@ -1,0 +1,43 @@
+# CALIB_SMOKE_3 — 本地 muster ZIP 与 m2st 版本兼容性结论（2026-07-22）
+
+## ZIP 核验
+
+用户提供的 `D:\vscode_projects\ee_download\amtevaluation.github.io-python-wrapper.zip`
+正确：顶层有 `setup.py`，包内有 `muster/__init__.py` 和 `muster/muster.py`，后者导出
+`muster` 函数，满足 m2st 的 `from muster import muster`。
+
+## 本地安装结果
+
+标准 `pip install` 调用该包的 `setup.py`；其 `CustomBuildPy` 会执行
+`muster/compile.sh`。该脚本需要 `sh` 和 `g++`，并编译 MUSTER 的评分二进制。机器有
+Git 的 `sh.exe`，但没有 `g++`，故标准安装在 `build_py` 阶段失败：
+
+```text
+running bdist_wheel
+running build
+running build_py
+error: [WinError 2] 系统找不到指定的文件。
+```
+
+## m2st 推理验证
+
+为不依赖评分二进制，使用仅本进程有效的 `PYTHONPATH` 指向本地 wrapper 源码。这样
+`from muster import muster` 已可导入，说明 ZIP 本身没有问题。
+
+权重加载所需的旧配置类已按 PyTorch 的受限 allowlist 要求加入；随后 m2st 的首曲
+`rec1.mid` 已实际进入 `Infer 0 / 3185`。但当前环境的 Transformers 为 4.57.6，m2st
+源码版本为 2024-10-11，运行时 API 已不兼容，最终错误为：
+
+```text
+TypeError: CustomRoFormerSelfAttention.forward() got an unexpected keyword argument 'past_key_values'
+```
+
+这不是数据或 ZIP 问题，而是新版 Transformers 以 `past_key_values` 调用注意力层，旧版
+m2st 自定义 `CustomRoFormerSelfAttention.forward()` 不接受此参数。继续在运行时打补丁
+会触及模型解码语义，已停止。`rec1.xml`、`rec2.xml`、`rec3.xml` 均未生成。
+
+## 后续需要
+
+应在隔离的 Python 3.11 环境中使用 m2st 当时兼容的 Transformers（README 的最早允许版
+`transformers==4.29.2` 是优先候选），而不能降级当前 `nemo_test` 环境；同时可只将本地
+muster 源码置入该环境的 import path 做转换，完整 MUSTER 评分另需可用的 GNU g++。

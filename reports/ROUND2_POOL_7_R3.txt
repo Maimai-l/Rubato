@@ -1,0 +1,13 @@
+# ROUND2_POOL_7_R3 —— r3 挂载后终对账(池 v3 冻结件)
+日期: 2026-07-25;来源: 用户人手执行 build_dataset --dry-run 后原文转贴(规划端落档)
+
+  pdmx     rows= 424284 kept= 372122 no_audio=  37920 no_dialect=     0 bad_schema=    0 dup=14239 filtered=    3
+  nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0 filtered=    0
+  maestro  rows= 374084 kept= 374084 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0 filtered=    0
+  TOTAL utts=753304 by_dialect={'A2S': 379220, 'A2S_lite': 379065, 'TAST': 198505, 'AMT': 374084}
+        by_kind={'pdmx': 372122, 'nasap': 7098, 'maestro': 374084} by_split={'train': 704549, 'test': 25254, 'val': 8932, 'quarantine_leak': 1239, 'validation': 13330}
+  train=704549 nasap_val=1142 maestro_val=28264 other=1239
+
+判读(对 D70 预登记):TOTAL/kept/train/评测四池/dup/no_audio/filtered 全部命中;
+A2S_lite 379,065(差 22 行 lite 缺省,容差内);撞名样本为既有 14,239 类(无新增)。
+**池 v3 = 753,304 冻结;数据建设期完工。**

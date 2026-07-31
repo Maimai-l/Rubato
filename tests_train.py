@@ -1,7 +1,11 @@
 """S11 train.py 装配测试(optimizer/schedule/bucketing 纯逻辑)。运行: python tests_train.py"""
 import sys, torch
 sys.path.insert(0, ".")
-from rubato.model.train import build_optimizer, bucket_batches
+from rubato.model.train import (
+    build_optimizer, bucket_batches, group_grad_norms,
+    normalize_accumulated_gradients, new_step_metrics,
+    accumulate_step_metrics, finalize_step_metrics, clip_gradients,
+)
 
 PASS = 0
 def check(name, cond, detail=""):
@@ -68,6 +72,84 @@ big = [{"utt_id": "big", "dur_s": 45}, {"utt_id": "s1", "dur_s": 10}, {"utt_id":
 batches = bucket_batches(big, max_batch_sec=50)
 # 10+10 可同桶,45 单独(45+10>50)
 check("respects_limit", all(sum(s["dur_s"] for s in b) <= 50 for b in batches), batches)
+try:
+    bucket_batches([{"utt_id": "too_long", "dur_s": 50.01}], max_batch_sec=50)
+    oversize_raised = False
+except ValueError:
+    oversize_raised = True
+check("single_oversize_is_not_silently_admitted", oversize_raised)
+
+print("[6] 分组梯度范数(enc/dec 观测,与总范数勾稽)")
+model3 = FakeModel()
+opt3, _ = build_optimizer(model3, cfg)
+loss = (model3.decoder(model3.encoder(torch.randn(4, 10))) ** 2).sum()
+loss.backward()
+gns = group_grad_norms(opt3.param_groups)
+check("one_norm_per_group", len(gns) == len(opt3.param_groups), gns)
+check("norms_positive", all(g > 0 for g in gns), gns)
+total = float(torch.nn.utils.clip_grad_norm_(model3.parameters(), 1e9))  # 阈值大到不裁,只取总范数
+recon = sum(g * g for g in gns) ** 0.5
+check("groups_reconcile_total", abs(recon - total) < 1e-4 * max(total, 1), f"recon={recon} total={total}")
+# 无梯度参数组不炸、给 0
+opt_empty = torch.optim.AdamW([{"params": [torch.nn.Parameter(torch.zeros(3))]}])
+check("no_grad_gives_zero", group_grad_norms(opt_empty.param_groups) == [0.0])
+
+print("[7] 梯度累积按完整有效 batch 的序列平均，切成几批不改变结果")
+xs = torch.tensor([1.0, 2.0, 4.0, 8.0])
+def accumulated_grad(chunks):
+    w = torch.nn.Parameter(torch.tensor(0.7))
+    pos = 0
+    n = 0
+    for size in chunks:
+        x = xs[pos:pos + size]
+        ((w * x).square().mean() * size).backward()
+        pos += size
+        n += size
+    normalize_accumulated_gradients([w], n)
+    return float(w.grad)
+g13 = accumulated_grad([1, 3])
+g22 = accumulated_grad([2, 2])
+g4 = accumulated_grad([4])
+check("partition_invariant", abs(g13 - g22) < 1e-6 and abs(g13 - g4) < 1e-6,
+      (g13, g22, g4))
+
+print("[8] 日志汇总覆盖整步全部 micro-batch，不再只报最后一批")
+s = new_step_metrics()
+accumulate_step_metrics(s, {
+    "batch_size": 2, "batch_audio_sec": 60.0, "loss": torch.tensor(2.0),
+    "semantic_loss": torch.tensor(1.0), "n_sem": 10,
+    "ts_loss": torch.tensor(3.0), "n_ts": 2,
+    "pitch_loss": torch.tensor(4.0), "n_pitch": 1,
+    "dialect_sem": {"A2S": (1.0, 2)},
+})
+accumulate_step_metrics(s, {
+    "batch_size": 1, "batch_audio_sec": 40.0, "loss": torch.tensor(5.0),
+    "semantic_loss": torch.tensor(2.0), "n_sem": 20,
+    "ts_loss": torch.tensor(7.0), "n_ts": 0,
+    "pitch_loss": None, "n_pitch": 0,
+    "dialect_sem": {"TAST": (2.0, 1)},
+})
+sm = finalize_step_metrics(s)
+check("full_step_audio", sm["batch_audio_sec"] == 100.0 and sm["micro_batches"] == 2, sm)
+check("loss_sequence_weighted", abs(sm["loss"] - 3.0) < 1e-7, sm["loss"])
+check("semantic_token_weighted", abs(sm["semantic_loss"] - 5 / 3) < 1e-7,
+      sm["semantic_loss"])
+
+print("[9] 非有限梯度必须在 optimizer.step 前硬失败")
+p_bad = torch.nn.Parameter(torch.tensor(1.0))
+p_bad.grad = torch.tensor(float("nan"))
+try:
+    clip_gradients([p_bad], 1.0)
+    nonfinite_rejected = False
+except RuntimeError:
+    nonfinite_rejected = True
+check("nonfinite_gradient_rejected", nonfinite_rejected)
+try:
+    clip_gradients([torch.nn.Parameter(torch.tensor(1.0))], 0.0)
+    bad_clip_rejected = False
+except ValueError:
+    bad_clip_rejected = True
+check("bad_clip_norm_rejected", bad_clip_rejected)
 
 print(f"\n全部通过: {PASS} 项")
 print("注:training_step/eval_hook/主循环需 GPU+NeMo 模型+真实数据,带断言本地跑;")

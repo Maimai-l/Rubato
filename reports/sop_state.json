@@ -1,0 +1,111 @@
+{
+ "done": [
+  "P0",
+  "P1a",
+  "P1b",
+  "P1c",
+  "P2a",
+  "P2b",
+  "P2c",
+  "P3",
+  "P2d",
+  "P4",
+  "P5a",
+  "P5b",
+  "P6a",
+  "P6b",
+  "P6b2",
+  "P2e"
+ ],
+ "approvals": {},
+ "numbers": {
+  "P0": {
+   "commit": "765677c"
+  },
+  "P1a": {
+   "outlier_pieces": "728"
+  },
+  "P1b": {
+   "clamped": "2294",
+   "audio_deleted": "652"
+  },
+  "P2a": {
+   "rows_dropped": "0",
+   "audio_deleted": "0"
+  },
+  "P1c": {
+   "nonpiano": "0"
+  },
+  "P2b": {
+   "vn_ok": "19",
+   "utts": "28",
+   "tast": "28"
+  },
+  "P2c": {
+   "vn_ok": "34902",
+   "utts": "34859",
+   "tast": "34859",
+   "vn_recycles": "513"
+  },
+  "P3": {
+   "ok": "417",
+   "fail": "0"
+  },
+  "P2d": {},
+  "P4": {
+   "corpus_lines": 273049,
+   "labels": 135977,
+   "giant_done": "22/85",
+   "giant_skipped": "63 timeout/fail"
+  },
+  "P5a": {
+   "windows": "84",
+   "labels": "84",
+   "win_fail": "0"
+  },
+  "P5b": {
+   "windows": "23659",
+   "labels": "23657",
+   "win_fail": "2",
+   "not_found": "0",
+   "parse_fail": "0"
+  },
+  "P6a": {
+   "sliced": "54",
+   "structure_mismatch": "4",
+   "no_whole_audio": "4",
+   "pieces_done": "12"
+  },
+  "P6b": {
+   "sliced": "76263",
+   "structure_mismatch": "5792",
+   "seg_too_long": "4452",
+   "no_whole_audio": "3683",
+   "pieces_done": "26778"
+  },
+  "P6b2": {},
+  "P6c": {
+   "corpus_lines": "364633"
+  },
+  "P7": {
+   "vocab": "8000",
+   "split_rate": "0.047",
+   "learnable": "3571"
+  },
+  "P8": {
+   "total_utts": "112480",
+   "pdmx_kept": "111204",
+   "maestro_kept": "1276",
+   "nasap_kept": "0",
+   "dialects": "A2S=111204, A2S_lite=111148, TAST=34887, AMT=1276",
+   "train": "112166",
+   "val": "137",
+   "test": "177"
+  },
+  "P2e": {
+   "fixed": "15917",
+   "nulled": "13082",
+   "already_ok": "5888"
+  }
+ }
+}

@@ -3,16 +3,37 @@ S11 采样与 tiling(R-S11.2, R-S11.3)。纯逻辑,沙盒可验证。
 """
 from __future__ import annotations
 import hashlib
+import math
 
 DIALECT_MIX = {"A2S": 0.35, "A2S_lite": 0.15, "TAST": 0.20, "AMT": 0.30}
 
 
+def mix_with_amt(amt: float) -> dict:
+    """
+    O4 旋钮:AMT 配比设为 amt,腾出的权重按 35:15:20 等比还给其余三方言
+    (保持 D2 纸面混比的内部平衡,只动 AMT 一个自由度)。
+    amt=0.30 时返回值 == DIALECT_MIX(恒等,便于对照)。
+    越界直接抛错:混比错了是整轮训练报废,不静默兜底。
+    """
+    if not (0.05 <= amt <= 0.50):
+        raise ValueError(f"amt_mix={amt} 越界(合理带 0.05-0.50);拒绝启动")
+    rest = 1.0 - amt
+    base = DIALECT_MIX["A2S"] + DIALECT_MIX["A2S_lite"] + DIALECT_MIX["TAST"]   # 0.70
+    return {"A2S": DIALECT_MIX["A2S"] * rest / base,
+            "A2S_lite": DIALECT_MIX["A2S_lite"] * rest / base,
+            "TAST": DIALECT_MIX["TAST"] * rest / base,
+            "AMT": amt}
+
+
 def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
-                    mix: dict | None = None):
+                    mix: dict | None = None, report: dict | None = None):
     """
     R-S11.2:按混比采样 (utt_id, dialect),不按数据集自然占比。
     available_by_utt: {utt_id: [可用 dialect]}。
     返回一个 epoch 的采样列表 [(utt_id, dialect)],总量 ≈ utt 数。
+    mix:可从配置注入(DIALECT_MIX 只是缺省),便于按数据实况调混比。
+    report:若传入 dict,填充每个 dialect 的 {pool_size, quota, oversample_ratio}——
+      小池被有放回过采样多少倍是数据多样性风险(AMT 池小却配大额=同曲反复),必须可见不静默。
 
     修复说明:旧实现"逐 utt 按其可用 dialect 的相对权重选一个"——当可用性分布偏斜时
     (MAESTRO 只有 AMT、占语料大头),epoch 的 dialect 分布=数据自然占比,直接违反
@@ -22,6 +43,11 @@ def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
     import random
     rng = random.Random(f"{seed}:{epoch}")
     mix = mix or DIALECT_MIX
+    if set(mix) != set(DIALECT_MIX):
+        raise ValueError(
+            f"dialect mix 键必须恰为 {sorted(DIALECT_MIX)}，得到 {sorted(mix)}")
+    if any(not math.isfinite(float(w)) or float(w) < 0 for w in mix.values()):
+        raise ValueError(f"dialect mix 含负数/非有限权重: {mix}")
     pools = {d: [u for u, avail in available_by_utt.items() if avail and d in avail]
              for d in mix}
     pools = {d: p for d, p in pools.items() if p}
@@ -29,15 +55,30 @@ def dialect_sampler(available_by_utt: dict, seed: int, epoch: int,
         return []
     n_total = sum(1 for a in available_by_utt.values() if a)
     tot_w = sum(mix[d] for d in pools)
+    if tot_w <= 0:
+        raise ValueError(f"有数据的方言权重总和必须 >0: pools={sorted(pools)} mix={mix}")
+    # 最大余数法：独立 round() 不守恒，N 很小时甚至四类 quota 全为 0。
+    # 先取 floor，再按小数余数补齐，保证一个 epoch 精确采 N 条。
+    raw_quota = {d: n_total * float(mix[d]) / tot_w for d in pools}
+    quotas = {d: int(math.floor(q)) for d, q in raw_quota.items()}
+    remain = n_total - sum(quotas.values())
+    order = sorted(pools, key=lambda d: (-(raw_quota[d] - quotas[d]), d))
+    for d in order[:remain]:
+        quotas[d] += 1
     out = []
     for d in sorted(pools):
-        quota = int(round(n_total * mix[d] / tot_w))
+        quota = quotas[d]
         pool = pools[d]
         take = rng.sample(pool, min(quota, len(pool)))     # 优先无放回
         while len(take) < quota:                           # 小池按混比过采样(有放回)
             take.append(rng.choice(pool))
         out.extend((u, d) for u in take)
+        if report is not None:
+            report[d] = {"pool_size": len(pool), "quota": quota,
+                         "oversample_ratio": round(quota / max(len(pool), 1), 2)}
     rng.shuffle(out)
+    if len(out) != n_total:
+        raise RuntimeError(f"dialect quota 不守恒:{len(out)} != {n_total}")
     return out
 
 

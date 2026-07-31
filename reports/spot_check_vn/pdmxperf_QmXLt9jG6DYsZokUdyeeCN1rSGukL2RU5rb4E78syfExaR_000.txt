@@ -1,0 +1,10 @@
+utt_id: pdmxperf_QmXLt9jG6DYsZokUdyeeCN1rSGukL2RU5rb4E78syfExaR_000
+audio: D:\vscode_projects\ee_download\work\pdmx_audio\pdmxperf_QmXLt9jG6DYsZokUdyeeCN1rSGukL2RU5rb4E78syfExaR_000.wav
+measure_range: [0, 17]
+score_range: None
+
+--- A2S(前 500 字)---
+|4/4k-4 3/4PL:A-2E-3PR:C4A-4 3/16PL:a-2e-3A-2E-3PR:c4a-4D-4B-4 1/16PL:a-2e-3PR:d-4b-4 |4/4k-4PL:A-2A-3PR:E-4C5 3/16PL:a-2a-3A-2A-3PR:e-4c5E-4C5 1/16PL:a-2a-3A-2A-3PR:e-4c5E-4C5 3/16PL:a-2a-3A-2A-3PR:e-4c5F4D-5 1/16PL:a-2a-3A-2E-3PR:f4d-5E-4C5 3/16PL:a-2e-3A-2E-3PR:e-4c5D-4B-4 1/16PL:a-2e-3A-2E-3PR:d-4b-4C4A-4 3/16PL:a-2e-3A-2E-3PR:c4a-4D-4B-4 1/16PL:a-2e-3PR:d-4b-4 |4/4k-4PL:A-2A-3PR:E-4C5 3/16PL:a-2a-3A-2A-3PR:e-4c5D-4B-4 1/16PL:a-2a-3A-2A-3PR:d-4b-4C4A-4 3/16PL:a-2a-3A-2A-3PR:c4a-4D-4F4 1/16PL
+
+--- TAST(前 500 字)---
+|4/4k-4 <|0.00|> 3/4PL:A-2E-3PR:C4A-4 <|0.51|> 3/16PL:a-2e-3A-2E-3PR:c4a-4D-4B-4 <|0.78|> 1/16PL:a-2e-3PR:d-4b-4 <|0.87|> |4/4k-4PL:A-2A-3PR:E-4C5 <|0.87|> 3/16PL:a-2a-3A-2A-3PR:e-4c5E-4C5 <|1.12|> 1/16PL:a-2a-3A-2A-3PR:e-4c5E-4C5 <|1.20|> 3/16PL:a-2a-3A-2A-3PR:e-4c5F4D-5 <|1.45|> 1/16PL:a-2a-3A-2E-3PR:f4d-5E-4C5 <|1.54|> 3/16PL:a-2e-3A-2E-3PR:e-4c5D-4B-4 <|1.80|> 1/16PL:a-2e-3A-2E-3PR:d-4b-4C4A-4 <|1.88|> 3/16PL:a-2e-3A-2E-3PR:c4a-4D-4B-4 <|2.14|> 1/16PL:a-2e-3PR:d-4b-4 <|2.23|> |4/4k-4PL:A-2A-

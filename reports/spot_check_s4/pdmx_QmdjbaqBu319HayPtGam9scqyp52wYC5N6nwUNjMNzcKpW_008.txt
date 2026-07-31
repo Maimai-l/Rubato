@@ -1,0 +1,7 @@
+utt_id: pdmx_QmdjbaqBu319HayPtGam9scqyp52wYC5N6nwUNjMNzcKpW_008
+audio: D:\vscode_projects\ee_download\work\pdmx_audio\pdmx_QmdjbaqBu319HayPtGam9scqyp52wYC5N6nwUNjMNzcKpW_008.flac
+measure_range: [54, 68]
+score_range: [51.0, 64.0]
+
+--- A2S(前 500 字)---
+|4/4k#3PL:D2D3PR:G#4D5G#5 1/8PL:d2d3A2 1/24a2D3 1/24d3F#3 1/24f#3A3PR:g#4d5g#5F#4D5F#5 1/8PL:a3F#3 1/8f#3D4PR:f#4d5f#5 1/8PL:d4A3PR:G#4G#5 1/8PL:a3F#3PR:g#4g#5A4A5 1/8PL:f#3D3PR:a4a5B4B5 1/8PL:d3PR:b4b5 |4/4k#3PL:C#2C#3PR:C#5A5C#6 1/4PL:c#2c#3C#3A3PR:c#5a5c#6 1/8C#5A5C#6 1/8PL:c#3a3C#3G#3PR:c#5a5c#6B4G#5B5 1/4PL:c#3g#3C#1C#2PR:b4g#5b5 1/4PL:c#1c#2 |4/4k#3D1D2PR:A4D5A5 1/8PL:d1d2D1D2 1/8d1d2PR:a4d5a5A4D5G#5 1/8PL:D3 1/24d3A2 1/24a2F#2 1/24f#2D2PR:a4d5g#5 1/8PL:d2PR:G#4G#5 1/8PL:D1D2PR:g#4g#5A4A5 

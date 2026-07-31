@@ -1,0 +1,34 @@
+训练配置回显: clip_norm=25.0 lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 eval_every=1000 eval_max=48
+续训:恢复 step=15000 epoch=1(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=9.59e-05 dec=2.88e-04)
+step 15050 loss=35.1483 avg50=55.3221 sem=2.4867 ts=2.3892 gn=18.3/avg22.7 enc=13.1 dec=12.7 lrE=9.59e-05 lrD=2.88e-04 audio=50s | A2S=2.95 A2S_lite=3.06 AMT=2.43 TAST=2.37
+step 15100 loss=54.1777 avg50=53.8608 sem=2.3171 ts=2.5348 gn=15.3/avg22.6 enc=11.5 dec=10.1 lrE=9.58e-05 lrD=2.87e-04 audio=40s | A2S=2.96 A2S_lite=3.15 AMT=2.46 TAST=2.42
+step 15150 loss=85.8276 avg50=61.5187 sem=3.5793 ts=0.0000 gn=15.0/avg20.7 enc=11.5 dec=9.5 lrE=9.58e-05 lrD=2.87e-04 audio=39s | A2S=3.02 A2S_lite=3.08 AMT=2.46 TAST=2.42
+step 15200 loss=72.8565 avg50=55.0799 sem=2.5618 ts=2.6734 gn=20.3/avg22.8 enc=13.7 dec=14.9 lrE=9.58e-05 lrD=2.87e-04 audio=37s | A2S=2.99 A2S_lite=3.04 AMT=2.46 TAST=2.46
+step 15250 loss=56.3773 avg50=54.5442 sem=2.3220 ts=2.0548 gn=38.1/avg22.3 enc=20.3 dec=32.3 lrE=9.57e-05 lrD=2.87e-04 audio=54s | A2S=2.98 A2S_lite=3.03 AMT=2.45 TAST=2.46
+step 15300 loss=35.3988 avg50=58.3921 sem=2.9706 ts=0.0000 gn=14.4/avg22.8 enc=10.6 dec=9.6 lrE=9.57e-05 lrD=2.87e-04 audio=32s | A2S=3.01 A2S_lite=3.02 AMT=2.46 TAST=2.45
+step 15350 loss=67.5210 avg50=58.3021 sem=2.1667 ts=2.3123 gn=32.2/avg21.0 enc=17.2 dec=27.3 lrE=9.57e-05 lrD=2.87e-04 audio=34s | A2S=2.99 A2S_lite=3.03 AMT=2.46 TAST=2.44
+step 15400 loss=61.4543 avg50=59.2498 sem=2.4198 ts=3.9235 gn=24.4/avg19.7 enc=13.7 dec=20.2 lrE=9.56e-05 lrD=2.87e-04 audio=36s | A2S=2.98 A2S_lite=2.99 AMT=2.46 TAST=2.44
+step 15450 loss=68.1379 avg50=61.5953 sem=2.3908 ts=2.3745 gn=39.1/avg21.9 enc=20.6 dec=33.2 lrE=9.56e-05 lrD=2.87e-04 audio=57s | A2S=2.96 A2S_lite=3.01 AMT=2.45 TAST=2.45
+step 15500 loss=56.2334 avg50=58.7464 sem=3.3606 ts=0.0000 gn=22.5/avg21.8 enc=13.6 dec=17.9 lrE=9.56e-05 lrD=2.87e-04 audio=40s | A2S=2.97 A2S_lite=3.02 AMT=2.44 TAST=2.45
+step 15550 loss=85.5096 avg50=57.7432 sem=2.9953 ts=0.0000 gn=22.5/avg22.4 enc=15.6 dec=16.2 lrE=9.56e-05 lrD=2.87e-04 audio=38s | A2S=2.97 A2S_lite=3.03 AMT=2.44 TAST=2.46
+step 15600 loss=54.3600 avg50=61.2865 sem=2.2505 ts=2.3058 gn=18.3/avg21.7 enc=13.8 dec=12.0 lrE=9.55e-05 lrD=2.87e-04 audio=56s | A2S=2.96 A2S_lite=3.05 AMT=2.44 TAST=2.45
+step 15650 loss=35.2716 avg50=59.0562 sem=2.3514 ts=0.0000 gn=19.2/avg22.5 enc=12.9 dec=14.2 lrE=9.55e-05 lrD=2.86e-04 audio=38s | A2S=2.97 A2S_lite=3.05 AMT=2.43 TAST=2.45
+step 15700 loss=55.3671 avg50=58.4155 sem=2.6466 ts=2.5987 gn=22.2/avg21.2 enc=13.0 dec=17.9 lrE=9.55e-05 lrD=2.86e-04 audio=36s | A2S=2.95 A2S_lite=3.06 AMT=2.44 TAST=2.46
+step 15750 loss=38.9365 avg50=57.1960 sem=2.5557 ts=2.1023 gn=17.8/avg22.8 enc=12.5 dec=12.6 lrE=9.54e-05 lrD=2.86e-04 audio=52s | A2S=2.95 A2S_lite=3.07 AMT=2.42 TAST=2.47
+step 15800 loss=41.6004 avg50=55.3072 sem=2.6199 ts=1.5783 gn=15.7/avg20.6 enc=9.6 dec=12.4 lrE=9.54e-05 lrD=2.86e-04 audio=54s | A2S=2.96 A2S_lite=3.07 AMT=2.43 TAST=2.47
+step 15850 loss=51.5650 avg50=57.6172 sem=2.3919 ts=3.1030 gn=15.7/avg24.2 enc=12.3 dec=9.7 lrE=9.54e-05 lrD=2.86e-04 audio=58s | A2S=2.97 A2S_lite=3.08 AMT=2.43 TAST=2.46
+step 15900 loss=31.2246 avg50=57.3966 sem=2.5314 ts=2.2811 gn=21.8/avg26.2 enc=11.8 dec=18.4 lrE=9.53e-05 lrD=2.86e-04 audio=30s | A2S=2.96 A2S_lite=3.07 AMT=2.43 TAST=2.45
+step 15950 loss=61.8555 avg50=59.4548 sem=2.3270 ts=2.0573 gn=26.2/avg20.2 enc=16.6 dec=20.2 lrE=9.53e-05 lrD=2.86e-04 audio=35s | A2S=2.95 A2S_lite=3.08 AMT=2.42 TAST=2.45
+step 16000 loss=58.9744 avg50=54.3175 sem=2.4714 ts=2.2457 gn=16.3/avg19.0 enc=12.6 dec=10.4 lrE=9.53e-05 lrD=2.86e-04 audio=59s | A2S=2.96 A2S_lite=3.09 AMT=2.41 TAST=2.44
+step 16050 loss=35.1609 avg50=59.6666 sem=2.6103 ts=0.0000 gn=23.2/avg21.3 enc=15.5 dec=17.3 lrE=9.52e-05 lrD=2.86e-04 audio=44s | A2S=2.96 A2S_lite=3.09 AMT=2.40 TAST=2.45
+step 16100 loss=37.5286 avg50=57.2180 sem=3.1206 ts=0.0000 gn=17.1/avg21.2 enc=11.9 dec=12.3 lrE=9.52e-05 lrD=2.86e-04 audio=56s | A2S=2.98 A2S_lite=3.09 AMT=2.42 TAST=2.46
+step 16150 loss=59.5478 avg50=60.3300 sem=2.3752 ts=1.6171 gn=23.9/avg21.1 enc=13.4 dec=19.8 lrE=9.52e-05 lrD=2.86e-04 audio=53s | A2S=2.98 A2S_lite=3.10 AMT=2.41 TAST=2.47
+step 16200 loss=54.3919 avg50=57.1106 sem=2.3348 ts=1.9397 gn=19.4/avg23.5 enc=12.6 dec=14.8 lrE=9.51e-05 lrD=2.85e-04 audio=51s | A2S=2.98 A2S_lite=3.11 AMT=2.40 TAST=2.47
+step 16250 loss=50.8220 avg50=61.7064 sem=2.5258 ts=2.3236 gn=18.2/avg20.6 enc=12.7 dec=13.0 lrE=9.51e-05 lrD=2.85e-04 audio=32s | A2S=2.99 A2S_lite=3.11 AMT=2.41 TAST=2.47
+step 16300 loss=61.4490 avg50=57.8498 sem=2.4258 ts=1.8032 gn=18.7/avg21.7 enc=13.1 dec=13.4 lrE=9.51e-05 lrD=2.85e-04 audio=32s | A2S=2.99 A2S_lite=3.10 AMT=2.41 TAST=2.47
+step 16350 loss=71.2512 avg50=58.4081 sem=2.3753 ts=2.5487 gn=20.8/avg20.9 enc=13.2 dec=16.1 lrE=9.50e-05 lrD=2.85e-04 audio=30s | A2S=2.99 A2S_lite=3.09 AMT=2.41 TAST=2.48
+step 16400 loss=76.9227 avg50=59.3113 sem=2.8150 ts=2.5670 gn=19.6/avg23.2 enc=12.8 dec=14.9 lrE=9.50e-05 lrD=2.85e-04 audio=34s | A2S=2.97 A2S_lite=3.09 AMT=2.40 TAST=2.47
+step 16450 loss=70.2903 avg50=59.6120 sem=3.5964 ts=0.0000 gn=29.1/avg20.5 enc=18.0 dec=22.9 lrE=9.50e-05 lrD=2.85e-04 audio=38s | A2S=2.97 A2S_lite=3.09 AMT=2.39 TAST=2.48
+step 16500 loss=28.6385 avg50=56.7232 sem=2.6941 ts=0.0000 gn=19.1/avg20.6 enc=12.8 dec=14.2 lrE=9.49e-05 lrD=2.85e-04 audio=40s | A2S=2.96 A2S_lite=3.07 AMT=2.40 TAST=2.49
+step 16550 loss=77.1273 avg50=59.2100 sem=2.9484 ts=3.2532 gn=20.3/avg22.0 enc=11.7 dec=16.6 lrE=9.49e-05 lrD=2.85e-04 audio=39s | A2S=2.94 A2S_lite=3.07 AMT=2.41 TAST=2.51
+step 16600 loss=37.6300 avg50=60.1588 sem=2.8527 ts=0.0000 gn=32.3/avg21.8 enc=15.2 dec=28.4 lrE=9.49e-05 lrD=2.85e-04 audio=36s | A2S=2.93 A2S_lite=3.06 AMT=2.43 TAST=2.51

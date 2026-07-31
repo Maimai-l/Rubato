@@ -46,6 +46,36 @@ def work_key(composer: str, title: str) -> str:
     return f"{normalize_work(composer)}|{normalize_work(title)}"
 
 
+def work_key_or_fallback(composer: str, title: str, piece_id: str) -> str:
+    """
+    ⚠ 缺 composer/title 的曲【绝不丢弃】—— 它的 MIDI/乐谱是好的,只是元数据缺标签,
+    对音频→乐谱训练毫无影响(作曲家名只是去重/split 的记账字段)。
+
+    设计根因修正:旧 SPEC 把 work_key=composer|title 设成承重主键,导致缺 composer 的
+    31k+ 首合格钢琴谱被硬删(占过滤损失的头号)。正解:缺元数据 → 用 piece_id 兜底成
+    【独立作品键】(它就是自己的"作品",不与任何曲共 split-key)。去重与跨集泄漏改由
+    MinHash 内容比对(near_dup_ids)兜底,命名无关,不需要 composer。
+
+    有 composer+title → 正常 work_key(参与同作品去重/split 隔离);
+    缺任一 → '__nometa__|<piece_id>'(唯一键,保证进 train 且不被误判重复)。
+    """
+    if _is_missing(composer) or _is_missing(title):
+        return f"__nometa__|{piece_id}"
+    c = normalize_work(composer)
+    t = normalize_work(title)
+    if not c or not t:                      # 归一化后为空(纯标点/编号词)也算缺
+        return f"__nometa__|{piece_id}"
+    return f"{c}|{t}"
+
+
+# PDMX 元数据缺失的常见占位:"NA" 是最常见(31k+ 首),别当成真作曲家名
+_MISSING_SENTINELS = {"", "na", "n/a", "none", "null", "nan", "unknown", "untitled", "?"}
+
+
+def _is_missing(v) -> bool:
+    return (v is None) or (str(v).strip().lower() in _MISSING_SENTINELS)
+
+
 # ---------------------------------------------------------------- MinHash 近重复(R-S3.6)
 
 def ngram_set(seq: list, n: int = 8) -> frozenset:
@@ -150,9 +180,48 @@ def cluster_duplicates(sigs: dict, threshold: float = 0.7) -> dict:
 def build_blacklist(nasap_test_works: list[str], asap_beyer_works: list[str]) -> set:
     """
     R-S3.6:nASAP test 与 ASAP-Beyer 曲目的 work_key 全量列入 train 黑名单
-    (跨数据集泄漏防线)。返回 work_key 集合。
+    (跨数据集泄漏防线,work_key 字符串匹配路径)。返回 work_key 集合。
+
+    ⚠ 已知局限(实测):PDMX 元数据与 ASAP 文件夹名的命名体系不同——
+    ASAP 'bach|fugue' vs PDMX 'johann sebastian bach|fugue c major',字符串 work_key
+    匹配常删 0 首。**真正的泄漏防线是下面的 MinHash 近重复(命名无关)**,work_key
+    仅作辅助。用 build_blacklist 后务必核对删除数非 0,为 0 就改用 near_dup_ids。
     """
     return set(nasap_test_works) | set(asap_beyer_works)
+
+
+# ---------------------------------------------------------------- MinHash 近重复防线(R-S3.6,命名无关)
+
+def ir_to_pitch_dur_seq(ir) -> list:
+    """
+    ScoreIR → 按 (onset, pitch) 排序的 (midi_pitch, dur_str) 序列。
+    这是 MinHash 近重复比对的输入:比的是【实际音符内容】,不吃标题/作曲家命名差异。
+    """
+    def _midi(p):
+        return p.midi if hasattr(p, "midi") else int(p)
+    notes = sorted(ir.notes, key=lambda n: (n.onset, _midi(n.pitch)))
+    return [(_midi(n.pitch), str(n.dur)) for n in notes]
+
+
+def piece_signature(ir, n: int = 8):
+    """ScoreIR → MinHash 签名(经 (pitch,dur) 序列)。近重复用。"""
+    return minhash_signature(ngram_set(ir_to_pitch_dur_seq(ir), n))
+
+
+def near_dup_ids(target_sigs: dict, ref_sigs: list, threshold: float = 0.7) -> set:
+    """
+    R-S3.6 真正的泄漏防线(命名无关)。
+    target_sigs: {piece_id: signature}(PDMX 候选曲);ref_sigs: [signature](ASAP test/Beyer 参考曲)。
+    返回近重复于【任一】参考曲的 piece_id 集合(判为泄漏,剔除出 train)。
+    Jaccard>threshold 判近重复。ref 数通常小(ASAP ~百首),O(n_pdmx × n_ref) 可接受。
+    """
+    flagged = set()
+    for pid, sig in target_sigs.items():
+        for ref in ref_sigs:
+            if estimate_jaccard(sig, ref) > threshold:
+                flagged.add(pid)
+                break
+    return flagged
 
 
 def check_split_leakage(pieces: list[dict], blacklist: set) -> dict:
@@ -180,11 +249,13 @@ def check_split_leakage(pieces: list[dict], blacklist: set) -> dict:
 
 # ---------------------------------------------------------------- license + metadata(R-S3.1/3.2)
 
-_LICENSE_OK = ("public domain", "cc0", "cc-by", "cc by", "publicdomain")
+# cc-zero / cc zero 是 CC0 的另一种写法(PDMX 元数据里大量用),不识别会误杀 30k+ 有效曲。
+_LICENSE_OK = ("public domain", "publicdomain", "cc0", "cc-zero", "cc zero",
+               "cc-by", "cc by", "ccby")
 
 
 def license_ok(license_str: str) -> bool:
-    """R-S3.2:license ∈ {public domain, CC0, CC-BY 系}。"""
+    """R-S3.2:license ∈ {public domain, CC0(含 cc-zero), CC-BY 系}。"""
     s = (license_str or "").lower()
     return any(tok in s for tok in _LICENSE_OK)
 
@@ -200,4 +271,73 @@ def metadata_filter(meta: dict) -> tuple[bool, str]:
         return False, "pdmx_is_transcription"
     if not license_ok(meta.get("license", "")):
         return False, "license_not_whitelisted"
+    return True, "ok"
+
+
+# ---------------------------------------------------------------- 乐器判定(补 S3 过滤器的洞)
+# 背景:s3_filter 唯一的"钢琴"代理是 n_tracks∈{1,2} —— 独奏鼓/吉他/人声全是 1-2 轨,照样穿过
+# (执行端实听抓到鼓谱)。判定必须看【内容】:谱面的无音高音符/打击乐谱号/TAB、MIDI 的 10 通道
+# 与 GM 音色号。任一强信号命中 = 非钢琴。名字词表只是辅助(用户乱填名不可靠)。
+
+_NONPIANO_NAME = re.compile(
+    r"drum|percus|guitar|violin|viola|cello|double bass|bass guitar|electric bass|"
+    r"flute|piccolo|clarinet|oboe|bassoon|sax|trumpet|trombone|tuba|french horn|"
+    r"voice|vocal|choir|chorus|soprano|tenor\b|ukulele|banjo|mandolin|harp(?!sichord)|"
+    r"marimba|xylophone|vibraphone|glockenspiel|organ|accordion|harmonica|recorder|"
+    r"ocarina|erhu|pipa|guzheng|dizi|koto|shakuhachi|steel pan|synth", re.IGNORECASE)
+
+
+def classify_musicxml_text(xml_text: str) -> tuple[bool, str]:
+    """MusicXML 文本 → (是钢琴, 理由)。强信号优先,全部内容级。"""
+    if "<unpitched" in xml_text:
+        return False, "percussion_unpitched"          # 鼓谱的确定性特征:无音高音符
+    if re.search(r"<sign>\s*percussion\s*</sign>", xml_text, re.I):
+        return False, "percussion_clef"
+    if re.search(r"<sign>\s*TAB\s*</sign>", xml_text, re.I):
+        return False, "tab_clef"                      # 吉他/贝斯 TAB
+    if re.search(r"<midi-channel>\s*10\s*</midi-channel>", xml_text):
+        return False, "midi_channel_10"               # GM 打击乐通道
+    progs = [int(m) for m in re.findall(r"<midi-program>\s*(\d+)\s*</midi-program>", xml_text)]
+    bad = [p for p in progs if not (1 <= p <= 8)]     # GM 1-8 = 钢琴/键盘类;其余一律非钢琴
+    if bad:
+        return False, f"midi_program_{bad[0]}"
+    names = re.findall(r"<(?:part-name|instrument-name)[^>]*>([^<]{0,80})<", xml_text)
+    for nm in names:
+        if _NONPIANO_NAME.search(nm):
+            return False, f"name:{nm.strip()[:30]}"
+    return True, "ok"
+
+
+def classify_score_file(path) -> tuple[bool, str]:
+    """.mxl(zip)/.musicxml/.xml → (是钢琴, 理由)。读不了 → (False, read_fail:...) 宁可错杀交人工。"""
+    import zipfile
+    from pathlib import Path as _P
+    p = _P(path)
+    try:
+        if p.suffix.lower() == ".mxl":
+            with zipfile.ZipFile(p) as z:
+                names = [n for n in z.namelist()
+                         if n.lower().endswith((".xml", ".musicxml")) and not n.startswith("META-INF")]
+                if not names:
+                    return False, "read_fail:empty_mxl"
+                text = z.read(names[0]).decode("utf-8", errors="replace")
+        else:
+            text = p.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return False, f"read_fail:{type(e).__name__}"
+    return classify_musicxml_text(text)
+
+
+def classify_midi_file(path) -> tuple[bool, str]:
+    """MIDI → (是钢琴, 理由):10 通道音符=打击乐;program change 超出 GM 0-7=非钢琴;无 program=放行。"""
+    import mido
+    try:
+        mid = mido.MidiFile(str(path))
+    except Exception as e:
+        return False, f"read_fail:{type(e).__name__}"
+    for msg in mido.merge_tracks(mid.tracks):
+        if msg.type in ("note_on", "note_off") and getattr(msg, "channel", 0) == 9:
+            return False, "midi_channel_10"
+        if msg.type == "program_change" and not (0 <= msg.program <= 7):
+            return False, f"midi_program_{msg.program + 1}"
     return True, "ok"

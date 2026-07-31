@@ -1,30 +1,185 @@
-# 16 个"空间/录音"预设 —— 对应论文 8 VST × 2 房麦 = 16 变体的替代实现
-# IR 由 rubato/render/irgen.py 按 (rt60, predelay, seed) 程序化合成:可复现、零下载、不怕链接腐烂
-# 要用真实 IR:把 wav 放到 assets/irs/real/<preset_id>.wav,同名即自动覆盖合成 IR
-# 字段: rt60(s) predelay(ms) wet(混响湿度) shelf4k(dB 高架EQ, +近麦亮/-远麦暗)
-#       lp/hp(Hz, 0=不启用) noise(dBFS 房噪底) gain_jitter(±dB) codec(落盘前重压缩, 模拟上传劣化)
+# 16 录音空间预设 —— 真实 IR(EchoThief)优先,缺失回退程序化 synth_ir。
+# 在线房间增广每 epoch 对每段干声 hash 选一预设,同 (utt,epoch) 确定。
+
 presets:
-  p01_close_dry_A:   {rt60: 0.30, predelay: 5,  wet: 0.08, shelf4k:  1.5, lp: 0,    hp: 0,   noise: -63, gain_jitter: 1.0, codec: null}
-  p02_close_dry_B:   {rt60: 0.40, predelay: 8,  wet: 0.12, shelf4k:  2.5, lp: 0,    hp: 0,   noise: -60, gain_jitter: 1.0, codec: null}
-  p03_studio_A:      {rt60: 0.60, predelay: 12, wet: 0.18, shelf4k:  0.0, lp: 0,    hp: 0,   noise: -58, gain_jitter: 1.5, codec: null}
-  p04_studio_B:      {rt60: 0.70, predelay: 10, wet: 0.22, shelf4k: -1.0, lp: 9000, hp: 0,   noise: -57, gain_jitter: 1.5, codec: null}
-  p05_recital_A:     {rt60: 1.10, predelay: 18, wet: 0.26, shelf4k: -1.5, lp: 8000, hp: 0,   noise: -55, gain_jitter: 1.5, codec: null}
-  p06_recital_B:     {rt60: 1.30, predelay: 22, wet: 0.30, shelf4k: -2.0, lp: 8000, hp: 0,   noise: -54, gain_jitter: 1.5, codec: null}
-  p07_hall_A:        {rt60: 1.80, predelay: 28, wet: 0.34, shelf4k: -2.5, lp: 7500, hp: 0,   noise: -53, gain_jitter: 2.0, codec: null}
-  p08_hall_B:        {rt60: 2.20, predelay: 34, wet: 0.40, shelf4k: -3.0, lp: 7000, hp: 0,   noise: -52, gain_jitter: 2.0, codec: null}
-  p09_church:        {rt60: 3.20, predelay: 42, wet: 0.45, shelf4k: -4.0, lp: 6500, hp: 0,   noise: -50, gain_jitter: 2.0, codec: null}
-  p10_living_room:   {rt60: 0.50, predelay: 6,  wet: 0.20, shelf4k: -0.5, lp: 0,    hp: 0,   noise: -50, gain_jitter: 2.0, codec: null}
-  p11_practice_room: {rt60: 0.40, predelay: 5,  wet: 0.15, shelf4k:  0.5, lp: 0,    hp: 0,   noise: -48, gain_jitter: 2.0, codec: null}
-  p12_vintage:       {rt60: 0.80, predelay: 15, wet: 0.25, shelf4k: -3.0, lp: 6300, hp: 120, noise: -42, gain_jitter: 2.5, codec: {name: libopus, bitrate: 24k}}
-  p13_lofi_upload:   {rt60: 1.00, predelay: 20, wet: 0.30, shelf4k: -2.0, lp: 7000, hp: 0,   noise: -46, gain_jitter: 2.5, codec: {name: libopus, bitrate: 32k}}
-  p14_phone_capture: {rt60: 0.90, predelay: 12, wet: 0.35, shelf4k: -2.0, lp: 6000, hp: 150, noise: -44, gain_jitter: 2.5, codec: {name: libopus, bitrate: 32k}}
-  p15_far_ambient:   {rt60: 2.50, predelay: 45, wet: 0.55, shelf4k: -3.5, lp: 6000, hp: 0,   noise: -52, gain_jitter: 2.0, codec: null}
-  p16_bone_dry:      {rt60: 0.15, predelay: 2,  wet: 0.03, shelf4k:  1.0, lp: 0,    hp: 0,   noise: -66, gain_jitter: 0.5, codec: null}
-# 采样权重:p1-9 写实主力 70%,p10-15 鲁棒长尾 25%,p16 纯净 5%
-weights: {p01_close_dry_A: 0.09, p02_close_dry_B: 0.08, p03_studio_A: 0.09, p04_studio_B: 0.08,
-          p05_recital_A: 0.08, p06_recital_B: 0.08, p07_hall_A: 0.07, p08_hall_B: 0.07, p09_church: 0.06,
-          p10_living_room: 0.05, p11_practice_room: 0.05, p12_vintage: 0.04, p13_lofi_upload: 0.04,
-          p14_phone_capture: 0.04, p15_far_ambient: 0.03, p16_bone_dry: 0.05}
-# 每条 utterance 的 (音源,预设) 由 hash(seed, utt_id) 定 → 完全可复现(实现见 rubato/render/assign.py)
-apply_online: true    # true=dataloader 在线卷积(省盘);CPU 吃紧则 07 脚本离线渲第三变体
-seed: 20260706
+  p01_bone_dry:
+    rt60: 0.15
+    predelay: 2
+    wet: 0.05
+    shelf4k: 3.0
+    lp: 0
+    hp: 0
+    noise: -66
+    gain_jitter: 0.3
+
+  p02_close_mic:
+    rt60: 0.25
+    predelay: 4
+    wet: 0.12
+    shelf4k: 2.0
+    lp: 0
+    hp: 0
+    noise: -60
+    gain_jitter: 0.4
+
+  p03_small_room:
+    rt60: 0.5
+    predelay: 8
+    wet: 0.25
+    shelf4k: 1.0
+    lp: 0
+    hp: 0
+    noise: -55
+    gain_jitter: 0.5
+
+  p04_medium_room:
+    rt60: 0.8
+    predelay: 12
+    wet: 0.35
+    shelf4k: 0.5
+    lp: 0
+    hp: 0
+    noise: -52
+    gain_jitter: 0.5
+
+  p05_stairwell:
+    rt60: 1.6
+    predelay: 15
+    wet: 0.45
+    shelf4k: -1.0
+    lp: 0
+    hp: 0
+    noise: -50
+    gain_jitter: 0.6
+
+  p06_recital_hall:
+    rt60: 1.2
+    predelay: 20
+    wet: 0.40
+    shelf4k: 0.0
+    lp: 0
+    hp: 0
+    noise: -50
+    gain_jitter: 0.6
+
+  p07_concert_hall:
+    rt60: 2.0
+    predelay: 25
+    wet: 0.50
+    shelf4k: -1.5
+    lp: 0
+    hp: 0
+    noise: -48
+    gain_jitter: 0.7
+
+  p08_theatre:
+    rt60: 1.8
+    predelay: 22
+    wet: 0.48
+    shelf4k: -1.0
+    lp: 0
+    hp: 0
+    noise: -48
+    gain_jitter: 0.7
+
+  p09_church:
+    rt60: 2.8
+    predelay: 30
+    wet: 0.60
+    shelf4k: -2.0
+    lp: 0
+    hp: 0
+    noise: -46
+    gain_jitter: 0.8
+
+  p10_chapel:
+    rt60: 2.2
+    predelay: 28
+    wet: 0.55
+    shelf4k: -1.5
+    lp: 0
+    hp: 0
+    noise: -46
+    gain_jitter: 0.8
+
+  p11_hallway:
+    rt60: 1.0
+    predelay: 10
+    wet: 0.55
+    shelf4k: 0.0
+    lp: 0
+    hp: 0
+    noise: -48
+    gain_jitter: 0.6
+
+  p12_dome:
+    rt60: 3.2
+    predelay: 35
+    wet: 0.65
+    shelf4k: -2.5
+    lp: 0
+    hp: 0
+    noise: -45
+    gain_jitter: 0.8
+
+  p13_cave:
+    rt60: 2.5
+    predelay: 25
+    wet: 0.70
+    shelf4k: -3.0
+    lp: 0
+    hp: 0
+    noise: -44
+    gain_jitter: 0.8
+
+  p14_old_recording:
+    rt60: 0.6
+    predelay: 10
+    wet: 0.20
+    shelf4k: -4.0
+    lp: 6000
+    hp: 80
+    noise: -48
+    gain_jitter: 1.0
+
+  p15_telephone:
+    rt60: 0.1
+    predelay: 2
+    wet: 0.02
+    shelf4k: -2.0
+    lp: 3400
+    hp: 300
+    noise: -42
+    gain_jitter: 1.5
+
+  p16_amateur_video:
+    rt60: 0.8
+    predelay: 15
+    wet: 0.30
+    shelf4k: -1.0
+    lp: 8000
+    hp: 60
+    noise: -45
+    gain_jitter: 2.0
+
+# 权重:写实为主 + 劣化长尾。真实 IR 优先(8 个 EchoThief),合成作补充。
+# 劣化类低权重——模型要见过但不主导训练,保证对真实录音的鲁棒性。
+weights:
+  # —— 写实主流(合计 ~75%) ——
+  p01_bone_dry: 2.0
+  p02_close_mic: 2.0
+  p03_small_room: 1.5
+  p04_medium_room: 1.5
+  p05_stairwell: 1.5
+  p06_recital_hall: 1.5
+  p07_concert_hall: 2.0
+  p08_theatre: 1.5
+  p09_church: 1.5
+  p10_chapel: 1.5
+  p11_hallway: 1.0
+  p12_dome: 1.0
+  # —— 特殊/劣化长尾(合计 ~10%) ——
+  p13_cave: 0.5
+  p14_old_recording: 0.5
+  p15_telephone: 0.3
+  p16_amateur_video: 0.5

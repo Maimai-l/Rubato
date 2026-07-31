@@ -17,15 +17,21 @@ SEED = 20260706
 # ---------------------------------------------------------------- 重叠切窗(R-S7.3)
 
 def segment_score_overlap(ir, tmap: TimeMap | None = None,
-                          min_measures: int = 4, max_measures: int = 32,
-                          max_sec: float = 40.0):
+                          min_measures: int = 4, max_measures: int | None = 32,
+                          max_sec: float = 40.0, sec_per_whole: float | None = None):
     """
     R-S7.3【论文明确 nASAP 用重叠窗】:小节对齐 4–32 小节 ≤40s,重叠步长=段长一半。
     返回 [(sub_ir, (a,b)), ...],起点比非重叠版更密。
 
     实现:先跑非重叠贪心切段拿到各段的小节跨度,再以每段跨度的一半为步长起新段。
     """
-    base = segment_score(ir, min_measures, max_measures, max_sec, tmap=tmap)
+    # 【坑】tmap 与 sec_per_whole 都缺时,_seg_seconds 返回 0 → max_sec 约束【静默失效】,
+    # 段只受 max_measures 限制(慢曲照样超训练窗)。调用方必须给一个时间源;两者都没给时
+    # 此处兜底恒速 2.0(可见于签名,不再静默)。
+    if tmap is None and sec_per_whole is None:
+        sec_per_whole = 2.0
+    base = segment_score(ir, min_measures, max_measures, max_sec, tmap=tmap,
+                         sec_per_whole=sec_per_whole)
     if not base:
         return []
     n = len(ir.measures)
@@ -39,7 +45,8 @@ def segment_score_overlap(ir, tmap: TimeMap | None = None,
     for a in sorted(starts):
         # 从 a 起按同约束贪心扩一段
         one = segment_score(_slice_from(ir, a), min_measures, max_measures,
-                            max_sec, tmap=_shift_tmap_from(ir, tmap, a))
+                            max_sec, tmap=_shift_tmap_from(ir, tmap, a),
+                            sec_per_whole=sec_per_whole)
         if not one:
             continue
         sub, (la, lb) = one[0]

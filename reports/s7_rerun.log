@@ -1,0 +1,298 @@
+======================================================================
+S7 nASAP Full Dataset Processing
+======================================================================
+
+Reading metadata: D:\vscode_projects\ee_download\asap-dataset\asap-dataset\metadata.csv
+Total rows: 1066
+Rows with maestro_audio_performance: 519
+
+[1/519] (998.9 pieces/s) Processing Bach/Fugue_bwv_846/Bach/Fugue/bwv_846/Shi05M.mid
+
+[21/519] (1.1 pieces/s) Processing Bach/Fugue_bwv_857/Bach/Fugue/bwv_857/YuP01M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "(   )" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+
+[41/519] (0.9 pieces/s) Processing Bach/Fugue_bwv_870/Bach/Fugue/bwv_870/LeeE01M.mid
+
+[61/519] (0.9 pieces/s) Processing Bach/Fugue_bwv_885/Bach/Fugue/bwv_885/JeonH01M.mid
+
+[81/519] (0.9 pieces/s) Processing Bach/Prelude_bwv_848/Bach/Prelude/bwv_848/Lin04M.mid
+
+[101/519] (1.0 pieces/s) Processing Bach/Prelude_bwv_860/Bach/Prelude/bwv_860/Ko04M.mid
+
+[121/519] (1.1 pieces/s) Processing Bach/Prelude_bwv_873/Bach/Prelude/bwv_873/Lisiecki13M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1112: UserWarning: ignoring direction type: metronome {'parentheses': 'no', 'default-x': '-51.17', 'relative-y': '20.00'}
+  warnings.warn("ignoring direction type: {} {}".format(dt.tag, dt.attrib))
+
+[141/519] (1.1 pieces/s) Processing Bach/Prelude_bwv_889/Bach/Prelude/bwv_889/LiuY01M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Tranquillo" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Poco pi¨´ mosso, energico" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "a tempo energico" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Tranquillo Tempo I" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 363603 to 363609 in Measure 257
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Presto furioso" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1309: UserWarning: not adding duplicate or conflicting dynamics indication
+  warnings.warn("not adding duplicate or conflicting dynamics indication")
+
+[161/519] (0.4 pieces/s) Processing Beethoven/Piano_Sonatas_12-1/Beethoven/Piano_Sonatas/12-1/Kleisen05M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Andante con Variazoni" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Var. I" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Var. II" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Var. III" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Var. IV" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Var. V" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "senza sordini" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1112: UserWarning: ignoring direction type: bracket {'type': 'start', 'number': '1', 'line-end': 'none', 'line-type': 'solid'}
+  warnings.warn("ignoring direction type: {} {}".format(dt.tag, dt.attrib))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:489: UserWarning: Found repeat without start
+Starting point 0 is assumed
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 34680 to 35280 in Measure 8
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 246360 to 246960 in Measure 50
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 468680 to 468720 in Measure 94
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 498360 to 498960 in Measure 100
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 503400 to 504000 in Measure 101
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "\u266d" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "a" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:443: UserWarning: unhandled: tempo
+  warnings.warn("unhandled: {}".format(string[start:end]))
+
+[181/519] (0.3 pieces/s) Processing Beethoven/Piano_Sonatas_18-1/Beethoven/Piano_Sonatas/18-1/ZhangH05M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "ri -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "tar -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "dan -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "do" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "INTRODUZIONE" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Attacca subito il Rondo:" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+
+[201/519] (0.2 pieces/s) Processing Beethoven/Piano_Sonatas_21-3/Beethoven/Piano_Sonatas/21-3/KimSY04M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "RONDO" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1102: UserWarning: Did not find a pedal start element for pedal stop!
+  warnings.warn("Did not find a pedal start element for pedal stop!")
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "In tempo d'un Menuetto" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "\u266e" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "\u266f" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from -120949 to 196560 in Measure 70
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 202320 to 519829 in Measure 72
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 525589 to 843098 in Measure 74
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 851738 to 1169247 in Measure 77
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "sempre Ped" (UnexpectedEOF)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 1028377 to 1665316 in Measure 139
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 1676836 to 2313775 in Measure 143
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 2319535 to 2956474 in Measure 145
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 2962234 to 3599173 in Measure 147
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 3627973 to 4264912 in Measure 157
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 4270672 to 4907611 in Measure 159
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 4913371 to 5550310 in Measure 161
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 5556070 to 6193009 in Measure 163
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "ritar    -     -     -     -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "dan    -     -     -     -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-       -       -      -   do" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:644: UserWarning: <backup> crosses measure boundary, adjusting position from 76827 to 76830 in Measure 44
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Expression" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Le-" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Das Lebewohl" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "be-" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "wohl" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "attacca subito l'Allegro" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+
+[221/519] (0.1 pieces/s) Processing Beethoven/Piano_Sonatas_26-2/Beethoven/Piano_Sonatas/26-2/HONG05M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Abwesenheit" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "In gehender Bewegung, doch mit Ausdruck" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Wiedersehen" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Im lebhaftesten Zeitmaasse" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Mit Lebhaftig und durchaus mit Empfindung und Ausdruck" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "(Lively, with feeling and expression)" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "pi¨´" (UnexpectedEOF)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Nicht zu geschwind und sehr singbar vorzutragen" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "(To be played not too fast and very songfully.)" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Etwas lebhaft und mit der innigsten Empfindung" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "ritar  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "dan  -  -  -  -  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Per la misura si conta nel largo sempre quattro semicrome, cio ¨¨" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "\ueca9\ueca9\ueca9\ueca9" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "" (UnexpectedEOF)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Largo (" (UnexpectedEOF)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "\ueca9" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "= 76)" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "un poco pi¨´ vivace" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "ri" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "tar" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1112: UserWarning: ignoring direction type: metronome {'parentheses': 'yes', 'default-x': '-34.50', 'default-y': '40.00', 'relative-x': '31.60', 'relative-y': '13.00'}
+  warnings.warn("ignoring direction type: {} {}".format(dt.tag, dt.attrib))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Fuga a tre voci con alcune licenze" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "poco" (UnexpectedEOF)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1112: UserWarning: ignoring direction type: metronome {'parentheses': 'no', 'relative-y': '20.00'}
+  warnings.warn("ignoring direction type: {} {}".format(dt.tag, dt.attrib))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1112: UserWarning: ignoring direction type: metronome {'parentheses': 'no', 'default-y': '16.71', 'relative-y': '20.00'}
+  warnings.warn("ignoring direction type: {} {}".format(dt.tag, dt.attrib))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Moderato cantabile molto espressivo" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "(sanft)" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "zur¨¹ckhaltend" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+
+[241/519] (0.1 pieces/s) Processing Beethoven/Piano_Sonatas_31-1/Beethoven/Piano_Sonatas/31-1/AbdelmoulaJS03M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "CODA" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "tutte" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "le" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "corde" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1288: UserWarning: not adding duplicate or conflicting tempo indication
+  warnings.warn("not adding duplicate or conflicting tempo indication")
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "ritar" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "dando" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "(Klagender Gesang)" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "FUGA" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "L'istesso tempo di Arioso" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "(Ermattet klagend)" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Perdendo le forze, dolento" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "L'istesso tempo della Fuga" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Meno allegro. Etwas langsamer" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "poi     a    poi" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:443: UserWarning: unhandled: pi¨´ moto
+  warnings.warn("unhandled: {}".format(string[start:end]))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Allegro con brio ed appassionata" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "ri-" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "tar-" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "dan" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-do" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "ritar -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "poi" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "sempre" (UnexpectedEOF)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+
+[261/519] (0.1 pieces/s) Processing Beethoven/Piano_Sonatas_4-1/Beethoven/Piano_Sonatas/4-1/SirajA02M.mid
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\io\importmusicxml.py:1698: UserWarning: Tuplet start and end notes do not belong to the same voice (4 != 2). This might indicate a missing <tuplet type="start"> or <tuplet type="stop">.
+  warnings.warn(
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "66" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "132" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "Attacca subito l'Allegro" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "\ue262" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+D:\ProgramData\envs\nemo_test\Lib\site-packages\partitura\directions.py:526: UserWarning: error parsing "a tempo (meno mosso)" (UnexpectedCharacters)
+  warnings.warn('error parsing "{}" ({})'.format(string, type(e).__name__))
+
+[281/519] (0.1 pieces/s) Processing Chopin/Ballades_1/Chopin/Ballades/1/Richardson13M.mid

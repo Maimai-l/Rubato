@@ -1,0 +1,7 @@
+  eval nasap 0/48(0s)
+  eval 探针[nasap_Bult-ItoS02M_171360e0_004/TAST]: acc=0.40 前缀acc=0.38 eotP@首位=0.0001 n=389
+  eval 探针argmax: '|4/4k0PL:F3C5 <|0.00|> 1/8a-4 <|0.38|> 1/16A-4 <|0.48|> 1/16 <|0.68|> 1/16c3c4PR'
+  eval 探针参照:   '|4/4k-4PL:C3C4PR:A-4 <|0.00|> 1/16C5 <|0.28|> 1/16c5F5 <|0.56|> 1/16f5E5 <|0.83|'
+  eval nasap 8/48(143s)
+  eval nasap 16/48(303s)
+  eval nasap 24/48(470s)

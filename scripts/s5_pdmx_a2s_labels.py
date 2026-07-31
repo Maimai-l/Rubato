@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from rubato.platform import read_jsonl, write_jsonl, write_text, read_text
 from rubato.intermo.partitura_adapter import part_to_ir
 from rubato.data.segment import segment_score, make_labels
+from rubato.data.nasap import segment_score_overlap
 from rubato.data.pdmx import build_blacklist, work_key
 
 
@@ -36,11 +37,12 @@ def load_musicxml_part(xml_path: str):
 
 
 def process_piece(piece: dict, xml_root: Path,
-                  min_measures: int, max_measures: int, max_sec: float,
-                  lenient: bool) -> tuple[list[dict], dict]:
+                  min_measures: int, max_measures: int | None, max_sec: float,
+                  lenient: bool, overlap: bool = False) -> tuple[list[dict], dict]:
     """
     单曲:归一化 XML → IR → 小节对齐切段 → A2S/A2S_lite 标签。
     返回 (label_rows, stats)。lenient 用于浪漫派非标准小节(华彩/延长)。
+    overlap=True 使用重叠切窗(每段步长=段长一半),提升 tokenizer 语料覆盖。
     """
     pid = piece["piece_id"]
     stats = {"piece_id": pid, "segments": 0, "labels": 0}
@@ -61,25 +63,64 @@ def process_piece(piece: dict, xml_root: Path,
         stats["skipped"] = f"part_to_ir_failed:{type(e).__name__}:{str(e)[:80]}"
         return [], stats
 
+    # 【分段用真实速度图,不再恒速 120bpm】(与 S5 VN 同一类 bug 的 S4 侧修复):
+    # 该曲的渲染 MIDI 自带 set_tempo 真速度 → midi_time 提取 tmap;max_sec=40 约束按真实秒生效,
+    # 快曲不再被切碎、慢曲不再超训练窗。结构守卫:MIDI 小节网格须与 IR 对齐(展开反复等结构
+    # 不一致 → 回退恒速并计数,此时该曲的段在 s4_slice_segments 处也会被 structure_mismatch 跳过)。
+    tmap = None
+    midi_path = piece.get("midi_path")
+    if midi_path and Path(midi_path).exists():
+        # 【巨曲守卫】(执行端痛点的正确解法,替代其 --no-midi-tempo 全局开关):个别"黑乐谱"式
+        # 巨 MIDI 解析要几分钟,卡住整个 P4;只对【超阈值的那几首】回退恒速并计数,其余曲保持真速度。
+        # 全局关掉真速度 = 为几首巨曲把全体分段正确性交出去,不干;且旧开关在 run() 里引用 __main__
+        # 的 args,经 s5_parallel 导入调用时必 NameError —— 已一并撤除。
+        import os as _os
+        max_mb = float(_os.environ.get("S5_TEMPO_MIDI_MAX_MB", "20"))
+        if Path(midi_path).stat().st_size > max_mb * 1e6:
+            stats["tempo_fallback"] = "midi_too_big"
+        else:
+            try:
+                from rubato.data.midi_time import midi_time
+                mtmap, mmeasures, mtotal = midi_time(midi_path)
+                if (len(mmeasures) == len(ir.measures)
+                        and abs(float(mtotal - ir.score_end)) <= 1.0 / 16):
+                    tmap = mtmap
+                else:
+                    stats["tempo_fallback"] = "structure_mismatch"
+            except Exception as e:
+                stats["tempo_fallback"] = f"midi_fail:{type(e).__name__}"
+    else:
+        stats["tempo_fallback"] = "no_midi"
     try:
-        segs = segment_score(ir, min_measures=min_measures,
-                             max_measures=max_measures, max_sec=max_sec,
-                             sec_per_whole=2.0)   # 恒速估算切段时长(无 tmap)
+        if overlap:
+            segs = segment_score_overlap(ir, tmap, min_measures=min_measures,
+                                         max_measures=max_measures, max_sec=max_sec)
+        else:
+            segs = segment_score(ir, min_measures=min_measures,
+                                 max_measures=max_measures, max_sec=max_sec,
+                                 tmap=tmap, sec_per_whole=None if tmap else 2.0)
         stats["segments"] = len(segs)
     except Exception as e:
         stats["skipped"] = f"segment_failed:{type(e).__name__}:{str(e)[:80]}"
         return [], stats
 
     rows = []
+    bounds = [m.start for m in ir.measures] + [ir.score_end]
     for si, (sub_ir, (a, b)) in enumerate(segs):
         try:
-            labels, fails = make_labels(sub_ir, "flat")   # flat→A2S/A2S_lite(TAST 需 tmap,此处无)
+            # flat→A2S/A2S_lite。此路【故意不产 TAST】:TAST 时间戳必须与音频同一 tmap,
+            # 本脚本不渲染音频(恒速估算与真实音频不匹配)。PDMX 的表现性音频+匹配 TAST
+            # 由 scripts/s5_vn_render.py 产(仅 VirtuosoNet)。本脚本只供 tokenizer 语料 + A2S 训练标签。
+            labels, fails = make_labels(sub_ir, "flat")
             a2s = labels.get("A2S")
             if a2s:
                 rows.append({
                     "utt_id": f"pdmx_{pid}_{si:03d}",
                     "piece_id": pid,
                     "measure_range": [a, b],
+                    # 【弱起免疫】IR 的真实乐谱位置(全音符)。切割器直接拿位置过 MIDI 速度图,
+                    # 不再从拍号算术重建小节网格 —— 弱起小节会让重建网格整体错位且守卫恰好双过。
+                    "score_range": [float(bounds[a]), float(bounds[b])],
                     "A2S": a2s,
                     "A2S_lite": labels.get("A2S_lite"),
                     "TAST": None, "AMT": None,
@@ -94,8 +135,8 @@ def process_piece(piece: dict, xml_root: Path,
 
 def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
         out_report: str, blacklist: set | None = None,
-        min_measures: int = 4, max_measures: int = 32, max_sec: float = 40.0,
-        lenient: bool = True, limit: int | None = None) -> dict:
+        min_measures: int = 1, max_measures: int | None = None, max_sec: float = 40.0,
+        lenient: bool = True, overlap: bool = False, limit: int | None = None) -> dict:
     """批量驱动。blacklist=work_key 集合(命中的曲整曲跳过,不产 train 标签)。"""
     blacklist = blacklist or set()
     xml_root = Path(xml_root)
@@ -122,11 +163,15 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
             continue
         try:
             rows, stats = process_piece(piece, xml_root, min_measures, max_measures,
-                                        max_sec, lenient)
+                                        max_sec, lenient, overlap)
         except Exception:
             report["failures"].append({"piece_id": piece.get("piece_id"),
                                        "reason": "exception", "tb": traceback.format_exc()[:200]})
             continue
+        if stats.get("tempo_fallback"):
+            tf = report.setdefault("tempo_fallback", {})
+            key = str(stats["tempo_fallback"]).split(":")[0]
+            tf[key] = tf.get(key, 0) + 1
         if rows:
             report["processed"] += 1
             report["total_segments"] += stats["segments"]
@@ -159,17 +204,29 @@ def run(manifest_path: str, xml_root: str, out_labels: str, out_corpus: str,
 
 
 if __name__ == "__main__":
-    # 本地路径(用户 Windows 环境)。黑名单从 nASAP test / ASAP-Beyer work_key 构建。
-    ROOT = Path(r"D:\vscode_projects\ee_download")
-    MANIFEST = ROOT / "work" / "manifest_pieces.jsonl"
-    XML_ROOT = ROOT / "work" / "xml_norm"
-    OUT_LABELS = ROOT / "work" / "pdmx_a2s_labels.jsonl"
-    OUT_CORPUS = ROOT / "work" / "a2s_corpus.txt"
-    OUT_REPORT = ROOT / "reports" / "s5_pdmx_a2s.json"
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--manifest", type=str, default="")
+    ap.add_argument("--out-labels", type=str, default="")
+    ap.add_argument("--out-corpus", type=str, default="")
+    ap.add_argument("--out-report", type=str, default="")
+    ap.add_argument("--min-measures", type=int, default=1)
+    ap.add_argument("--max-measures", type=int, default=0,
+                    help="0=不设小节数上限(用户决定:时间 max-sec 是唯一上限,段尽量长)")
+    ap.add_argument("--overlap", type=int, default=1)
+    ap.add_argument("--limit", type=int, default=0)
+    args = ap.parse_args()
 
-    # 黑名单:若已有 nASAP split / ASAP-Beyer 曲目清单则读入(此处示例留空,
-    # 实跑时从 nasap_split.json 的 test_works + ASAP-Beyer 清单构建)。
+    ROOT = Path(r"D:\vscode_projects\ee_download")
+    MANIFEST = Path(args.manifest) if args.manifest else ROOT / "work" / "manifest_pieces.jsonl"
+    XML_ROOT = ROOT / "work" / "xml_norm"
+    OUT_LABELS = Path(args.out_labels) if args.out_labels else ROOT / "work" / "pdmx_a2s_labels.jsonl"
+    OUT_CORPUS = Path(args.out_corpus) if args.out_corpus else ROOT / "work" / "a2s_corpus.txt"
+    OUT_REPORT = Path(args.out_report) if args.out_report else ROOT / "reports" / "s5_pdmx_a2s.json"
+
     blacklist = build_blacklist(nasap_test_works=[], asap_beyer_works=[])
 
     run(str(MANIFEST), str(XML_ROOT), str(OUT_LABELS), str(OUT_CORPUS),
-        str(OUT_REPORT), blacklist=blacklist)
+        str(OUT_REPORT), blacklist=blacklist,
+        min_measures=args.min_measures, max_measures=args.max_measures or None,
+        overlap=bool(args.overlap), limit=args.limit if args.limit else None)

@@ -1,0 +1,45 @@
+# CALIB_FULL —— Tkun→M2ST 全量校准比分(本文件由 scripts/calib_score.py 代码生成,重跑覆盖)
+生成时间: 2026-07-22T20:05:26
+官方脚本: D:\vscode_projects\ee_download\legato-main\legato-main\scripts\compute_OMR-NED.py
+MusicDiff 源码: D:\vscode_projects\ee_download\work\efficient-musicdiff
+自检 ref-vs-ref: 0.0(通过)
+配对总数 34 | est-xml 缺失 0 | 打分成功 34 | 打分失败 0
+
+perf_id	OMR-NED	备注
+nasap_BuiJL02M_7cf9fe18	0.8779866199426569	
+nasap_BuiJL06M_1bcb5f52	0.25068565400843884	
+nasap_Bult-ItoS03M_a8230d19	0.36891602045867017	
+nasap_CaoJ02M_8c43c486	0.3395872420262664	
+nasap_ChenGuang06M_8ec0e2e4	0.9786876518151266	
+nasap_GiacomelliN04M_861c59b0	0.7184406572099193	
+nasap_Hebert01M_1ba14164	0.24655047204066813	
+nasap_HuNY02M_ba15073f	0.8773539584934665	
+nasap_KOLESO06M_95ab114f	0.9740106101776373	
+nasap_KabuliL10M_714c58e2	0.6342548204964312	
+nasap_Khmara05M_e22363a9	0.8021304642131889	
+nasap_Kim02M_25752980	0.8800522221617799	
+nasap_Ko05M_39739e8d	0.30378263185935	
+nasap_Larionova04M_b5fc9cd2	0.6094931580842636	
+nasap_LeeS02M_7b01cf34	0.6086717263201339	
+nasap_LeeSH02M_a7e23cc9	0.8260704942861077	
+nasap_LiA09M_c6bd3153	0.9952490092154896	
+nasap_Lin05M_4c61fcc2	0.413175820198098	
+nasap_LuoJ03M_95e7b72a	0.8508173599389581	
+nasap_MiyashitaM02M_892ac3d8	0.2631439192777483	
+nasap_MiyashitaM03M_de08b343	0.46976899341172546	
+nasap_Mo10M_0d46f7a2	0.5749476987447699	
+nasap_MunA03M_cd8b178c	0.901834436317195	
+nasap_Nikiforov14M_44e7d079	0.804985187455307	
+nasap_Sham03M_dec99a67	0.9022674314393261	
+nasap_Wang02M_00f262b9	0.3078626299141437	
+nasap_WangY01M_35ac459e	0.2542287647435311	
+nasap_WongWY02M_e15b732f	0.2936929789765966	
+nasap_Woo05M_1c7f16c8	0.9210517376091314	
+nasap_WuuE02M_b656e252	0.9452729358439887	
+nasap_Yarden07M_150414a4	0.8062656775364253	
+nasap_YuP03M_483053f7	0.2928486293206198	
+nasap_ZhangE02M_6f0cc500	0.3216563411078717	
+nasap_Zhdanov05M_eefd16d2	0.9399515738498789	
+
+均值 63.40 | 中位 67.63 | 总体std 27.12 | n=34 (官方脚本输出为 0-1 口径,已 ×100 对带 —— 预登记换算)
+判决(判据预登记于 REF_SYSTEM_CALIB.md,先于数据): 灰区(|Δ69.1|=5.70 ∈ (5,10])→ 按预登记抽 5 曲人工比对 XML 后定

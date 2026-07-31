@@ -1,0 +1,35 @@
+# CALIB_SMOKE_4 — m2st 冒烟成功（2026-07-22）
+
+承接 `CALIB_SMOKE_3.txt`。无需创建、复制或下载新环境：本机已有的
+`D:\ProgramData\envs\midi2score` 与 m2st 保存时期兼容，实测版本为：
+
+```text
+Python 3.11.15
+torch 2.12.0+cpu (CUDA=False)
+lightning 2.6.1
+transformers 4.29.2
+tokenizers 0.13.3
+```
+
+本地 `amtevaluation.github.io-python-wrapper.zip` 以**仅本进程有效**的
+`PYTHONPATH` 提供 `muster` Python wrapper；不需要其 GNU g++ 评分二进制即可完成
+MIDI→MusicXML 转换。权重加载使用 PyTorch 要求的受限 allowlist，仅允许 m2st 本地
+`config.MyModelConfig` 类。
+
+三份 m2st 产物均已生成：
+
+| 输入 MIDI | 输出 MusicXML | 大小 |
+|---|---|---:|
+| `work/calib_smoke/rec1.mid` (21,479 bytes) | `work/calib_smoke/rec1.xml` | 1,085,102 bytes |
+| `work/calib_smoke/rec2.mid` (22,365 bytes) | `work/calib_smoke/rec2.xml` | 960,472 bytes |
+| `work/calib_smoke/rec3.mid` (23,619 bytes) | `work/calib_smoke/rec3.xml` | 972,914 bytes |
+
+实际命令核心（在 `m2st/midi2scoretransformer` 下，以现成 `midi2score` 环境执行）：
+
+```powershell
+$env:PYTHONPATH='D:\vscode_projects\ee_download\m2st\amtevaluation.github.io-python-wrapper;D:\vscode_projects\ee_download\m2st\midi2scoretransformer'
+& 'D:\ProgramData\envs\midi2score\python.exe' -c "... torch.serialization.add_safe_globals([MyModelConfig]); ... Roformer.load_from_checkpoint('...MIDI2ScoreTF.ckpt'); quantize_path(mid, model).write('musicxml', fp=xml, makeNotation=False)"
+```
+
+耗时（CPU）：rec1 约 52 秒；rec2+rec3 合计约 115 秒。未使用训练 GPU，未更改
+`nemo_test`、m2st 源码、模型权重或依赖版本。

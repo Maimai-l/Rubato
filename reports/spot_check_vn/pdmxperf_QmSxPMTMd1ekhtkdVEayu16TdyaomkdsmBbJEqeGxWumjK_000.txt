@@ -1,0 +1,10 @@
+utt_id: pdmxperf_QmSxPMTMd1ekhtkdVEayu16TdyaomkdsmBbJEqeGxWumjK_000
+audio: D:\vscode_projects\ee_download\work\pdmx_audio\pdmxperf_QmSxPMTMd1ekhtkdVEayu16TdyaomkdsmBbJEqeGxWumjK_000.wav
+measure_range: [0, 12]
+score_range: None
+
+--- A2S(前 500 字)---
+|9/8k#2PR:D4 1/8d4F#4 1/8f#4A4 1/8a4A4 1/8a4F#4 1/8f#4D4 1/8d4E4 1/4e4D4 1/8d4 |9/8k#2E4 1/8e4G4 1/8g4B4 1/8b4B4 1/8b4G4 1/8g4E4 1/8e4E4 3/8e4 |9/8k#2D4 1/8d4F#4 1/8f#4A4 1/8a4A4 1/8a4F#4 1/8f#4D4 1/8d4E4 1/4e4D4 1/8d4 |9/8k#2D5 1/8d5C#5 1/8c#5B4 1/8b4A4 1/8a4F#4 1/8f#4D4 1/8d4D4 3/8d4 |9/8k#2D5 1/8d5E5 1/8e5F#5 1/8f#5F#5 1/8f#5D5 1/8d5F#5 1/8f#5A5 1/4a5F#5 1/8f#5 |9/8k#2E5 1/8e5F#5 1/8f#5E5 1/8e5E5 1/8e5C#5 1/8c#5A4 1/8a4B4 1/4b4A4 1/8a4 |9/8k#2D5 1/8d5E5 1/8e5F#5 1/8f#5F#5 1/8f#5D5 1/8d5F#5 1/
+
+--- TAST(前 500 字)---
+|9/8k#2PR:D4 <|0.50|> 1/8d4F#4 <|0.69|> 1/8f#4A4 <|0.87|> 1/8a4A4 <|1.06|> 1/8a4F#4 <|1.22|> 1/8f#4D4 <|1.39|> 1/8d4E4 <|1.56|> 1/4e4D4 <|1.88|> 1/8d4 <|2.05|> |9/8k#2E4 <|2.05|> 1/8e4G4 <|2.20|> 1/8g4B4 <|2.34|> 1/8b4B4 <|2.49|> 1/8b4G4 <|2.64|> 1/8g4E4 <|2.79|> 1/8e4E4 <|2.95|> 3/8e4 <|3.40|> |9/8k#2D4 <|3.40|> 1/8d4F#4 <|3.54|> 1/8f#4A4 <|3.69|> 1/8a4A4 <|3.83|> 1/8a4F#4 <|3.98|> 1/8f#4D4 <|4.13|> 1/8d4E4 <|4.27|> 1/4e4D4 <|4.57|> 1/8d4 <|4.71|> |9/8k#2D5 <|4.71|> 1/8d5C#5 <|4.86|> 1/8c#5B4 <

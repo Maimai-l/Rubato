@@ -120,6 +120,23 @@ for wn, wp, rng in wins:
     check(f"amt_label_valid_{rng[0]:.0f}", "AMT" in lab, f)
     break
 
+print("[7b] AMT 音符预算:密集段自动切短窗,每窗 ≤ 预算+少量切点余量(修 78% 超长丢弃)")
+dense = [{"pitch": 60 + i % 24, "on": i * 0.05, "off": i * 0.05 + 0.04, "vel": 80}
+         for i in range(900)]                     # 20 音/秒 × 45s,炫技密度
+wins_b = segment_amt(dense, [(0.0, False)], target_lo=12, target_hi=25, max_notes=100)
+check("budget_windows_exist", len(wins_b) >= 6, len(wins_b))
+for wn, _, (t0, t1) in wins_b:
+    check(f"budget_le_{t0:.1f}", len(wn) <= 100 + 25, len(wn))   # 切点在预算点 ±search 内找
+    break
+check("budget_all_windows", all(len(wn) <= 125 for wn, _, _ in wins_b),
+      [len(wn) for wn, _, _ in wins_b])
+covered = sum(len(wn) for wn, _, _ in wins_b)
+check("budget_coverage", covered >= 0.95 * len(dense), covered)  # 切短≠丢内容
+# 无预算(旧行为)对照:同一密集流,窗内音符远超预算
+wins_nb = segment_amt(dense, [(0.0, False)], target_lo=12, target_hi=25)
+check("no_budget_dense", max(len(wn) for wn, _, _ in wins_nb) > 200,
+      max(len(wn) for wn, _, _ in wins_nb))
+
 print("[8] 泄漏终检")
 utts = [
     {"utt_id": "u1", "split": "train", "work_key": "chopin|op10", "maestro_id": None, "dup_cluster": 1},
@@ -132,5 +149,26 @@ utts_bad = utts + [{"utt_id": "u4", "split": "test", "work_key": "chopin|op10",
                     "maestro_id": None, "dup_cluster": 9}]
 r = leakage_check(utts_bad)
 check("leakage_detected", not r["ok"] and "chopin|op10" in r["violations"]["work_key"], r)
+
+print("[9] max_measures=None:小节数不设限,时间是唯一上限(用户决定,段尽量长)")
+ir9 = make_ir(60)                                     # 60 小节,每小节 1 全音符
+tm_fast = TimeMap([(F(0), 0.0), (F(60), 30.0)])       # 全曲 30s:60 小节都装进一段 40s 窗
+segs9 = segment_score(ir9, min_measures=1, max_measures=None, max_sec=40.0, tmap=tm_fast)
+check("unbounded_one_seg", len(segs9) == 1 and segs9[0][1] == (0, 60),
+      [s[1] for s in segs9])                          # 旧上限 32 会硬拆;现在一段装满
+tm_slow = TimeMap([(F(0), 0.0), (F(60), 120.0)])      # 全曲 120s:时间上限起作用
+segs9b = segment_score(ir9, min_measures=1, max_measures=None, max_sec=40.0, tmap=tm_slow)
+check("time_split_count", len(segs9b) == 3, len(segs9b))   # 120s/40s = 恰 3 段
+check("segments_maximal", all((b - a) == 20 for _, (a, b) in segs9b),
+      [s[1] for s in segs9b])                          # 每段装满 40s=20 小节,绝不提前切
+
+print("[10] 单小节超窗:segment_score 下限是 1 小节,单小节 >max_sec 也会产出(消费方必须自设守卫)")
+ir10 = make_ir(3)                                      # 3 小节,每小节 1 全音符
+tm_huge = TimeMap([(F(0), 0.0), (F(1), 60.0), (F(3), 70.0)])   # 第 1 小节 60s(华彩式)
+segs10 = segment_score(ir10, min_measures=1, max_measures=None, max_sec=40.0, tmap=tm_huge)
+check("oversize_single_measure_emitted",
+      any(float(tm_huge(ir10.measures[b].start if b < 3 else ir10.score_end)
+                - tm_huge(ir10.measures[a].start)) > 40.0 for _, (a, b) in segs10),
+      [s[1] for s in segs10])                          # 机制:首候选超时仍产出 → S5/S4 消费方各有丢弃守卫
 
 print(f"\n全部通过: {PASS} 项")

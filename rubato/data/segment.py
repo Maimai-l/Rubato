@@ -16,7 +16,7 @@ from __future__ import annotations
 from fractions import Fraction
 
 from rubato.intermo.core import (
-    Note, Measure, ScoreIR, TimeMap, project, perf_to_amt,
+    Note, Measure, ScoreIR, TimeMap, SerializeError, project, perf_to_amt,
     text_to_units, validate_units,
 )
 
@@ -55,30 +55,33 @@ def _slice_ir(ir: ScoreIR, a: int, b: int) -> tuple[ScoreIR, Fraction]:
     return ScoreIR(notes, measures, hi - lo), lo
 
 
-def segment_score(ir: ScoreIR, min_measures: int = 4, max_measures: int = 32,
+def segment_score(ir: ScoreIR, min_measures: int = 4, max_measures: int | None = 32,
                   max_sec: float = 40.0, sec_per_whole: float | None = None,
                   tmap: TimeMap | None = None) -> list[tuple[ScoreIR, tuple[int, int]]]:
     """
     R-S8.1:小节对齐贪心聚合。返回 [(sub_ir, (a,b)), ...],a/b 为原始小节索引。
     约束:min_measures≤(b-a)≤max_measures 且段渲染时长≤max_sec;段起点在小节线。
     末不足 min_measures 的尾巴向前并入(仍≤max_measures 且≤max_sec)否则弃。
+    max_measures=None【用户决定 2026-07-11】:小节数不设上限,时间(max_sec)是唯一上限 ——
+    段尽量长,在 ≤max_sec 内装下尽可能多的完整小节(PDMX 训练数据用;nASAP 仍按论文 4–32 重叠窗)。
     """
     n = len(ir.measures)
+    mm = max_measures if max_measures else n        # None = 无小节数上限,只受 max_sec 约束
     segs = []
     a = 0
     while a < n:
         b = a + min_measures
         if b > n:                                   # 末尾不足 min:尝试并入上一段
-            if segs and (n - segs[-1][1][0]) <= max_measures:
+            if segs and (n - segs[-1][1][0]) <= mm:
                 pa, _ = segs[-1][1]
                 sub, off = _slice_ir(ir, pa, n)
                 if _seg_seconds(sub, off, tmap, sec_per_whole) <= max_sec:
                     segs[-1] = (sub, (pa, n))
                     break
             break                                   # 并不进去 → 丢弃尾巴
-        # 贪心向后扩,直到 max_measures 或超时或到末尾
+        # 贪心向后扩,直到超时或小节上限或到末尾 —— 段【尽量长】
         best_b = b
-        for bb in range(b, min(a + max_measures, n) + 1):
+        for bb in range(b, min(a + mm, n) + 1):
             sub, off = _slice_ir(ir, a, bb)
             if _seg_seconds(sub, off, tmap, sec_per_whole) <= max_sec:
                 best_b = bb
@@ -94,25 +97,46 @@ def segment_score(ir: ScoreIR, min_measures: int = 4, max_measures: int = 32,
 
 def segment_amt(notes: list[dict], pedal: list[tuple[float, bool]],
                 target_lo: float = 12.0, target_hi: float = 25.0,
-                search: float = 1.0, window_max: float = 40.0):
+                search: float = 1.0, window_max: float = 40.0,
+                max_notes: int | None = None):
     """
     R-S6.3:AMT 目标窗长 U[lo,hi];切点在候选 ±search 内找"无发声音符且踏板抬起"时刻。
     找不到则硬切并丢跨界音符。返回 [(win_notes, win_pedal, (t0,t1)), ...]。
 
     修复问题#12:win_notes / win_pedal 的时间【平移为窗内相对时间】(减 t0),
     使 perf_to_amt 的 10ms bin 落在 0-window_max 有效区间,不被钳到末 bin。
+
+    max_notes(音符预算,全量装配实测逼出来的):AMT 文本逐音符 ≈4-5 token,按时长切窗
+    没管 token 预算 —— 密集炫技段 12-25s 窗 300+ 音符 = 1300+ token,超 decoder 位置表
+    1024 行,78% 的 MAESTRO 窗被超长过滤丢弃(AMT 池只剩稀疏慢段,占混比 0.30 的方言废掉)。
+    预算线:窗内音符将超 max_notes 时把候选切点收缩到预算音符处(下限 2s),密集段自动
+    出短窗 —— 窗变多、每窗必进 1024。
     """
     if not notes:
         return []
+    import bisect
     end = max(n["off"] for n in notes)
+    onsets = sorted(n["on"] for n in notes)
     wins = []
     t0 = 0.0
     target = (target_lo + target_hi) / 2.0
     while t0 < end - 1e-6:
         cand = t0 + target
-        cut = _find_cut(notes, pedal, cand, search, t0 + target_lo, t0 + target_hi)
+        lo_t, hi_t = t0 + target_lo, t0 + target_hi
+        budget_cut = None
+        if max_notes:
+            i0 = bisect.bisect_left(onsets, t0)
+            if i0 + max_notes < len(onsets):
+                t_cap = onsets[i0 + max_notes]       # 第 max_notes+1 个音的时刻
+                if t_cap < cand:
+                    budget_cut = max(t0 + 2.0, t_cap)
+                    cand = budget_cut
+                    lo_t = max(t0 + 1.0, cand - search)   # 允许在预算点附近找静音切点
+                    hi_t = cand + search
+        cut = _find_cut(notes, pedal, cand, search, lo_t, hi_t)
         if cut is None or cut <= t0:
-            cut = min(t0 + window_max, end)          # 硬切
+            # 硬切:预算收缩过就切在预算点(宁可丢跨界音,不出超长窗);否则按老规则
+            cut = min(budget_cut if budget_cut is not None else t0 + window_max, end)
         cut = min(cut, end)
         win_notes = [n for n in notes if n["on"] >= t0 - 1e-9 and n["on"] < cut - 1e-9]
         # 相对时间平移(问题#12):窗内所有事件减 t0
@@ -154,6 +178,86 @@ def _pedal_at(pedal, t: float) -> bool:
     return state
 
 
+def shift_events(notes: list[dict], pedal: list[tuple[float, bool]], offset: float):
+    """
+    C2 偏移视角(EXPERIMENT_ACOUSTIC):把整场演奏的事件流前移 offset 秒,喂给同一台
+    切窗机 → 切出与原窗系错开的第二组窗(论文"重叠切窗"乘数的保守版)。
+    - on < offset 的音符丢弃(与 segment_amt 窗界丢跨界音的既有口径一致);
+    - 踏板在 offset 时刻的保持状态合成为 t=0 的初始事件(否则前移会丢"踏板正踩着"这个事实)。
+    返回 (notes2, pedal2),原列表不动。offset<=0 原样返回。
+    """
+    if offset <= 0:
+        return notes, pedal
+    notes2 = [{"pitch": n["pitch"], "on": n["on"] - offset, "off": n["off"] - offset,
+               "vel": n["vel"]} for n in notes if n["on"] >= offset]
+    state0 = _pedal_at(pedal, offset)
+    pedal2 = [(0.0, state0)] + [(s - offset, d) for s, d in pedal if s > offset]
+    return notes2, pedal2
+
+
+# ---------------------------------------------------------------- AMT 切窗·token 实测把关
+
+def amt_windows_token_budget(notes: list[dict], pedal: list[tuple[float, bool]],
+                             count_tokens, token_budget: int = 950,
+                             target_lo: float = 12.0, target_hi: float = 25.0,
+                             max_notes: int = 100):
+    """
+    切窗 + 逐窗【实测 token 数】把关:超预算的窗在乐句边界对半再切,切不动才丢。
+    count_tokens(text)->int 必须喂真 tokenizer —— 每音符 token 数依赖序列化细节与 spm
+    合并,【估算已经翻车两次】(不设预算 → 78% 超长;按"4-5 tok/音符"设 160 音符预算 →
+    实测 ≥5.1 起步、spm 细分后 6-9,窗数翻倍丢弃也翻倍)。从此只测不估。
+    返回 (wins, dropped):wins = [(win_notes, win_pedal, (t0,t1), amt_text, n_tok)],
+    每个 text 已过校验、n_tok ≤ token_budget【由构造保证】。
+    """
+    out: list = []
+    dropped = 0
+    stack = list(reversed(segment_amt(notes, pedal, target_lo, target_hi,
+                                      max_notes=max_notes)))
+    guard = 0
+    while stack and guard < 10000:
+        guard += 1
+        win_notes, win_pedal, (t0, t1) = stack.pop()
+        labels, _fails = make_amt_label(win_notes, win_pedal)
+        text = labels.get("AMT")
+        if not text:
+            dropped += 1
+            continue
+        n_tok = int(count_tokens(text))
+        if n_tok <= token_budget:
+            out.append((win_notes, win_pedal, (t0, t1), text, n_tok))
+            continue
+        # 超预算 → 先试乐句边界二分(静音+踏板抬起处);找不到或窗已太小,按音符索引
+        # 硬对半(牺牲边界美观,保内容 —— 触底即丢曾在极端密度下丢掉 2/3 音符)。
+        subs: list = []
+        if (t1 - t0) >= 1.5 and len(win_notes) >= 8:
+            abs_notes = [dict(n, on=n["on"] + t0, off=n["off"] + t0) for n in win_notes]
+            abs_pedal = [(s + t0, d) for s, d in win_pedal]
+            half = (t1 - t0) / 2.0
+            subs = segment_amt(abs_notes, abs_pedal,
+                               target_lo=max(1.0, half * 0.5), target_hi=max(1.6, half),
+                               max_notes=max(8, len(win_notes) // 2))
+        if len(subs) > 1:
+            for sub in reversed(subs):      # (a,b) 已是绝对坐标(输入就是绝对时间)
+                stack.append(sub)
+            continue
+        if len(win_notes) < 4:
+            dropped += 1                    # 4 个音都装不下 = 病态(预算过小),丢弃记账
+            continue
+        onsets_rel = sorted(n["on"] for n in win_notes)
+        tmid = onsets_rel[len(onsets_rel) // 2]
+        left = [dict(n, off=min(n["off"], tmid)) for n in win_notes if n["on"] < tmid]
+        right = [dict(n, on=n["on"] - tmid, off=n["off"] - tmid)
+                 for n in win_notes if n["on"] >= tmid]
+        if not left or not right:
+            dropped += 1
+            continue
+        lp = [(s, d) for s, d in win_pedal if s < tmid]
+        rp = [(s - tmid, d) for s, d in win_pedal if s >= tmid]
+        stack.append((right, rp, (t0 + tmid, t1)))
+        stack.append((left, lp, (t0, t0 + tmid)))
+    return out, dropped
+
+
 # ---------------------------------------------------------------- 标签生成(R-S8.3/8.4)
 
 _DIALECTS_BY_KIND = {
@@ -193,6 +297,29 @@ def make_labels(ir: ScoreIR, kind: str, tmap: TimeMap | None = None,
                 fails.append({"dialect": d, "reason": f"validate:{viol[:2]}"})
                 continue
             labels[d] = text
+        except SerializeError as strict_error:
+            # PDMX contains legitimate scores with cadenza/extended measures
+            # whose actual interval length differs from the declared meter.
+            # Fall back only for this structural mismatch; the lenient mode
+            # still enforces positive self-contained measures, Dyck balance,
+            # and timestamp monotonicity.
+            if "长度" not in str(strict_error):
+                fails.append({"dialect": d, "reason": f"SerializeError:{str(strict_error)[:60]}"})
+                continue
+            try:
+                if d == "TAST":
+                    if local_tmap is None:
+                        continue
+                    text = project(ir, "TAST", local_tmap, lenient_measures=True)
+                else:
+                    text = project(ir, d, lenient_measures=True)
+                viol = validate_units(text_to_units(text), lenient_measures=True)
+                if viol:
+                    fails.append({"dialect": d, "reason": f"lenient_validate:{viol[:2]}"})
+                    continue
+                labels[d] = text
+            except Exception as lenient_error:
+                fails.append({"dialect": d, "reason": f"lenient_{type(lenient_error).__name__}:{str(lenient_error)[:60]}"})
         except Exception as e:
             fails.append({"dialect": d, "reason": f"{type(e).__name__}:{str(e)[:60]}"})
     return labels, fails
@@ -200,13 +327,19 @@ def make_labels(ir: ScoreIR, kind: str, tmap: TimeMap | None = None,
 
 def _shift_tmap(sub_ir: ScoreIR, tmap: TimeMap, offset: Fraction) -> TimeMap:
     """
-    构造段内局部 tmap:local(x) = tmap(x + offset)。用段内小节起点做锚点。
-    offset==0 时直接返回原 tmap(全曲/测试路径)。
+    构造段内局部 tmap:local(x) = tmap(x + offset) − tmap(offset)。用段内小节起点做锚点。
+
+    秒轴必须一并归零(减 tmap(offset)):段音频是从 tmap(offset) 秒切/读出来的,
+    时间戳要的是【段内相对秒】。旧版只平移乐谱轴、秒轴保持绝对演奏时间 ——
+    S5 多段曲与 nASAP 所有段的 TAST 戳随段起点整体偏移,超 40s 的段被
+    stamp_units 全钳到末 bin(4000-bin 编码上限),且与切片/窗读音频错位。
+    offset==0 且 tmap(0)==0 时返回原 tmap(常见于每段独立渲染的路径,无需重建)。
     """
-    if offset == 0:
+    base = float(tmap(offset))
+    if offset == 0 and abs(base) < 1e-9:
         return tmap
     pts = sorted({m.start for m in sub_ir.measures} | {Fraction(0), sub_ir.score_end})
-    anchors = [(p, float(tmap(p + offset))) for p in pts]
+    anchors = [(p, float(tmap(p + offset)) - base) for p in pts]
     # 去重同秒锚点保持 TimeMap 可构建
     seen, uniq = set(), []
     for p, s in anchors:
@@ -214,8 +347,8 @@ def _shift_tmap(sub_ir: ScoreIR, tmap: TimeMap, offset: Fraction) -> TimeMap:
             seen.add(p)
             uniq.append((p, s))
     if len(uniq) < 2:
-        uniq = [(Fraction(0), float(tmap(offset))),
-                (sub_ir.score_end, float(tmap(offset + sub_ir.score_end)))]
+        uniq = [(Fraction(0), 0.0),
+                (sub_ir.score_end, float(tmap(offset + sub_ir.score_end)) - base)]
     return TimeMap(uniq)
 
 

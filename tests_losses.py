@@ -2,7 +2,7 @@
 import sys, torch
 sys.path.insert(0, ".")
 from rubato.model.losses import (
-    ordinal_smoothing_targets, timestamp_loss, semantic_loss, sequence_loss,
+    batch_sequence_loss, ordinal_smoothing_targets,
 )
 from rubato.model.sampling import dialect_sampler, tiling_offset, DIALECT_MIX
 
@@ -27,35 +27,40 @@ q0 = ordinal_smoothing_targets(2, n_bins=4000, w=5)   # 左边界截断
 check("boundary_still_sums_1", abs(q0.sum().item() - 1.0) < 1e-5, q0.sum().item())
 check("boundary_center_preserved", abs(q0[2].item() - 0.9) < 1e-6)
 
-print("[3] 时间戳 loss")
+print("[3] 唯一生产 loss:语义/时间戳分流 + 1/sqrt(T)")
+# V=8，其中 token 6/7 是两个时间戳 bin。两条等长序列，逐位置都必须进入
+# batch_sequence_loss；这是 train.py 真正 backward 的唯一入口。
 torch.manual_seed(0)
-logits = torch.randn(4, 4000)
-targets = torch.tensor([100, 200, 50, 3999])
-tl = timestamp_loss(logits, targets)
-check("ts_loss_positive", tl.item() > 0)
-check("ts_loss_finite", torch.isfinite(tl))
-# 完美预测(logit 集中在目标)应 loss 更低
-logits_good = torch.full((1, 4000), -10.0); logits_good[0, 100] = 10.0
-tl_good = timestamp_loss(logits_good, torch.tensor([100]))
-tl_bad = timestamp_loss(torch.zeros(1, 4000), torch.tensor([100]))
-check("ts_good_lower", tl_good < tl_bad, f"{tl_good.item()} vs {tl_bad.item()}")
+raw = torch.randn(2, 4, 8, requires_grad=True)
+logp = raw.log_softmax(-1)
+labels = torch.tensor([[1, 6, 2, 7], [3, 4, 5, 1]])
+types = torch.tensor([[0, 1, 0, 1], [0, 0, 0, 0]])
+mask = torch.ones(2, 4, dtype=torch.bool)
+bins = torch.tensor([[0, 0, 0, 1], [0, 0, 0, 0]])
+parts = batch_sequence_loss(
+    logp, labels, types, mask, bins, torch.tensor([6, 7]),
+    label_smoothing=0.1, p_center=0.9, w=1)
+check("production_loss_finite",
+      torch.isfinite(parts["loss"]) and parts["loss"].item() > 0, parts)
+check("production_counts", (parts["n_sem"], parts["n_ts"]) == (6, 2), parts)
+parts["loss"].backward()
+check("production_loss_has_grad",
+      raw.grad is not None and torch.isfinite(raw.grad).all())
 
-print("[4] 语义 loss(label smoothing)")
-sl = semantic_loss(torch.randn(8, 3571), torch.randint(0, 3571, (8,)))
-check("sem_loss_positive", sl.item() > 0 and torch.isfinite(sl))
+print("[4] 生产 loss 的序列长度归一精确口径")
+# 均匀分布时每 token CE=log(V)。长度 1/4 的序列贡献分别 log(V)、2log(V)，
+# batch mean = 1.5log(V)。
+uniform = torch.full((2, 4, 8), -torch.log(torch.tensor(8.0)))
+mask_len = torch.tensor([[1, 0, 0, 0], [1, 1, 1, 1]], dtype=torch.bool)
+plain = batch_sequence_loss(
+    uniform, labels, torch.zeros_like(types), mask_len, bins,
+    torch.tensor([6, 7]), label_smoothing=0.0, w=1)
+expected = 1.5 * torch.log(torch.tensor(8.0))
+check("length_normalized",
+      abs(plain["loss"].item() - expected.item()) < 1e-6,
+      (plain["loss"].item(), expected.item()))
 
-print("[5] 序列级长度归一化(R-S11.1)")
-# 两条序列,长度差 100 倍,归一化后长序列不应主导
-ce = torch.tensor([10.0, 100.0])          # 短序列 CE 和=10,长序列=100
-lens = torch.tensor([5, 500])             # |T|=5, 500
-L = sequence_loss(ce, lens)
-# 归一化:10/√5=4.47, 100/√500=4.47 → 两者贡献相当
-norm0 = 10.0 / (5 ** 0.5)
-norm1 = 100.0 / (500 ** 0.5)
-check("length_normalized", abs(norm0 - norm1) < 0.01, f"{norm0} vs {norm1}")
-check("seq_loss_is_mean", abs(L.item() - (norm0 + norm1) / 2) < 0.01, L.item())
-
-print("[6] dialect 采样按混比(R-S11.2)")
+print("[5] dialect 采样按混比(R-S11.2)")
 # 所有 utt 都可用全部 4 个 dialect → 分布应趋近混比
 avail = {f"u{i}": ["A2S", "A2S_lite", "TAST", "AMT"] for i in range(4000)}
 samp = dialect_sampler(avail, seed=1, epoch=0)
@@ -66,14 +71,14 @@ for dl, target in DIALECT_MIX.items():
     frac = dist[dl] / total
     check(f"mix_{dl}", abs(frac - target) < 0.03, f"{frac:.3f} vs {target}")
 
-print("[7] 采样可复现")
+print("[6] 采样可复现")
 s1 = dialect_sampler(avail, seed=1, epoch=0)
 s2 = dialect_sampler(avail, seed=1, epoch=0)
 check("sampler_reproducible", s1 == s2)
 s3 = dialect_sampler(avail, seed=1, epoch=1)   # 不同 epoch 应不同
 check("sampler_epoch_varies", s1 != s3)
 
-print("[8] tiling 偏移(R-S11.3)")
+print("[7] tiling 偏移(R-S11.3)")
 # A2S 不 tiling
 check("a2s_no_tiling", tiling_offset("A2S", 10.0, "u1", 0, 1) == 0.0)
 # TAST tiling 在 [0, 40-dur]

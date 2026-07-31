@@ -1,0 +1,93 @@
+[stream_map] 500/40225 ok=500 fail=0 mem_avail=16.4GB
+[stream_map] 1000/40225 ok=1000 fail=0 mem_avail=16.4GB
+[stream_map] 1500/40225 ok=1500 fail=0 mem_avail=16.4GB
+[stream_map] 2000/40225 ok=2000 fail=0 mem_avail=16.4GB
+[stream_map] 2500/40225 ok=2500 fail=0 mem_avail=16.4GB
+[stream_map] 3000/40225 ok=3000 fail=0 mem_avail=16.4GB
+[stream_map] 3500/40225 ok=3500 fail=0 mem_avail=16.4GB
+[stream_map] 4000/40225 ok=4000 fail=0 mem_avail=16.4GB
+[stream_map] 4500/40225 ok=4500 fail=0 mem_avail=16.4GB
+[stream_map] 5000/40225 ok=5000 fail=0 mem_avail=16.3GB
+[stream_map] 5500/40225 ok=5500 fail=0 mem_avail=16.2GB
+[stream_map] 6000/40225 ok=6000 fail=0 mem_avail=16.3GB
+[stream_map] 6500/40225 ok=6500 fail=0 mem_avail=16.3GB
+[stream_map] 7000/40225 ok=7000 fail=0 mem_avail=16.2GB
+[stream_map] 7500/40225 ok=7500 fail=0 mem_avail=16.3GB
+[stream_map] 8000/40225 ok=8000 fail=0 mem_avail=16.3GB
+[stream_map] 8500/40225 ok=8500 fail=0 mem_avail=16.3GB
+[stream_map] 9000/40225 ok=9000 fail=0 mem_avail=16.3GB
+[stream_map] 9500/40225 ok=9500 fail=0 mem_avail=16.3GB
+[stream_map] 10000/40225 ok=10000 fail=0 mem_avail=16.3GB
+[stream_map] 10500/40225 ok=10500 fail=0 mem_avail=16.3GB
+[stream_map] 11000/40225 ok=11000 fail=0 mem_avail=16.3GB
+[stream_map] 11500/40225 ok=11500 fail=0 mem_avail=16.3GB
+[stream_map] 12000/40225 ok=12000 fail=0 mem_avail=16.3GB
+[stream_map] 12500/40225 ok=12500 fail=0 mem_avail=16.3GB
+[stream_map] 13000/40225 ok=13000 fail=0 mem_avail=16.2GB
+[stream_map] 13500/40225 ok=13500 fail=0 mem_avail=16.3GB
+[stream_map] 14000/40225 ok=14000 fail=0 mem_avail=16.3GB
+[stream_map] 14500/40225 ok=14500 fail=0 mem_avail=16.2GB
+[stream_map] 15000/40225 ok=15000 fail=0 mem_avail=16.2GB
+[stream_map] 15500/40225 ok=15500 fail=0 mem_avail=16.2GB
+[stream_map] 16000/40225 ok=16000 fail=0 mem_avail=16.2GB
+[stream_map] 16500/40225 ok=16500 fail=0 mem_avail=16.1GB
+[stream_map] 17000/40225 ok=17000 fail=0 mem_avail=16.1GB
+[stream_map] 17500/40225 ok=17500 fail=0 mem_avail=16.2GB
+[stream_map] 18000/40225 ok=18000 fail=0 mem_avail=16.1GB
+[stream_map] 18500/40225 ok=18500 fail=0 mem_avail=16.1GB
+[stream_map] 19000/40225 ok=19000 fail=0 mem_avail=16.2GB
+[stream_map] 19500/40225 ok=19500 fail=0 mem_avail=16.1GB
+[stream_map] 20000/40225 ok=20000 fail=0 mem_avail=16.1GB
+[stream_map] 20500/40225 ok=20500 fail=0 mem_avail=16.1GB
+[stream_map] 21000/40225 ok=21000 fail=0 mem_avail=16.2GB
+[stream_map] 21500/40225 ok=21500 fail=0 mem_avail=16.1GB
+[stream_map] 22000/40225 ok=22000 fail=0 mem_avail=16.1GB
+[stream_map] 22500/40225 ok=22500 fail=0 mem_avail=16.0GB
+[stream_map] 23000/40225 ok=23000 fail=0 mem_avail=16.0GB
+[stream_map] 23500/40225 ok=23500 fail=0 mem_avail=16.1GB
+[stream_map] 24000/40225 ok=24000 fail=0 mem_avail=16.1GB
+[stream_map] 24500/40225 ok=24500 fail=0 mem_avail=16.1GB
+[stream_map] 25000/40225 ok=25000 fail=0 mem_avail=16.1GB
+[stream_map] 25500/40225 ok=25500 fail=0 mem_avail=16.1GB
+[stream_map] 26000/40225 ok=26000 fail=0 mem_avail=16.1GB
+[stream_map] 26500/40225 ok=26500 fail=0 mem_avail=16.1GB
+[stream_map] 27000/40225 ok=27000 fail=0 mem_avail=16.0GB
+[stream_map] 27500/40225 ok=27500 fail=0 mem_avail=16.0GB
+[stream_map] 28000/40225 ok=28000 fail=0 mem_avail=16.0GB
+[stream_map] 28500/40225 ok=28500 fail=0 mem_avail=16.0GB
+[stream_map] 29000/40225 ok=29000 fail=0 mem_avail=16.1GB
+[stream_map] 29500/40225 ok=29500 fail=0 mem_avail=16.0GB
+[stream_map] 30000/40225 ok=30000 fail=0 mem_avail=16.0GB
+[stream_map] 30500/40225 ok=30500 fail=0 mem_avail=16.0GB
+[stream_map] 31000/40225 ok=31000 fail=0 mem_avail=16.1GB
+[stream_map] 31500/40225 ok=31500 fail=0 mem_avail=16.1GB
+[stream_map] 32000/40225 ok=32000 fail=0 mem_avail=15.9GB
+[stream_map] 32500/40225 ok=32500 fail=0 mem_avail=15.8GB
+[stream_map] 33000/40225 ok=33000 fail=0 mem_avail=15.9GB
+[stream_map] 33500/40225 ok=33500 fail=0 mem_avail=16.0GB
+[stream_map] 34000/40225 ok=34000 fail=0 mem_avail=16.0GB
+[stream_map] 34500/40225 ok=34500 fail=0 mem_avail=16.0GB
+[stream_map] 35000/40225 ok=35000 fail=0 mem_avail=16.0GB
+[stream_map] 35500/40225 ok=35500 fail=0 mem_avail=15.9GB
+[stream_map] 36000/40225 ok=36000 fail=0 mem_avail=15.9GB
+[stream_map] 36500/40225 ok=36500 fail=0 mem_avail=16.0GB
+[stream_map] 37000/40225 ok=37000 fail=0 mem_avail=16.0GB
+[stream_map] 37500/40225 ok=37500 fail=0 mem_avail=15.9GB
+[stream_map] 38000/40225 ok=38000 fail=0 mem_avail=15.9GB
+[stream_map] 38500/40225 ok=38500 fail=0 mem_avail=16.0GB
+[stream_map] 39000/40225 ok=39000 fail=0 mem_avail=16.0GB
+[stream_map] 39500/40225 ok=39500 fail=0 mem_avail=15.9GB
+[stream_map] 40000/40225 ok=40000 fail=0 mem_avail=15.9GB
+S4 段切割(按 MIDI 真实速度图):
+  pieces = 40272
+  pieces_done = 2901
+  sliced = 0
+  seg_resumed = 89237
+  seg_too_short = 1404
+  seg_too_long = 4452
+  structure_mismatch = 5792
+  no_whole_audio = 3683
+  no_midi = 47
+  midi_fail = 0
+  audio_read_fail = 0
+  段音频 → D:\vscode_projects\ee_download\work\pdmx_audio/<utt_id>.flac;跳过的段无文件,assemble 时计 no_audio(可见可追)。

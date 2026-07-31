@@ -76,4 +76,23 @@ al_miss = [
 tmap_m, stats_m = build_timemap(al_miss, {"known": F(0), "known2": F(1,4)})
 check("missing_counted", stats_m["dropped_no_scorepos"] == 1, stats_m)
 
+print("[7] 真实 nASAP 格式:TSV 'n2-1' ↔ partitura note.id 'n2'(问题#6 实测格式)")
+# 实测:partitura note.id='n2',对齐 TSV xml_id='n2-1'(note+和弦序号)。
+# 旧多策略匹配对此返回 None → 匹配率 ~1%。剥和弦序号后应全中。
+from rubato.data.nasap_timemap import match_xmlid, _build_match_index, diagnose_match
+pos = {"n2": F(0), "n3": F(1, 8), "n4": F(1, 4)}            # build_xmlid_map 产出(原生 id)
+idx = _build_match_index(pos)
+check("n2-1_maps_n2", match_xmlid("n2-1", pos, idx) == "n2")
+check("chord_n2-2_maps_n2", match_xmlid("n2-2", pos, idx) == "n2")   # 和弦同 note 不同序号
+check("n4-1_maps_n4", match_xmlid("n4-1", pos, idx) == "n4")
+al_real = [{"xml_id": "n2-1", "perf_onset_sec": 0.0, "pitch": 60},
+           {"xml_id": "n2-2", "perf_onset_sec": 0.0, "pitch": 64},   # 和弦
+           {"xml_id": "n3-1", "perf_onset_sec": 0.5, "pitch": 67},
+           {"xml_id": "n4-1", "perf_onset_sec": 1.0, "pitch": 72}]
+tmap_r, stats_r = build_timemap(al_real, pos)
+check("real_format_high_match", stats_r["matched_xmlid"] == 4, stats_r)
+check("real_format_timemap_built", tmap_r is not None)
+diag = diagnose_match(al_real, pos)
+check("diagnose_100pct", diag["match_rate"] == 1.0, diag)
+
 print(f"\n全部通过: {PASS} 项")

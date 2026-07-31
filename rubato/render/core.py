@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 import hashlib
+import os
 import tempfile
 import pathlib
 import numpy as np
@@ -27,6 +28,76 @@ def _pick(weights: dict, u: float):
         if u < acc:
             return k
     return next(iter(weights))
+
+
+def events_to_midi(events: list[dict], pedal: list, out_path: str,
+                    tempo_bpm: float = 120.0, ppq: int = 480) -> str:
+    """
+    演奏事件(秒)→ MIDI 文件。演奏事件渲成音频前的一步:
+    调用方产出 [{pitch,on,off,vel}] + pedal[(sec,down)] → .mid,
+    再交给 render_midi_to_wav44。用固定 tempo 把秒换算成 tick(秒本身已含表现性时序,
+    tempo 只是 tick 标度,不改听感)。踏板写 CC64。
+    """
+    import mido
+    tpb = ppq
+    spb = 60.0 / tempo_bpm                              # 秒/拍
+    def sec_to_tick(s): return int(round(s / spb * tpb))
+    ev = []                                            # (tick, order, msg)
+    for n in events:
+        ev.append((sec_to_tick(n["on"]), 1, mido.Message(
+            "note_on", note=int(n["pitch"]), velocity=int(n.get("vel", 64)))))
+        ev.append((sec_to_tick(n["off"]), 0, mido.Message(
+            "note_off", note=int(n["pitch"]), velocity=0)))
+    for s, down in pedal:
+        ev.append((sec_to_tick(s), 0, mido.Message(
+            "control_change", control=64, value=127 if down else 0)))
+    ev.sort(key=lambda x: (x[0], x[1]))                # 同 tick:off/CC 先于 on
+    mid = mido.MidiFile(ticks_per_beat=tpb)
+    track = mido.MidiTrack(); mid.tracks.append(track)
+    track.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(tempo_bpm)))
+    prev = 0
+    for tick, _o, msg in ev:
+        msg.time = max(0, tick - prev)
+        prev = tick
+        track.append(msg)
+    pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    mid.save(out_path)
+    return out_path
+
+
+# 压缩采样格式:sfizz 加载时解码成 PCM,内存 ≈ 文件大小 × 解码倍率(FLAC 压缩率 ~50-60% → 解码 ~2×)。
+_COMPRESSED_SAMPLE_EXT = {".flac", ".ogg", ".oga", ".opus", ".wv", ".mp3"}
+
+
+def soundfont_weights(sources_cfg: dict, repo_root, mem_factor: float = 1.0,
+                      decode_factor: float | None = None) -> dict:
+    """
+    每个音源的【内存权重】(GB)= 其 .sfz 所在目录样本的【解码后】估计大小:
+    未压缩(wav/aiff)按文件大小;压缩(flac/ogg/…)按 文件大小 × decode_factor
+    (默认 2.0,env SF_DECODE_FACTOR 可调)。
+    【为什么不能按文件大小】执行端实测:ExperienceNY 文件 6.9GB(FLAC)→ sfizz 实际 RSS ~12GB。
+    按文件大小准入会在 22.8GB 预算里放行 2 个并发(6.9×2=13.8 "够"),实际 24GB → OOM。
+    解码后大小才是 sfizz 常驻内存的真实上限。给内存预算调度用:大音源自动少并发、小音源多并发。
+    目录缺失(如沙盒)→ 保守 2.0GB。mem_factor<1:承认流式加载、换更多并发(自担风险)。
+    """
+    if decode_factor is None:
+        decode_factor = float(os.environ.get("SF_DECODE_FACTOR", "2.0"))
+    out = {}
+    for sid, s in sources_cfg.get("sources", {}).items():
+        d = (pathlib.Path(repo_root) / s["path"]).parent
+        gb = 2.0
+        if d.exists():
+            total = 0.0
+            for f in d.rglob("*"):
+                try:
+                    if f.is_file():
+                        mult = decode_factor if f.suffix.lower() in _COMPRESSED_SAMPLE_EXT else 1.0
+                        total += f.stat().st_size * mult
+                except OSError:
+                    pass
+            gb = total / 1e9
+        out[sid] = max(0.1, gb * mem_factor)
+    return out
 
 
 def assign_source_and_preset(utt_id: str, sources_cfg: dict, presets_cfg: dict):
@@ -70,16 +141,22 @@ def render_midi_to_wav44(midi_path: str, source: dict, sources_cfg: dict,
         sfpath = source["path"]
 
     from rubato.platform import run
+    # 【D36】sources.yaml 里的音源路径是相对路径(assets/soundfonts/...),按【工作目录】解析
+    # —— 换个目录启动就是 3,480 曲 100% 全崩(SFZ not found),且此雷在"大家恰好都从
+    # 同一目录启动"的几周里完全隐形。渲染进程的 cwd 一律钉在 repo 根,两个引擎同待遇。
+    # (执行端 8b53bad 修 sfizz 分支,规划端审后追认并补齐 fluidsynth 分支。)
+    repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
     if engine == "fluidsynth":
         gain = render_cfg["fluidsynth_gain"]
         run("fluidsynth", ["-ni", "-F", out_wav, "-r", str(sr),
-                           "-g", str(gain), sfpath, midi_path], timeout=timeout_s)
+                           "-g", str(gain), sfpath, midi_path],
+            timeout=timeout_s, cwd=repo_root)
     elif engine == "sfizz":
         # sfizz_render flag 以 --help 为准(冒烟阶段核实);常见形式如下
         extra = list(source.get("sfizz_flags") or render_cfg.get("sfizz_flags") or [])
         run("sfizz_render", ["--sfz", sfpath, "--midi", midi_path,
                              "--wav", out_wav, "--samplerate", str(sr), *extra],
-            timeout=timeout_s)
+            timeout=timeout_s, cwd=repo_root)
     else:
         raise ValueError(f"未知引擎 {engine}")
 
@@ -109,12 +186,15 @@ def finalize(wav44_path: str, preset: dict, sources_cfg: dict, presets_cfg: dict
     # 峰值归一化: 插在音源渲染后、预设链前。统一所有音源电平,杜绝音源身份泄漏。
     audio = peak_normalize(audio, target_peak_db=-1.0)
 
-    # 先在渲染采样率上做混响(IR 也按此率合成,irgen 内部按传入 sr 处理)
-    # 为省算力,预设作用放在重采样后的 16k 上(混响细节 16k 足够,且快得多)
-    # 因此先重采样,再 apply_preset:
+    # 先重采样到 16k 再 apply_preset(混响细节 16k 足够,更快)。
+    # 【内存/速度修复】改用 resample_poly(多相)而非 resample(整信号 FFT):
+    #   实测同一 5 分钟缓冲,resample 峰值 91MB/1.35s → resample_poly 38MB/0.35s(2.4×省内存、3.9×提速)。
+    #   16 个 worker 并行时,这一项从 ~1.5GB 降到 ~0.6GB。
     import scipy.signal as ss
-    n_target = int(round(len(audio) * sr_target / sr))
-    audio16 = ss.resample(audio, n_target).astype("float32")   # 近似 soxr;要更好用 ffmpeg soxr
+    from math import gcd
+    g = gcd(int(sr_target), int(sr))
+    up, down = int(sr_target) // g, int(sr) // g
+    audio16 = ss.resample_poly(audio, up, down).astype("float32")
     wet = apply_preset(audio16, preset, sr=sr_target, seed=seed)
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -153,3 +233,29 @@ def duration_check(audio_path: str, expected_dur_s: float, tol_s: float = 1.5) -
     diff = abs(actual - expected_dur_s)
     return {"ok": diff < tol_s, "actual_s": round(actual, 2),
             "expected_s": round(expected_dur_s, 2), "diff_s": round(diff, 2)}
+
+
+def render_qc(midi_path: str, audio_path: str, tol_s: float = 1.5,
+              gate_db: float = -60.0) -> dict:
+    """R-S4.4 runtime gate for a newly rendered file.
+
+    This is intentionally called by the render workers, not merely by an
+    after-the-fact audit.  A parse/probe failure fails closed: a non-empty
+    output file alone is not proof that sfizz completed successfully.
+    """
+    try:
+        import mido
+        expected = float(mido.MidiFile(str(midi_path)).length)
+        duration = duration_check(audio_path, expected, tol_s=tol_s)
+        audible = silence_check(audio_path, gate_db=gate_db)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "audible": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        **duration,
+        "audible": bool(audible),
+        "ok": bool(duration["ok"] and audible),
+    }

@@ -1,0 +1,3 @@
+# SPEED_RESULT — prefetch=3 采样
+
+## GPU 利用率 (nvidia-smi -l 5, 15行)

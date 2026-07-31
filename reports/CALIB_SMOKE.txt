@@ -1,0 +1,42 @@
+# CALIB_SMOKE — MIDI2ScoreTransformer 冒烟（2026-07-22）
+
+## ① Transkun MIDI 产物
+
+输入均为 nASAP test 中的整曲真实钢琴 FLAC；输出目录：
+`D:\vscode_projects\ee_download\work\calib_smoke\`
+
+| 文件 | 大小 | 状态 |
+|---|---:|---|
+| `rec1.mid` | 21,479 bytes | 已生成 |
+| `rec2.mid` | 22,365 bytes | 已生成 |
+| `rec3.mid` | 23,619 bytes | 已生成 |
+
+## ② m2st → MusicXML
+
+`m2st/README.md` 的 Setup (Inference) 只要求下载并放置
+`MIDI2ScoreTF.ckpt`，没有提供可照抄的推理 CLI。权重已在：
+`D:\vscode_projects\ee_download\m2st\MIDI2ScoreTF.ckpt`（389,829,880 bytes）。
+
+按仓库 `midi2scoretransformer/utils.py:quantize_path` 和
+`models/roformer.py:Roformer.load_from_checkpoint` 做的最小入口尝试（仅 rec1）：
+
+```powershell
+Set-Location 'D:\vscode_projects\ee_download\m2st\midi2scoretransformer'
+& 'D:\ProgramData\envs\nemo_test\python.exe' -c "from utils import quantize_path; from models.roformer import Roformer; import torch; m=Roformer.load_from_checkpoint(r'D:\vscode_projects\ee_download\m2st\MIDI2ScoreTF.ckpt'); m.to('cuda' if torch.cuda.is_available() else 'cpu').eval(); s=quantize_path(r'D:\vscode_projects\ee_download\work\calib_smoke\rec1.mid',m); s.write('musicxml',fp=r'D:\vscode_projects\ee_download\work\calib_smoke\rec1.xml',makeNotation=False)"
+```
+
+`rec1.xml`、`rec2.xml`、`rec3.xml` 均未生成：导入阶段即失败，模型未加载、未开始任何 MIDI 推理。
+
+## ③ 原始报错（未自行修复）
+
+```text
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "D:\vscode_projects\ee_download\m2st\midi2scoretransformer\utils.py", line 5, in <module>
+    from muster import muster
+ModuleNotFoundError: No module named 'muster'
+```
+
+预检：`nemo_test` 为 Python 3.11.15、torch 2.11.0+cu128、CUDA=True，
+Lightning 2.4.0、pretty_midi、transformers、music21 均可导入；仅缺 m2st README
+明确要求手动 clone/install 的 `muster`。按执行守则，未安装、未替换版本、未改代码。

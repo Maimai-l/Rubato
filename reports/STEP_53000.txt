@@ -1,0 +1,10 @@
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.23 Δts=+0.19 真sem=0.76 静sem=0.53 acc=0.64 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=-0.00 Δts=+0.03 真sem=0.72 静sem=0.72 acc=0.63 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.10 Δts=-0.05 真sem=0.66 静sem=0.56 acc=0.56 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.22 Δts=+0.12 真sem=0.70 静sem=0.48 acc=0.63 n=724
+  eval 汇总: parseable=0.04 empty=0.9583333333333334 n=48 样本0='|4/4k0' 探针acc=0.64/前缀0.59 eotP0=0.0000
+  eval 指标: parseable=0.04 amt_f1=0.0 omr_ned=0.9508553955434704 n_nasap=48 n_maestro=48
+---
+step 52950 loss=37.6783 avg50=50.8209 sem=2.2988 ts=0.0000 gn=20.1/avg30.4 enc=12.2 dec=15.9 lrE=5.18e-05 lrD=1.56e-04 audio=42s | A2S=2.59 A2S_lite=2.65 AMT=2.31 TAST=2.17
+step 53000 loss=45.6749 avg50=52.0202 sem=2.6153 ts=0.0000 gn=19.9/avg25.8 enc=11.2 dec=16.5 lrE=5.18e-05 lrD=1.55e-04 audio=39s | A2S=2.60 A2S_lite=2.65 AMT=2.30 TAST=2.17
+step 53050 loss=63.1741 avg50=55.5917 sem=2.8745 ts=0.0000 gn=19.5/avg27.2 enc=13.6 dec=14.0 lrE=5.17e-05 lrD=1.55e-04 audio=39s | A2S=2.59 A2S_lite=2.65 AMT=2.31 TAST=2.17

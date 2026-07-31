@@ -37,26 +37,40 @@ def notes_to_intervals(notes: list[dict]):
 
 
 def note_f1(ref_notes: list[dict], est_notes: list[dict],
-            onset_tolerance: float = 0.05) -> dict:
+            onset_tolerance: float = 0.05, offset_ratio: float = 0.2,
+            offset_min_tolerance: float = 0.05) -> dict:
     """
     R-S13.1:note F1,onset 50ms 容差。用 mir_eval.transcription。
-    返回 {precision, recall, f1, n_ref, n_est}。
+    返回 {precision, recall, f1, n_ref, n_est, precision_off, recall_off, f1_off}。
+
+    论文 Table 3 的 note F1 是两套并列的:onset-only(只对 onset+pitch)与
+    onset+offset(还要求 offset 在 max(offset_min_tolerance, offset_ratio×时长) 内)。
+    只报 onset-only 会系统性地【偏乐观】——offset 完全错也算命中。这里两套都算,
+    f1 仍为 onset-only(向后兼容既有调用),f1_off 为带 offset 的严格版,供论文对照。
     """
     import mir_eval
-    import numpy as np
     ref_int, ref_p = notes_to_intervals(ref_notes)
     est_int, est_p = notes_to_intervals(est_notes)
     if len(ref_int) == 0 and len(est_int) == 0:
-        return {"precision": 1.0, "recall": 1.0, "f1": 1.0, "n_ref": 0, "n_est": 0}
+        return {"precision": 1.0, "recall": 1.0, "f1": 1.0, "n_ref": 0, "n_est": 0,
+                "precision_off": 1.0, "recall_off": 1.0, "f1_off": 1.0}
     if len(ref_int) == 0 or len(est_int) == 0:
         return {"precision": 0.0, "recall": 0.0, "f1": 0.0,
-                "n_ref": len(ref_int), "n_est": len(est_int)}
+                "n_ref": len(ref_int), "n_est": len(est_int),
+                "precision_off": 0.0, "recall_off": 0.0, "f1_off": 0.0}
     # onset-only 匹配(不看 offset,pitch 需一致)
     p, r, f, _ = mir_eval.transcription.precision_recall_f1_overlap(
         ref_int, ref_p, est_int, est_p,
         onset_tolerance=onset_tolerance, offset_ratio=None)
+    # onset+offset 匹配(offset 也要在容差内)
+    po, ro, fo, _ = mir_eval.transcription.precision_recall_f1_overlap(
+        ref_int, ref_p, est_int, est_p,
+        onset_tolerance=onset_tolerance, offset_ratio=offset_ratio,
+        offset_min_tolerance=offset_min_tolerance)
     return {"precision": round(p, 4), "recall": round(r, 4), "f1": round(f, 4),
-            "n_ref": len(ref_int), "n_est": len(est_int)}
+            "n_ref": len(ref_int), "n_est": len(est_int),
+            "precision_off": round(po, 4), "recall_off": round(ro, 4),
+            "f1_off": round(fo, 4)}
 
 
 # ---------------------------------------------------------------- bootstrap CI(R-S13.1)
@@ -84,12 +98,13 @@ def bootstrap_ci(scores: list[float], n_resample: int = 10000,
 
 def classify_failure(est_a2s: str, ref_a2s: str | None = None,
                      omr_ned: float | None = None,
-                     ned_threshold: float = 0.3) -> str:
+                     ned_threshold: float = 30.0) -> str:
     """
     R-S13.3:失败三分类。
       - parse_fail:est 无法解析(validate 违规)→ 工程 bug(解析/生成)
       - merge_artifact:可解析但有分段/合并伪影特征(小节数与 ref 差异大、重复小节)→ 工程 bug
-      - content_error:可解析、结构正常,但音乐内容错(OMR-NED 高)→ 模型能力问题
+      - content_error:可解析、结构正常,但音乐内容错(百分制 OMR-NED > 30)→ 模型能力
+      - ok:可解析、无合并伪影且 OMR-NED 未超过诊断阈值
     只有 content_error 是"继续训练能缩"的;前两类是 bug,训练缩不了。
     """
     viol = validate_a2s_safe(est_a2s)
@@ -106,7 +121,7 @@ def classify_failure(est_a2s: str, ref_a2s: str | None = None,
     # 结构正常但内容错(OMR-NED 高)
     if omr_ned is not None and omr_ned > ned_threshold:
         return "content_error"
-    return "content_error"      # 默认:结构对但有差异 → 归模型
+    return "ok"
 
 
 def validate_a2s_safe(a2s: str) -> list[str]:
@@ -126,6 +141,24 @@ def _has_duplicate_measures(a2s: str) -> bool:
         if measures[i] == measures[i + 1] and len(measures[i]) > 8:
             return True
     return False
+
+
+# ---------------------------------------------------------------- 文本 NED 代理(ckpt 选择用)
+
+def text_ned(est: str, ref: str) -> float:
+    """
+    A2S 文本级归一化差异 ∈[0,1](0=全同)。用 difflib 的匹配率近似(1−ratio),
+    不是严格编辑距离 —— 只用作【checkpoint 选择/收敛判定的代理指标】:
+    train.run_eval_hooks 用它保证 best.pt 的挑选与 StopController 的收敛规则
+    始终有明确的训练监控指标，而不是静默悬空。
+    论文对照的正式 OMR-NED 仍以 LEGATO 官方脚本为准(omr_ned_via_legato)。
+    """
+    if not ref and not est:
+        return 0.0
+    if not ref or not est:
+        return 1.0
+    import difflib
+    return 1.0 - difflib.SequenceMatcher(None, est, ref, autojunk=False).ratio()
 
 
 # ---------------------------------------------------------------- OMR-NED(R-S13.1,本地)
@@ -201,25 +234,36 @@ def gap_annotation(metric: str, value: float, tol_trainable: float = 5.0) -> dic
     }
 
 
-def build_eval_report(metrics: dict, failures: list[dict]) -> str:
+def build_eval_report(metrics: dict, failures: list[dict],
+                      compare_to_paper: bool | None = None,
+                      paper_comparable_metrics: set[str] | None = None) -> str:
     """
     R-S13.4:生成 outputs/eval_report.md 文本。
     metrics: {metric_name: value};failures: [{utt_id, category}]。
     """
     from collections import Counter
+    if paper_comparable_metrics is None:
+        # Backward-compatible programmatic API. New production callers should
+        # pass per-metric certification rather than one blanket bool.
+        paper_comparable_metrics = (
+            set(metrics) if compare_to_paper is not False else set())
     lines = ["# 评测报告\n"]
-    lines.append("## 指标对照论文\n")
+    lines.append("## 指标（仅认证为同一协议的项目对照论文）\n")
     for m, v in metrics.items():
-        ann = gap_annotation(m, v)
+        comparable = m in paper_comparable_metrics
+        ann = gap_annotation(m, v) if comparable else {
+            "metric": m, "value": v, "paper": None}
         if ann.get("paper"):
             lines.append(f"- {m}: {v} (论文 {ann['paper']}, 差距 {ann['gap']}, "
                          f"**{ann['verdict']}**)")
         else:
-            lines.append(f"- {m}: {v}")
-    lines.append("\n## 失败归因(R-S13.3)\n")
+            lines.append(f"- {m}: {v}（本地指标；测试集/聚合协议未认证为论文同口径）")
+    lines.append("\n## 样本归因(R-S13.3)\n")
     cats = Counter(f["category"] for f in failures)
-    total = sum(cats.values())
-    lines.append(f"总失败: {total}")
+    failure_total = sum(cats.get(k, 0) for k in
+                        ("parse_fail", "merge_artifact", "content_error"))
+    lines.append(f"总样本: {sum(cats.values())}; 判定失败: {failure_total}; "
+                 f"通过: {cats.get('ok', 0)}; 指标不可用: {cats.get('metric_unavailable', 0)}")
     for cat in ("parse_fail", "merge_artifact", "content_error"):
         n = cats.get(cat, 0)
         tag = "工程 bug" if cat != "content_error" else "模型能力"

@@ -23,7 +23,64 @@
 简化)。对训练数据增强足够真实——我们要的是"多样且合理的空间染色",不是声学仿真级精度。
 """
 from __future__ import annotations
+import os
 import numpy as np
+
+
+def load_real_ir(preset_id: str, sr: int = 16000,
+                 irs_dir: str = "assets/irs/real") -> "np.ndarray | None":
+    """
+    真实 IR(R-S4.3 + U12):assets/irs/real/<preset_id>.wav 存在则加载、转单声道、
+    重采样到 sr、能量归一化,返回;不存在返回 None(调用方回退 synth_ir)。
+
+    为什么要真实 IR:程序化 synth_ir 是【指数衰减白噪声】,只近似 RT60 与粗略频谱,
+    缺真实空间的早期反射图样、模态密度、房间染色。对【真实录音鲁棒性】(论文头号卖点)
+    这是域差:模型学会抗"假混响",真录音的真房间声学不一样。真实 IR 消除这个域差。
+
+    免费真实 IR 来源(下载后放 assets/irs/real/<preset_id>.wav):
+      OpenAIR(openairlib.net,教堂/厅堂/房间)、EchoThief(echothief.com,100+ 真实空间)、
+      MIT Acoustical Reverberation Survey(270 个日常空间)、Aachen AIR。
+    """
+    import os
+    from pathlib import Path
+    import soundfile as sf
+    p = Path(irs_dir) / f"{preset_id}.wav"
+    if not p.exists():
+        return None
+    ir, ir_sr = sf.read(str(p), dtype="float32")
+    if ir.ndim > 1:
+        ir = ir.mean(axis=1)                     # → mono
+    if ir_sr != sr:
+        try:
+            import soxr
+            ir = soxr.resample(ir, ir_sr, sr)
+        except Exception:
+            import scipy.signal as ss
+            ir = ss.resample(ir, int(round(len(ir) * sr / ir_sr))).astype("float32")
+    ir = ir.astype("float32")
+    ir /= np.sqrt(np.sum(ir ** 2)) + 1e-9        # 能量归一,防卷积后音量漂移
+    return ir
+
+
+def audit_real_irs(preset_ids, irs_dir: str = "assets/irs/real", sr: int = 16000) -> dict:
+    """
+    报告每个 preset 用的是真实 IR 还是程序化(防【静默回退】陷阱):
+    load_real_ir 找不到文件会静默返回 None → 回退 synth,不报错。若 EchoThief wav 的
+    文件名没【精确】改成 <preset_id>.wav,该预设会悄悄用回合成混响,你还以为在用真实 IR。
+    返回 {preset_id: 'real'|'synth'};渲染/训练前跑一次,核对 real 的数目符合预期。
+    """
+    return {pid: ("real" if load_real_ir(pid, sr, irs_dir) is not None else "synth")
+            for pid in preset_ids}
+
+
+def resolve_ir(preset: dict, preset_id: str | None, sr: int, seed: int,
+               irs_dir: str = "assets/irs/real") -> np.ndarray:
+    """真实 IR 优先(assets/irs/real/<preset_id>.wav),缺失回退程序化 synth_ir。"""
+    if preset_id is not None:
+        real = load_real_ir(preset_id, sr, irs_dir)
+        if real is not None:
+            return real
+    return synth_ir(preset["rt60"], preset["predelay"], sr, seed)
 
 
 def synth_ir(rt60_s: float, predelay_ms: float, sr: int = 16000,
@@ -66,19 +123,40 @@ def _highshelf(x: np.ndarray, sr: int, gain_db: float, f0: float = 4000.0) -> np
 
 
 def apply_preset(audio: np.ndarray, preset: dict, sr: int = 16000,
-                 seed: int = 0, ir_override: np.ndarray | None = None) -> np.ndarray:
-    """把一个录音预设完整作用到干声上。audio: mono float32 @ sr。返回同格式。"""
+                 seed: int = 0, ir_override: np.ndarray | None = None,
+                 preset_id: str | None = None,
+                 irs_dir: str = "assets/irs/real",
+                 wet_mode: str = "energy") -> np.ndarray:
+    """
+    把一个录音预设完整作用到干声上。audio: mono float32 @ sr。返回同格式。
+    IR 优先级:ir_override > 真实 IR(assets/irs/real/<preset_id>.wav)> 程序化 synth_ir。
+    传 preset_id 即自动启用真实 IR(存在时);不传则维持旧行为(程序化)。
+    wet_mode="energy"(默认,听感修复)|"legacy"(旧峰值对齐,仅供 A/B 对照)。
+    全局旋钮(用户实听调音,不改配置):RUBATO_WET_SCALE(默认 1.0,湿度整体缩放)、
+    RUBATO_NOISE_DB_OFFSET(默认 0,噪底整体加减 dB,负数=更安静)。
+    """
     from scipy.signal import fftconvolve, butter, lfilter
     rng = np.random.default_rng(seed)
     x = audio.astype(np.float32)
 
-    # 1) 卷积混响
-    ir = ir_override if ir_override is not None else synth_ir(
-        preset["rt60"], preset["predelay"], sr, seed)
-    wet = fftconvolve(x, ir, mode="full")[:len(x) + len(ir)]
-    wet = wet[:len(x)]                       # 对齐到原长(尾巴溢出可选保留,这里截断求简)
-    mix = float(preset["wet"])
-    y = (1 - mix) * x + mix * (wet / (np.max(np.abs(wet)) + 1e-9) * np.max(np.abs(x)))
+    # 1) 卷积混响(真实 IR 优先)
+    if ir_override is not None:
+        ir = ir_override
+    else:
+        ir = resolve_ir(preset, preset_id, sr, seed, irs_dir)
+    mix = float(preset["wet"]) * float(os.environ.get("RUBATO_WET_SCALE", "1.0"))
+    mix = min(max(mix, 0.0), 1.0)
+    if wet_mode == "legacy":
+        # 旧算法【听感 bug,仅留作 A/B】:湿声按"峰值"对齐干声峰值再混 —— 混响把能量摊平后
+        # 峰值低而 RMS 高,峰值对齐等于把湿声响度抬高数 dB,同一 wet 数值下听感远比标称湿
+        # (用户实听"糊/混响过大"的主放大器)。
+        wet = fftconvolve(x, ir, mode="full")[:len(x)]
+        y = (1 - mix) * x + mix * (wet / (np.max(np.abs(wet)) + 1e-9) * np.max(np.abs(x)))
+    else:
+        # 【听感修复】IR 归一到单位能量:卷积保持响度,mix 才是真实的湿/干能量比。
+        ir_e = ir / (np.sqrt(np.sum(ir.astype(np.float64) ** 2)) + 1e-12)
+        wet = fftconvolve(x, ir_e.astype(np.float32), mode="full")[:len(x)]
+        y = (1 - mix) * x + mix * wet
 
     # 2) 高架 EQ(麦克风特性)
     y = _highshelf(y, sr, preset["shelf4k"])
@@ -91,8 +169,8 @@ def apply_preset(audio: np.ndarray, preset: dict, sr: int = 16000,
         b, a = butter(4, min(preset["lp"], sr/2 - 1) / (sr / 2), btype="low")
         y = lfilter(b, a, y).astype(np.float32)
 
-    # 4) 房噪底
-    noise_db = preset.get("noise", -60)
+    # 4) 房噪底(RUBATO_NOISE_DB_OFFSET 全局加减,负数=更安静;用户实听"吵"的调音旋钮)
+    noise_db = preset.get("noise", -60) + float(os.environ.get("RUBATO_NOISE_DB_OFFSET", "0"))
     noise_amp = 10 ** (noise_db / 20.0)
     y = y + rng.standard_normal(len(y)).astype(np.float32) * noise_amp
 

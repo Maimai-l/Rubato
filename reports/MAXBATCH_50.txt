@@ -1,0 +1,20 @@
+# MAXBATCH_50 — 溢出试验
+
+## 配置
+batch_sec=50.0 (down from 60) | prefetch=关
+
+## GPU 内存
+专用=15,291 MB | 共享=920 MB | 总计=16,211 MB
+之前: 共享=1,576 MB → 降到 920 MB (-42%)
+
+## 连续 5 步 td=/tc=
+step 62800: td=0.7s tc=9.1s
+step 62850: td=0.6s tc=9.1s
+step 62900: td=0.7s tc=9.1s
+step 62950: td=0.7s tc=9.2s
+step 63000: td=0.7s tc=9.1s
+均值: td=0.68s tc=9.12s = 9.8s/步
+
+## 结论
+共享内存降 42% 但微批 33→40 → tc 8.4→9.1s(+8%)。
+A2S=2.53 新低, A2S_lite=2.58 新低, step=63000.

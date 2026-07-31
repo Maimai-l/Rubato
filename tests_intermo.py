@@ -43,11 +43,13 @@ ir = ScoreIR(
     score_end=F(3, 4),
 )
 text = project(ir, "A2S")
-expected = "|3/4k-4PL:A-2PR:C4 1/4c4E-4G4 1/2 |3/4k-4PL:a-2PR:e-4g4"
+# D-06 修正后匹配论文 Fig.1:收尾 offset(a-2,e-4,g4)挂在小节线【前】的 1/2 interval 单元,
+# 终止小节线(D-05,本实现的有意扩展)为空。
+expected = "|3/4k-4PL:A-2PR:C4 1/4c4E-4G4 1/2PL:a-2PR:e-4g4 |3/4k-4"
 check("golden.exact", text == expected, f"\n    got:  {text}\n    want: {expected}")
-# 说明:①offset 先于 onset(c4 在 E-4G4 前)②落在小节线时刻的事件归属小节线单元(D-06),
-#   故终止 offset 挂在末尾小节线上,其前补一个空 moment 的 1/2 interval;与首小节线携带
-#   开头 onset 对称 ③staff 标记只在切换时发出 ④和弦按音高升序 ⑤小节内 interval 和 = 3/4 ✓
+# 说明:①offset 先于 onset(c4 在 E-4G4 前)②收尾 offset 属小节线前的 interval 单元(D-06,论文形式)
+#   ③staff 标记只在切换时发出 ④和弦按音高升序 ⑤小节内 interval 和 = 3/4 ✓
+#   ⑥终止小节线为空(D-05:与 Fig.1 差一个末尾 token,系为 score_end 可恢复,有意为之)
 
 # ---------------------------------------------------------------- 2. 往返:8 类边界
 print("[2] 边界情形往返")
@@ -135,10 +137,10 @@ ir = ScoreIR(
 tmap = TimeMap([(F(0), 0.0), (F(2, 4), 2.0)])
 tast = project(ir, "TAST", tmap)
 import re
-stripped = re.sub(r" <\|t\d+\|>", "", tast)
+stripped = re.sub(r" <\|\d+\.\d{2}\|>", "", tast)
 check("tast_strip_eq_a2s", stripped == project(ir, "A2S"), f"\n    {tast}\n    {stripped}")
 n_units = len(text_to_units(project(ir, "A2S")))
-n_ts = len(re.findall(r"<\|t\d+\|>", tast))
+n_ts = len(re.findall(r"<\|\d+\.\d{2}\|>", tast))
 check("ts_per_unit", n_ts == n_units, f"{n_ts} vs {n_units}")
 
 # 3.3 lite 与 A2S 音高集合一致(MIDI 投影)
@@ -171,8 +173,8 @@ amt, stats = perf_to_amt(
            {"pitch": 64, "on": 0.505, "off": 1.20, "vel": 78},
            {"pitch": 60, "on": 1.30, "off": 1.302, "vel": 90}],  # 触发最短音长
     pedal=[(0.50, True), (1.25, False)])
-check("amt_has_vel_ts", "<|v82|>" in amt and "<|t50|>" in amt, amt)
-check("amt_pedal", "<|ped1|>" in amt and "<|ped0|>" in amt, amt)
+check("amt_has_vel_ts", "<|vel:82|>" in amt and "<|0.50|>" in amt, amt)  # bin 50 = 0.50s
+check("amt_pedal", "<|CC64:on|>" in amt and "<|CC64:off|>" in amt, amt)
 check("amt_min_dur_floor", stats["min_dur_floored"] == 1, stats)
 check("amt_dyck", not [x for x in validate_units(text_to_units(amt))
                        if "DYCK" in x], validate_units(text_to_units(amt)))

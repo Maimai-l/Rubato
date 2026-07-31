@@ -37,15 +37,6 @@ def load_binaries(project_yaml: str | Path | None = None) -> dict:
     return cfg.get("binaries", {}) or {}
 
 
-def posix_path(p: str | Path) -> str:
-    """
-    路径统一为正斜杠字符串(问题#16:Windows 下 glob 正斜杠 × os.sep 反斜杠拼接
-    产出 'mid/1\\49\\file.mid' 混合路径,subprocess 偶发失败)。
-    拼路径永远用 pathlib 的 /,落字符串前过一次本函数。
-    """
-    return Path(p).as_posix()
-
-
 def resolve_exe(name: str, binaries: dict | None = None) -> str:
     """
     解析外部程序的可执行路径。
@@ -99,6 +90,50 @@ def run(name: str, args: list[str], binaries: dict | None = None,
     )
 
 
+# ---------------------------------------------------------------- stdout/stderr 编码硬化(Windows GBK 控制台)
+
+def harden_stdout(errors: str = "backslashreplace") -> None:
+    """
+    让 print 在 Windows GBK(cp936)控制台上【永不因非 GBK 字符崩溃】。
+    坑(本模块只修了文件 IO,漏了这个):print() 走 sys.stdout,Windows 默认 cp936。打印
+    '−'(U+2212)、'↔'、作曲家名 'Fauré/Dvořák'、音乐符号 '♭' 时 → UnicodeEncodeError 整个进程崩。
+    执行端 S5 五次全崩在预算打印的 '−' 上,VN 一次没跑成 —— 这才是首要 BLOCKER,不是 OOM。
+    修:放宽 stdout/stderr 的编码错误策略为不抛异常(坏字符转义),保留原编码 → 中文照常显示。
+    reconfigure 不可用(旧 wrapper / 被 wandb 换过 stdout)时,退回 UTF-8 TextIOWrapper 包底层 buffer。
+    幂等,可多次调用(wandb 在 import virtuoso 时会重新包 stdout,故构造 VN 引擎后需再调一次)。
+    """
+    import sys, io
+    for name in ("stdout", "stderr"):
+        s = getattr(sys, name, None)
+        if s is None:
+            continue
+        try:
+            s.reconfigure(errors=errors)      # 保留原编码(GBK),只放宽错误策略,最不惊扰
+            continue
+        except Exception:
+            pass
+        try:
+            buf = getattr(s, "buffer", None)
+            if buf is not None:
+                setattr(sys, name, io.TextIOWrapper(buf, encoding="utf-8",
+                                                    errors=errors, line_buffering=True))
+        except Exception:
+            pass
+
+
+def quiet_wandb() -> None:
+    """
+    渲染脚本不需要 wandb;但 virtuoso(VirtuosoNet)import 时会带出 wandb,其 console_capture 会把
+    sys.stdout 换成一个【按控制台编码(GBK)重编码】的 wrapper —— 于是任何非 GBK 字符的 print 直接崩。
+    在【任何可能 import wandb 之前】调用:console=off 不拦 stdout;mode=disabled + silent 彻底静默。
+    setdefault 允许执行端显式覆盖,但渲染场景本就不该开 wandb。
+    """
+    import os
+    os.environ.setdefault("WANDB_CONSOLE", "off")
+    os.environ.setdefault("WANDB_MODE", "disabled")
+    os.environ.setdefault("WANDB_SILENT", "true")
+
+
 # ---------------------------------------------------------------- UTF-8 文件 IO
 
 def read_text(path: str | Path) -> str:
@@ -128,14 +163,6 @@ def write_jsonl(path: str | Path, rows) -> None:
     with open(p, "w", encoding="utf-8", newline="\n") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-
-def append_jsonl(path: str | Path, row: dict) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
 
 if __name__ == "__main__":
     # 自检:UTF-8 往返(含音乐符号与中文作曲家名)+ 程序解析

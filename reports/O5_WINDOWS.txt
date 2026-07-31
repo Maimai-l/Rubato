@@ -1,0 +1,7 @@
+## s6_amt_windows --offset 5 DONE 统计
+
+命令: python scripts/s6_amt_windows.py --offset 5
+
+DONE in 110s: performances=962 windows=115442 labels=115426 win_fail=16 not_found=0 parse_fail=0 skip_nontrain=314
+  → D:\vscode_projects\ee_download\work\maestro_amt_windows_o5.jsonl
+  (行带 win=[t0,t1], 加载时按窗读整曲 FLAC, 不切文件)

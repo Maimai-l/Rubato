@@ -40,9 +40,20 @@
 
 **砍掉**:DBD、DBD_plus(节拍任务,对 A2S 耦合弱,小节监督已含在 A2S 内)、TAST_lite、AMT_lite(冗余)。若追求极限精简,进一步可砍 TAST(保 A2S/A2S_lite/AMT),但将失去 §S12 的分窗机制,需另行设计终止准则——不推荐。
 
+> **更新(能力已补齐,默认仍关)**:上述"砍掉"是**训练混比的缺省选择**,不再是"做不了"。
+> TAST_lite / AMT_lite / DBD 的投影与 prompt 已实现(`core.project` / `perf_to_amt(lite=)` /
+> `ir_to_dbd_units`;`build.DIALECT_PROMPT` 含 7 方言;`tests_dialects.py`)。PDMX→AMT 通路
+> 也已打通(`core.score_ir_to_events` + `perf_to_amt`)。要对齐论文全 8 方言/PDMX-AMT,
+> 只需把它们并入 `DIALECT_MIX` 与标签生成,无需改架构。DBD_lite 的 full/lite 精确切分待 Fig.2 确认。
+
 **词表布局仍按论文全量保留**【不变量】:4000 时间戳 + 129 MIDI + 1 beat(占位不用)+ 40 prompt + 256 byte-fallback + 3 特殊符 + 3571 可学习语义 = 8000。理由:保持论文核账检查有效、embedding 行数便宜、未来加回 DBD 无痛。
 
 **与论文的偏离清单(冻结)**:D1 热启动(encoder 载 canary 权重,非 from-scratch);D2 音源替换(5 具名免费源 × 16 程序化录音预设);D3 dialect 裁剪(上表);D4 评测缩水(无 ATEPP 全量);D5 编码器帧率接受 canary 默认(见 R-S10.3,不追论文的 40ms)。
+
+> **更新(D1/D3 已降级为开关)**:D1 现为 `build_model(from_scratch=)` 开关——缺省热启动,
+> `True` 则全权重随机化对齐论文(encoder hash 核对反向断言"已改变")。D3 见上方方言更新。
+> 两者的"偏离"现在只是**缺省值**,不是能力缺口;真正剩下的取舍是**算力/规模**(从头训贵一个量级、
+> PDMX-AMT 多一条渲染链),代码不拦。
 
 ---
 
@@ -216,9 +227,9 @@ R-S5.5 力度增广【新增,来自你的封装能力】:`velocity_multiplier` �
 R-S5.6 TAST 时间戳来源(依 U9 结果二选一):
 - 主路径:save_csv 每行↔乐谱音符且含演奏 onset → 直接构成 time_map 喂 `score_to_intermo(part, time_map)`,VN 产物全 dialect 可用。
 - 降级路径:CSV 不含映射 → VN 产物仅供 A2S/A2S_lite;TAST 时间戳由 humanize 路线(时间自生成,天然有真值)与 nASAP 承担。**主线不因此受损**。
-R-S5.7 humanize 兜底【推断,冻结参数】:对 straight MIDI 施加 ①逐拍速度因子 OU 过程 φ_{k+1}=φ_k+0.2(1−φ_k)Δt+0.05√Δt·ε,截断 [0.90,1.10];②onset 抖动 N(0,12ms) 截 ±35ms,off 同步平移保时值;③力度 +U[−10,10] 截 [20,120];④踏板照谱。覆盖对象:VN failed/timeout 的曲 + 按预算未进 VN 队列的曲。
+R-S5.7 【已废除,2026-07-11 用户拍板:只要 VirtuosoNet,不要恒速假演奏。humanize 模块已删除;VN 失败=该曲失败,按标签续跑重试。原文留档:】humanize 兜底【推断,冻结参数】:对 straight MIDI 施加 ①逐拍速度因子 OU 过程 φ_{k+1}=φ_k+0.2(1−φ_k)Δt+0.05√Δt·ε,截断 [0.90,1.10];②onset 抖动 N(0,12ms) 截 ±35ms,off 同步平移保时值;③力度 +U[−10,10] 截 [20,120];④踏板照谱。覆盖对象:VN failed/timeout 的曲 + 按预算未进 VN 队列的曲。
 R-S5.8 资源约束【不变量】:VN 批量与 S11 训练不得同时占 GPU。依 U8 环境实测单曲耗时(你的指南:5070Ti ≈3–5s/曲)确定 VN 队列曲数上限 = 训练开始前可完成的量;溢出部分自动划给 humanize。队列进度记 ledger(jsonl),中断可续。
-R-S5.9 VN 失败判据:进程非零退出 / 超时 timeout=300s / 输出 .mid 缺失或 0 音符。失败入 failures 并转 humanize,**不重试超过 1 次**。
+R-S5.9 VN 失败判据:进程非零退出 / 超时 timeout=300s / 输出 .mid 缺失或 0 音符。失败入 failures,【2026-07-11 起不转 humanize(已废除)】,由按标签续跑机制重试。
 
 ### 验收
 A-S5.1 首批 20 曲:输出 .mid 音符数 ∈ [0.8, 1.2]×谱面音符数(展开后);抽 3 曲人耳对比 flat 版,可闻 rubato。
@@ -268,7 +279,7 @@ A-S7.2 report:曲目数、段数、重叠系数、与 MAESTRO test 的录音交�
 **输入**:S4/S5/S6/S7 产物。**输出**:`manifest_utts.jsonl`、`labels.jsonl`、`$SHARDS/`(训练分片)。
 
 ### 需求
-R-S8.1 乐谱类切段【不变量】:小节对齐,贪心聚合连续小节,约束 4≤小节数≤32 且渲染时长 ≤40s;段起点必在小节线;piece 末不足 4 小节的尾巴向前并入(仍 ≤40s)否则弃。**禁止任意时间点切乐谱类样本**(会破坏 Dyck 与小节自包含)。
+R-S8.1 乐谱类切段【不变量;2026-07-11 用户修订:PDMX 训练数据小节数不设上下限,时间(≤40s)是唯一上限,段尽量长(min_measures=1, max_measures=None),质量下限由 ≥2s 时长守卫把守;nASAP 仍按 R-S7.3 论文明确的 4–32 重叠窗】原文:小节对齐,贪心聚合连续小节,约束 4≤小节数≤32 且渲染时长 ≤40s;段起点必在小节线;piece 末不足 4 小节的尾巴向前并入(仍 ≤40s)否则弃。**禁止任意时间点切乐谱类样本**(会破坏 Dyck 与小节自包含)。
 R-S8.2 每段渲染时长来源:flat/humanize 由生成的 MIDI 时间;vn 由输出 MIDI;时长与音频实测差 >1.5s 判废。
 R-S8.3 dialects 可用性规则:flat/humanize → {A2S, A2S_lite, TAST, (无 AMT:合成域不做 AMT【推断:力度/踏板系人造,监督价值低,省序列长度】)};vn → 依 R-S5.6;maestro → {AMT};nasap → {A2S, A2S_lite, TAST}。
 R-S8.4 标签文本生成:调 `project()`;每条样本每个可用 dialect 一份文本;任何 validate() 违规 = 该样本整条废弃入 failures。

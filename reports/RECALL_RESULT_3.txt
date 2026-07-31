@@ -1,0 +1,4 @@
+S4 recall: ok=3480 fail=0 skipped=0 in 48.4m — sfizz cwd fix worked
+DONE: ok=3480 fail=0 skipped(已存在)=0 in 48.4m | 峰值内存占用≈7.4/7.1GB
+  逐条状态: D:\vscode_projects\ee_download\reports\s4_render.jsonl
+  内存仍紧?set S4_RESERVE_GB=8 多留;想更快?set S4_MEM_FACTOR=0.5(承认 sfizz 流式)。

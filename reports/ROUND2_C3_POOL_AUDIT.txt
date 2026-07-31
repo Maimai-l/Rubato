@@ -1,0 +1,72 @@
+ROUND2 C3 pool audit — 2026-07-22
+====================================
+
+Scope
+-----
+This records the D53 C3 full-render label promotion and the follow-up
+dry-run validation.  It is a data-construction audit only: no training was
+started.
+
+Initial full C3 run
+-------------------
+The full renderer completed with 34,465 deterministically selected pieces.
+Its final log (`work/c3_full.log`) reported:
+
+  picked=34465 render_ok=34465 render_skipped=12000
+  slice_sliced=63501 slice_seg_resumed=34556
+  slice_structure_mismatch=5519 slice_seg_too_long=4917
+  slice_seg_too_short=1528 staging_rows=133628
+
+The first post-promotion dry-run completed, but exposed an input-quality
+issue rather than an assembler failure:
+
+  pdmx rows=304893 kept=202924 no_audio=73491 dup=28478
+  TOTAL utts=584106
+
+Root cause and repair
+---------------------
+`scripts/c3_timbre_copies.py` stage 3 wrote a label for every selected source
+row, including rows whose segment had not been produced by stage 2.  It also
+preserved repeated `utt_id`s.  The assembler correctly rejected those rows,
+so they did not enter the effective training pool, but they obscured the
+input accounting.
+
+The generator now:
+
+  * writes a C3 staging label only when `<utt_id>.opus` or `<utt_id>.flac`
+    exists in `work/pdmx_audio_s2`;
+  * keeps only the first occurrence of each C3 `utt_id`; and
+  * provides `--stage-only` to rebuild labels from existing C3 artifacts
+    without rendering again.
+
+Rebuild evidence (`work/c3_stage_rebuild.log`):
+
+  picked=34465 stage_only=1 staging_dup=19170
+  staging_no_audio=30640 staging_rows=83818
+
+The formerly active unfiltered C3 labels were preserved at:
+
+  work/pdmx_a2s_labels_s2.pre_label_filter.bak
+
+The original pre-C3 active labels remain preserved at:
+
+  work/pdmx_a2s_labels_s2.pre_c3.bak
+
+Final dry-run
+-------------
+`work/round2_c3_filtered_dryrun.log` completed successfully:
+
+  pdmx     rows=255083 kept=202924 no_audio=37920 no_dialect=0 bad_schema=0 dup=14239
+  nasap    rows=7098   kept=7098   no_audio=0     no_dialect=0 bad_schema=0 dup=0
+  maestro  rows=374084 kept=374084 no_audio=0     no_dialect=0 bad_schema=0 dup=0
+  TOTAL utts=584106
+  by_dialect={'A2S': 210022, 'A2S_lite': 209915, 'TAST': 29304, 'AMT': 374084}
+  by_split={'train': 535351, 'test': 25254, 'val': 8932,
+            'quarantine_leak': 1239, 'validation': 13330}
+
+Interpretation
+--------------
+The final effective pool is unchanged at 584,106 utterances: invalid C3 rows
+were already excluded by `assemble()`.  The repaired staging file makes that
+fact explicit before assembly.  Leak quarantine remains 1,239, and neither
+the final audit nor this repair started training.
