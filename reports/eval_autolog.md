@@ -1243,3 +1243,36 @@ decode-abtest @ step 61200;同子集 n=4;beam→greedy 回退=关
 decode-abtest @ step 61200;同子集 n=4;domain=sample.domain;beam→greedy 回退=关
   beam=1: parseable=0/4 fallback=4 elapsed=45.6s 拒因:DYCK=4 TERMINAL=4 TS_PARSE=3 parse_error=3 TS_MISSING=2
   beam=4: parseable=0/4 fallback=4 elapsed=123.4s 拒因:TS_PARSE=3 parse_error=3 DYCK=2 TERMINAL=2 MEASURE=1 TS_MISSING=1
+
+## eval @ step 62000 (2026-08-03 16:49:32)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.14 Δts=+0.16 Δpitch=+0.27 真sem=0.76 静sem=0.63 真pitch=0.90 acc=0.63 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.04 Δts=+0.01 Δpitch=+0.04 真sem=0.74 静sem=0.70 真pitch=0.35 acc=0.65 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.17 Δts=+0.07 Δpitch=+0.28 真sem=0.71 静sem=0.54 真pitch=0.67 acc=0.62 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.21 Δts=+0.12 Δpitch=+0.18 真sem=0.72 静sem=0.51 真pitch=0.87 acc=0.66 n=724
+  eval(仅探针;解码腿按 eval_decode_every 稀疏跑,本次跳过)
+
+## eval @ step 63000 (2026-08-03 19:18:28)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.12 Δts=+0.18 Δpitch=+0.24 真sem=0.76 静sem=0.64 真pitch=0.90 acc=0.64 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.02 Δts=-0.01 Δpitch=-0.01 真sem=0.73 静sem=0.71 真pitch=0.28 acc=0.65 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.17 Δts=+0.14 Δpitch=+0.28 真sem=0.73 静sem=0.56 真pitch=0.72 acc=0.65 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.21 Δts=+0.09 Δpitch=+0.17 真sem=0.71 静sem=0.50 真pitch=0.88 acc=0.65 n=724
+  eval(仅探针;解码腿按 eval_decode_every 稀疏跑,本次跳过)
+
+## decode-abtest @ step 63800 (2026-08-03 22:34:30)
+decode-abtest @ step 63800;同子集 n=24;16 臂;domain=sample.domain;beam→greedy 回退=关
+  beam=1 rep=1.0 eot=0.0: parseable=0/24 fallback=24 elapsed=256.7s 拒因:DYCK=24 TERMINAL=23 TS_MISSING=21 MEASURE=9 TS_PARSE=6 parse_error=6 TS_NONMONOTONE=5
+  beam=1 rep=1.0 eot=1.0: parseable=0/24 fallback=24 elapsed=233.7s 拒因:DYCK=24 TERMINAL=22 TS_MISSING=21 MEASURE=10 TS_NONMONOTONE=5 TS_PARSE=5 parse_error=5
+  beam=1 rep=1.0 eot=2.0: parseable=0/24 fallback=24 elapsed=224.5s 拒因:DYCK=24 TERMINAL=21 TS_MISSING=21 MEASURE=10 TS_NONMONOTONE=5 TS_PARSE=3 parse_error=3
+  beam=1 rep=1.0 eot=4.0: parseable=0/24 fallback=24 elapsed=208.4s 拒因:DYCK=24 TS_MISSING=20 TERMINAL=19 MEASURE=12 TS_NONMONOTONE=4 TS_PARSE=3 parse_error=3
+  beam=1 rep=1.1 eot=0.0: parseable=0/24 fallback=24 elapsed=250.8s 拒因:DYCK=24 TERMINAL=21 TS_MISSING=21 MEASURE=10 TS_PARSE=6 parse_error=6 TS_NONMONOTONE=3
+  beam=1 rep=1.1 eot=1.0: parseable=0/24 fallback=24 elapsed=245.0s 拒因:DYCK=24 TERMINAL=21 TS_MISSING=21 MEASURE=11 TS_PARSE=5 parse_error=5 TS_NONMONOTONE=3
+  beam=1 rep=1.1 eot=2.0: parseable=0/24 fallback=24 elapsed=234.9s 拒因:DYCK=24 TERMINAL=22 TS_MISSING=21 MEASURE=10 TS_PARSE=5 parse_error=5 TS_NONMONOTONE=3
+  beam=1 rep=1.1 eot=4.0: parseable=1/24 fallback=23 elapsed=214.1s 拒因:DYCK=23 TS_MISSING=21 TERMINAL=20 MEASURE=10 TS_PARSE=3 parse_error=3 TS_NONMONOTONE=2 通过=1
+  beam=1 rep=1.3 eot=0.0: parseable=0/24 fallback=24 elapsed=249.3s 拒因:DYCK=23 TERMINAL=22 TS_MISSING=21 MEASURE=8 TS_PARSE=6 parse_error=6 TS_NONMONOTONE=3
+  beam=1 rep=1.3 eot=1.0: parseable=0/24 fallback=24 elapsed=242.8s 拒因:DYCK=23 TERMINAL=21 TS_MISSING=21 MEASURE=9 TS_PARSE=5 parse_error=5 TS_NONMONOTONE=3
+  beam=1 rep=1.3 eot=2.0: parseable=0/24 fallback=24 elapsed=245.6s 拒因:DYCK=23 TERMINAL=21 TS_MISSING=20 MEASURE=8 TS_PARSE=5 parse_error=5 TS_NONMONOTONE=3
+  beam=1 rep=1.3 eot=4.0: parseable=1/24 fallback=23 elapsed=218.9s 拒因:DYCK=23 TERMINAL=19 TS_MISSING=19 MEASURE=11 TS_PARSE=3 parse_error=3 TS_NONMONOTONE=2 通过=1
+  beam=1 rep=1.5 eot=0.0: parseable=0/24 fallback=24 elapsed=245.6s 拒因:DYCK=23 TERMINAL=19 TS_MISSING=19 MEASURE=8 TS_PARSE=8 parse_error=8
+  beam=1 rep=1.5 eot=1.0: parseable=0/24 fallback=24 elapsed=242.6s 拒因:DYCK=23 TERMINAL=20 TS_MISSING=19 MEASURE=8 TS_PARSE=7 parse_error=7
+  beam=1 rep=1.5 eot=2.0: parseable=0/24 fallback=24 elapsed=231.5s 拒因:DYCK=24 TERMINAL=20 TS_MISSING=20 MEASURE=8 TS_PARSE=7 parse_error=7
+  beam=1 rep=1.5 eot=4.0: parseable=1/24 fallback=23 elapsed=205.0s 拒因:DYCK=23 TERMINAL=20 TS_MISSING=18 MEASURE=8 TS_PARSE=3 parse_error=3 通过=1

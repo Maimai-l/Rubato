@@ -1,0 +1,456 @@
+CUDA allocator 预配置: PYTORCH_ALLOC_CONF=expandable_segments:True
+  [INFO] nASAP test work_keys (from nasap_split.json): 12
+  [INFO] ASAP-Beyer: 14 works / 25 real recordings (Beyer-Dai public split)
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] 时长缓存加载 373410 条(audio_dur_cache.jsonl)
+=== 装配统计(每一步丢弃都计数,不静默)===
+  pdmx     rows= 424284 kept= 371610 no_audio=  37181 no_dialect=     0 bad_schema=    0 dup=14239 filtered= 1254
+  nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0 filtered=    0
+  maestro  rows= 374084 kept= 374084 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0 filtered=    0
+  -- per file --
+  pdmx_perf_labels.jsonl                 kind=pdmx     rows=  35288 kept=  35101 no_audio=      0 no_dialect=     0 dup=    0 filtered=  187
+  pdmx_a2s_labels.jsonl                  kind=pdmx     rows= 135977 kept=  83786 no_audio=  37181 no_dialect=     0 dup=14239 filtered=  771
+  nasap_labels.jsonl                     kind=nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows.jsonl              kind=maestro  rows= 144087 kept= 144087 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows_o10.jsonl          kind=maestro  rows= 114571 kept= 114571 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows_o5.jsonl           kind=maestro  rows= 115426 kept= 115426 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  pdmx_a2s_labels_s2.jsonl               kind=pdmx     rows=  83818 kept=  83786 no_audio=      0 no_dialect=     0 dup=    0 filtered=   32
+  pdmx_perf_labels_s2.jsonl              kind=pdmx     rows=  30607 kept=  30598 no_audio=      0 no_dialect=     0 dup=    0 filtered=    9
+  pdmx_perf_labels_r3_native.jsonl       kind=pdmx     rows= 138594 kept= 138339 no_audio=      0 no_dialect=     0 dup=    0 filtered=  255
+  ⚠ manifest 无映射隔离: pdmx_perf_labels.jsonl 5 个 unique piece；样例=['QmRRAFR5Z9UdYUVUydBLEjNJHNfVzydetDgwjjZmyPBAxU', 'QmRiFhzfpp3QcQSLbLmhk2aewBLn63pT6MWzoCx4fGAN28', 'QmU6re1UeyZdkUTXvcc5DLAbx3G4dewA5Yz2Cx3cwE6cws', 'QmWHjTTbQJFLQHZ94V55odFCFxDY5n2sKoDBy9sSLBthdj', 'QmX5qq4Bf1AqNFpbZegBnC21g7n6fHSb7pQCLe9ugmsWaD']
+  ⚠ manifest 无映射隔离: pdmx_a2s_labels.jsonl 6 个 unique piece；样例=['QmPwgnJdJfP3zfi8wNa3v8vjm2QjxdJSZhXmFAtgNdMq8U', 'QmRiFhzfpp3QcQSLbLmhk2aewBLn63pT6MWzoCx4fGAN28', 'QmU6re1UeyZdkUTXvcc5DLAbx3G4dewA5Yz2Cx3cwE6cws', 'QmWHjTTbQJFLQHZ94V55odFCFxDY5n2sKoDBy9sSLBthdj', 'QmYCUeW8CyA9Hjfe8qHreit94DQkEo41QdPTaVJZYC1V49']
+  TOTAL utts=752792 by_dialect={'A2S': 378708, 'A2S_lite': 378554, 'TAST': 198237, 'AMT': 374084}
+        by_kind={'pdmx': 371610, 'nasap': 7098, 'maestro': 374084} by_split={'train': 704024, 'test': 25260, 'val': 8939, 'quarantine_leak': 1239, 'validation': 13330}
+  ⚠ 撞名 utt_id 样本: ['pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_000', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_001', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_002', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_003', 'pdmx_QmYgjwZY5rA8cbpZmzdeTuP42DZHGz6VRWorf5fEdcNC9s_000', 'pdmx_QmYgjwZY5rA8cbpZmzdeTuP42DZHGz6VRWorf5fEdcNC9s_001', 'pdmx_QmYgFj1QfizKWfDyprpMff8fouzo5gNBAhLMCDQd8YoxiZ_000', 'pdmx_QmYgFj1QfizKWfDyprpMff8fouzo5gNBAhLMCDQd8YoxiZ_001', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_000', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_001', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_002', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_003', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_000', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_001', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_002', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_003', 'pdmx_QmYgD78XzmFp7wH1yt2Kh2LoZoBmB8Dqc8bk357uG4Evik_004', 'pdmx_QmYgD78XzmFp7wH1yt2Kh2LoZoBmB8Dqc8bk357uG4Evik_005', 'pdmx_QmYgjUdsTn9cod9QS7bf5msP2mnRKcXKNYT5C1TNQG12JB_000', 'pdmx_QmYgjUdsTn9cod9QS7bf5msP2mnRKcXKNYT5C1TNQG12JB_001']
+  train=704024 nasap_val=539 maestro_val=13330 nasap_test(保留终评)=603 maestro_test(保留终评)=14934 other=1239(隔离/未知split,训练/验证/终评均不进)
+  PDMX 内容泄漏证书: PASS (train_unique=158510 refs=242)
+[NeMo I 2026-08-03 21:31:57 mixins:208] _setup_tokenizer: detected an aggregate tokenizer
+[NeMo I 2026-08-03 21:31:57 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1152 tokens
+[NeMo I 2026-08-03 21:31:57 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 21:31:57 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 21:31:57 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 21:31:57 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 21:31:57 aggregate_tokenizer:73] Aggregate vocab size: 5248
+[NeMo I 2026-08-03 21:31:58 save_restore_connector:285] Model EncDecMultiTaskModel was successfully restored from D:\vscode_projects\ee_download\canary-180m-flash.nemo.
+build_model: {'replaced_embeddings': 1, 'replaced_linears': 1, 'old_vocab': 5248, 'new_vocab': 8000, 'shared_weight_groups_untied': 1, 'removed_unique_params': 5379200, 'added_unique_params': 16392000, 'param_growth': 11012800, 'total_before': 182643840, 'total_after': 193656640, 'expected_total_after': 193656640, 'exact_param_count_ok': True} encoder_ok=True
+体检: tokenizer=8000 位置表最小=None
+  Embedding transf_decoder._embedding.token_embedding: 8000 × 1024
+  大 Linear transf_decoder._decoder.layers.0.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.1.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.2.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.3.third_sub_layer.dense_in: out=4096
+  大 Linear log_softmax.mlp.layer0: out=8000
+  · Linear transf_decoder._decoder.layers.0.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.1.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.2.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.3.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+--decode-abtest @ step 63800: beams=[1] rep=[1.0, 1.1, 1.3, 1.5] eot=[0.0, 1.0, 2.0, 4.0] → 16 臂 × n=24,domain=sample.domain,beam→greedy 回退=关
+  beam=1 rep=1.0 eot=0.0 1/24 ok=0 fallback=1 10.3s
+  beam=1 rep=1.0 eot=0.0 2/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.0 eot=0.0 3/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.0 eot=0.0 4/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.0 eot=0.0 5/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.0 eot=0.0 6/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.0 eot=0.0 7/24 ok=0 fallback=1 9.2s
+  beam=1 rep=1.0 eot=0.0 8/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.0 eot=0.0 9/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.0 eot=0.0 10/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.0 eot=0.0 11/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.0 eot=0.0 12/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.0 eot=0.0 13/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.0 eot=0.0 14/24 ok=0 fallback=1 5.9s
+  beam=1 rep=1.0 eot=0.0 15/24 ok=0 fallback=1 10.3s
+  beam=1 rep=1.0 eot=0.0 16/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.0 eot=0.0 17/24 ok=0 fallback=1 11.2s
+  beam=1 rep=1.0 eot=0.0 18/24 ok=0 fallback=1 11.2s
+  beam=1 rep=1.0 eot=0.0 19/24 ok=0 fallback=1 7.7s
+  beam=1 rep=1.0 eot=0.0 20/24 ok=0 fallback=1 10.3s
+  beam=1 rep=1.0 eot=0.0 21/24 ok=0 fallback=1 7.0s
+  beam=1 rep=1.0 eot=0.0 22/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.0 eot=0.0 23/24 ok=0 fallback=1 10.3s
+  beam=1 rep=1.0 eot=0.0 24/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.0 eot=1.0 1/24 ok=0 fallback=1 6.1s
+  beam=1 rep=1.0 eot=1.0 2/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.0 eot=1.0 3/24 ok=0 fallback=1 6.8s
+  beam=1 rep=1.0 eot=1.0 4/24 ok=0 fallback=1 8.3s
+  beam=1 rep=1.0 eot=1.0 5/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.0 eot=1.0 6/24 ok=0 fallback=1 10.4s
+  beam=1 rep=1.0 eot=1.0 7/24 ok=0 fallback=1 8.8s
+  beam=1 rep=1.0 eot=1.0 8/24 ok=0 fallback=1 6.5s
+  beam=1 rep=1.0 eot=1.0 9/24 ok=0 fallback=1 11.0s
+  beam=1 rep=1.0 eot=1.0 10/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.0 eot=1.0 11/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.0 eot=1.0 12/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.0 eot=1.0 13/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.0 eot=1.0 14/24 ok=0 fallback=1 5.7s
+  beam=1 rep=1.0 eot=1.0 15/24 ok=0 fallback=1 10.2s
+  beam=1 rep=1.0 eot=1.0 16/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.0 eot=1.0 17/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.0 eot=1.0 18/24 ok=0 fallback=1 11.2s
+  beam=1 rep=1.0 eot=1.0 19/24 ok=0 fallback=1 7.8s
+  beam=1 rep=1.0 eot=1.0 20/24 ok=0 fallback=1 10.4s
+  beam=1 rep=1.0 eot=1.0 21/24 ok=0 fallback=1 6.1s
+  beam=1 rep=1.0 eot=1.0 22/24 ok=0 fallback=1 10.9s
+  beam=1 rep=1.0 eot=1.0 23/24 ok=0 fallback=1 9.9s
+  beam=1 rep=1.0 eot=1.0 24/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.0 eot=2.0 1/24 ok=0 fallback=1 5.1s
+  beam=1 rep=1.0 eot=2.0 2/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.0 eot=2.0 3/24 ok=0 fallback=1 6.5s
+  beam=1 rep=1.0 eot=2.0 4/24 ok=0 fallback=1 6.7s
+  beam=1 rep=1.0 eot=2.0 5/24 ok=0 fallback=1 11.2s
+  beam=1 rep=1.0 eot=2.0 6/24 ok=0 fallback=1 4.7s
+  beam=1 rep=1.0 eot=2.0 7/24 ok=0 fallback=1 8.9s
+  beam=1 rep=1.0 eot=2.0 8/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.0 eot=2.0 9/24 ok=0 fallback=1 11.0s
+  beam=1 rep=1.0 eot=2.0 10/24 ok=0 fallback=1 11.2s
+  beam=1 rep=1.0 eot=2.0 11/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.0 eot=2.0 12/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.0 eot=2.0 13/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.0 eot=2.0 14/24 ok=0 fallback=1 5.6s
+  beam=1 rep=1.0 eot=2.0 15/24 ok=0 fallback=1 9.6s
+  beam=1 rep=1.0 eot=2.0 16/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.0 eot=2.0 17/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.0 eot=2.0 18/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.0 eot=2.0 19/24 ok=0 fallback=1 8.0s
+  beam=1 rep=1.0 eot=2.0 20/24 ok=0 fallback=1 9.8s
+  beam=1 rep=1.0 eot=2.0 21/24 ok=0 fallback=1 6.2s
+  beam=1 rep=1.0 eot=2.0 22/24 ok=0 fallback=1 11.1s
+  beam=1 rep=1.0 eot=2.0 23/24 ok=0 fallback=1 9.1s
+  beam=1 rep=1.0 eot=2.0 24/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.0 eot=4.0 1/24 ok=0 fallback=1 4.9s
+  beam=1 rep=1.0 eot=4.0 2/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.0 eot=4.0 3/24 ok=0 fallback=1 6.6s
+  beam=1 rep=1.0 eot=4.0 4/24 ok=0 fallback=1 6.7s
+  beam=1 rep=1.0 eot=4.0 5/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.0 eot=4.0 6/24 ok=0 fallback=1 4.9s
+  beam=1 rep=1.0 eot=4.0 7/24 ok=0 fallback=1 9.3s
+  beam=1 rep=1.0 eot=4.0 8/24 ok=0 fallback=1 6.5s
+  beam=1 rep=1.0 eot=4.0 9/24 ok=0 fallback=1 10.8s
+  beam=1 rep=1.0 eot=4.0 10/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.0 eot=4.0 11/24 ok=0 fallback=1 11.1s
+  beam=1 rep=1.0 eot=4.0 12/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.0 eot=4.0 13/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.0 eot=4.0 14/24 ok=0 fallback=1 5.8s
+  beam=1 rep=1.0 eot=4.0 15/24 ok=0 fallback=1 8.6s
+  beam=1 rep=1.0 eot=4.0 16/24 ok=0 fallback=1 5.9s
+  beam=1 rep=1.0 eot=4.0 17/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.0 eot=4.0 18/24 ok=0 fallback=1 7.8s
+  beam=1 rep=1.0 eot=4.0 19/24 ok=0 fallback=1 7.9s
+  beam=1 rep=1.0 eot=4.0 20/24 ok=0 fallback=1 9.3s
+  beam=1 rep=1.0 eot=4.0 21/24 ok=0 fallback=1 6.1s
+  beam=1 rep=1.0 eot=4.0 22/24 ok=0 fallback=1 6.7s
+  beam=1 rep=1.0 eot=4.0 23/24 ok=0 fallback=1 7.5s
+  beam=1 rep=1.0 eot=4.0 24/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.1 eot=0.0 1/24 ok=0 fallback=1 10.9s
+  beam=1 rep=1.1 eot=0.0 2/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=0.0 3/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.1 eot=0.0 4/24 ok=0 fallback=1 12.2s
+  beam=1 rep=1.1 eot=0.0 5/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.1 eot=0.0 6/24 ok=0 fallback=1 6.2s
+  beam=1 rep=1.1 eot=0.0 7/24 ok=0 fallback=1 9.0s
+  beam=1 rep=1.1 eot=0.0 8/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.1 eot=0.0 9/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.1 eot=0.0 10/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=0.0 11/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=0.0 12/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.1 eot=0.0 13/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=0.0 14/24 ok=0 fallback=1 5.9s
+  beam=1 rep=1.1 eot=0.0 15/24 ok=0 fallback=1 9.0s
+  beam=1 rep=1.1 eot=0.0 16/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=0.0 17/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.1 eot=0.0 18/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=0.0 19/24 ok=0 fallback=1 8.1s
+  beam=1 rep=1.1 eot=0.0 20/24 ok=0 fallback=1 10.9s
+  beam=1 rep=1.1 eot=0.0 21/24 ok=0 fallback=1 7.0s
+  beam=1 rep=1.1 eot=0.0 22/24 ok=0 fallback=1 10.8s
+  beam=1 rep=1.1 eot=0.0 23/24 ok=0 fallback=1 9.6s
+  beam=1 rep=1.1 eot=0.0 24/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=1.0 1/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.1 eot=1.0 2/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=1.0 3/24 ok=0 fallback=1 6.8s
+  beam=1 rep=1.1 eot=1.0 4/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=1.0 5/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=1.0 6/24 ok=0 fallback=1 6.3s
+  beam=1 rep=1.1 eot=1.0 7/24 ok=0 fallback=1 9.0s
+  beam=1 rep=1.1 eot=1.0 8/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.1 eot=1.0 9/24 ok=0 fallback=1 11.1s
+  beam=1 rep=1.1 eot=1.0 10/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=1.0 11/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=1.0 12/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.1 eot=1.0 13/24 ok=0 fallback=1 12.3s
+  beam=1 rep=1.1 eot=1.0 14/24 ok=0 fallback=1 6.1s
+  beam=1 rep=1.1 eot=1.0 15/24 ok=0 fallback=1 9.7s
+  beam=1 rep=1.1 eot=1.0 16/24 ok=0 fallback=1 12.2s
+  beam=1 rep=1.1 eot=1.0 17/24 ok=0 fallback=1 12.1s
+  beam=1 rep=1.1 eot=1.0 18/24 ok=0 fallback=1 12.1s
+  beam=1 rep=1.1 eot=1.0 19/24 ok=0 fallback=1 8.6s
+  beam=1 rep=1.1 eot=1.0 20/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.1 eot=1.0 21/24 ok=0 fallback=1 6.6s
+  beam=1 rep=1.1 eot=1.0 22/24 ok=0 fallback=1 11.0s
+  beam=1 rep=1.1 eot=1.0 23/24 ok=0 fallback=1 9.8s
+  beam=1 rep=1.1 eot=1.0 24/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.1 eot=2.0 1/24 ok=0 fallback=1 7.0s
+  beam=1 rep=1.1 eot=2.0 2/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=2.0 3/24 ok=0 fallback=1 6.8s
+  beam=1 rep=1.1 eot=2.0 4/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.1 eot=2.0 5/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.1 eot=2.0 6/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.1 eot=2.0 7/24 ok=0 fallback=1 9.2s
+  beam=1 rep=1.1 eot=2.0 8/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.1 eot=2.0 9/24 ok=0 fallback=1 11.0s
+  beam=1 rep=1.1 eot=2.0 10/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=2.0 11/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.1 eot=2.0 12/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.1 eot=2.0 13/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.1 eot=2.0 14/24 ok=0 fallback=1 5.9s
+  beam=1 rep=1.1 eot=2.0 15/24 ok=0 fallback=1 9.3s
+  beam=1 rep=1.1 eot=2.0 16/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.1 eot=2.0 17/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=2.0 18/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.1 eot=2.0 19/24 ok=0 fallback=1 8.0s
+  beam=1 rep=1.1 eot=2.0 20/24 ok=0 fallback=1 10.3s
+  beam=1 rep=1.1 eot=2.0 21/24 ok=0 fallback=1 6.2s
+  beam=1 rep=1.1 eot=2.0 22/24 ok=0 fallback=1 10.9s
+  beam=1 rep=1.1 eot=2.0 23/24 ok=0 fallback=1 9.3s
+  beam=1 rep=1.1 eot=2.0 24/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.1 eot=4.0 1/24 ok=0 fallback=1 5.4s
+  beam=1 rep=1.1 eot=4.0 2/24 ok=0 fallback=1 12.2s
+  beam=1 rep=1.1 eot=4.0 3/24 ok=0 fallback=1 7.0s
+  beam=1 rep=1.1 eot=4.0 4/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.1 eot=4.0 5/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.1 eot=4.0 6/24 ok=1 fallback=0 6.0s
+  beam=1 rep=1.1 eot=4.0 7/24 ok=0 fallback=1 9.1s
+  beam=1 rep=1.1 eot=4.0 8/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.1 eot=4.0 9/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=4.0 10/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.1 eot=4.0 11/24 ok=0 fallback=1 7.5s
+  beam=1 rep=1.1 eot=4.0 12/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=4.0 13/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.1 eot=4.0 14/24 ok=0 fallback=1 5.7s
+  beam=1 rep=1.1 eot=4.0 15/24 ok=0 fallback=1 9.2s
+  beam=1 rep=1.1 eot=4.0 16/24 ok=0 fallback=1 7.3s
+  beam=1 rep=1.1 eot=4.0 17/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.1 eot=4.0 18/24 ok=0 fallback=1 10.2s
+  beam=1 rep=1.1 eot=4.0 19/24 ok=0 fallback=1 7.3s
+  beam=1 rep=1.1 eot=4.0 20/24 ok=0 fallback=1 10.1s
+  beam=1 rep=1.1 eot=4.0 21/24 ok=0 fallback=1 6.2s
+  beam=1 rep=1.1 eot=4.0 22/24 ok=0 fallback=1 6.7s
+  beam=1 rep=1.1 eot=4.0 23/24 ok=0 fallback=1 9.5s
+  beam=1 rep=1.1 eot=4.0 24/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=0.0 1/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=0.0 2/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=0.0 3/24 ok=0 fallback=1 4.4s
+  beam=1 rep=1.3 eot=0.0 4/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.3 eot=0.0 5/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.3 eot=0.0 6/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.3 eot=0.0 7/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=0.0 8/24 ok=0 fallback=1 11.0s
+  beam=1 rep=1.3 eot=0.0 9/24 ok=0 fallback=1 10.7s
+  beam=1 rep=1.3 eot=0.0 10/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.3 eot=0.0 11/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=0.0 12/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.3 eot=0.0 13/24 ok=0 fallback=1 11.3s
+  beam=1 rep=1.3 eot=0.0 14/24 ok=0 fallback=1 5.7s
+  beam=1 rep=1.3 eot=0.0 15/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=0.0 16/24 ok=0 fallback=1 12.1s
+  beam=1 rep=1.3 eot=0.0 17/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.3 eot=0.0 18/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=0.0 19/24 ok=0 fallback=1 8.1s
+  beam=1 rep=1.3 eot=0.0 20/24 ok=0 fallback=1 10.9s
+  beam=1 rep=1.3 eot=0.0 21/24 ok=0 fallback=1 7.1s
+  beam=1 rep=1.3 eot=0.0 22/24 ok=0 fallback=1 11.2s
+  beam=1 rep=1.3 eot=0.0 23/24 ok=0 fallback=1 10.8s
+  beam=1 rep=1.3 eot=0.0 24/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.3 eot=1.0 1/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=1.0 2/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=1.0 3/24 ok=0 fallback=1 4.5s
+  beam=1 rep=1.3 eot=1.0 4/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.3 eot=1.0 5/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.3 eot=1.0 6/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.3 eot=1.0 7/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.3 eot=1.0 8/24 ok=0 fallback=1 6.5s
+  beam=1 rep=1.3 eot=1.0 9/24 ok=0 fallback=1 9.2s
+  beam=1 rep=1.3 eot=1.0 10/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=1.0 11/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=1.0 12/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=1.0 13/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=1.0 14/24 ok=0 fallback=1 5.7s
+  beam=1 rep=1.3 eot=1.0 15/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.3 eot=1.0 16/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.3 eot=1.0 17/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=1.0 18/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=1.0 19/24 ok=0 fallback=1 8.2s
+  beam=1 rep=1.3 eot=1.0 20/24 ok=0 fallback=1 11.0s
+  beam=1 rep=1.3 eot=1.0 21/24 ok=0 fallback=1 6.9s
+  beam=1 rep=1.3 eot=1.0 22/24 ok=0 fallback=1 10.9s
+  beam=1 rep=1.3 eot=1.0 23/24 ok=0 fallback=1 10.3s
+  beam=1 rep=1.3 eot=1.0 24/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=2.0 1/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=2.0 2/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.3 eot=2.0 3/24 ok=0 fallback=1 4.7s
+  beam=1 rep=1.3 eot=2.0 4/24 ok=0 fallback=1 9.0s
+  beam=1 rep=1.3 eot=2.0 5/24 ok=0 fallback=1 12.2s
+  beam=1 rep=1.3 eot=2.0 6/24 ok=0 fallback=1 6.2s
+  beam=1 rep=1.3 eot=2.0 7/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=2.0 8/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.3 eot=2.0 9/24 ok=0 fallback=1 9.4s
+  beam=1 rep=1.3 eot=2.0 10/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.3 eot=2.0 11/24 ok=0 fallback=1 12.2s
+  beam=1 rep=1.3 eot=2.0 12/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=2.0 13/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.3 eot=2.0 14/24 ok=0 fallback=1 6.0s
+  beam=1 rep=1.3 eot=2.0 15/24 ok=0 fallback=1 12.1s
+  beam=1 rep=1.3 eot=2.0 16/24 ok=0 fallback=1 12.1s
+  beam=1 rep=1.3 eot=2.0 17/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.3 eot=2.0 18/24 ok=0 fallback=1 12.1s
+  beam=1 rep=1.3 eot=2.0 19/24 ok=0 fallback=1 8.6s
+  beam=1 rep=1.3 eot=2.0 20/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=2.0 21/24 ok=0 fallback=1 6.5s
+  beam=1 rep=1.3 eot=2.0 22/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.3 eot=2.0 23/24 ok=0 fallback=1 10.8s
+  beam=1 rep=1.3 eot=2.0 24/24 ok=0 fallback=1 12.1s
+  beam=1 rep=1.3 eot=4.0 1/24 ok=0 fallback=1 6.5s
+  beam=1 rep=1.3 eot=4.0 2/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=4.0 3/24 ok=0 fallback=1 4.3s
+  beam=1 rep=1.3 eot=4.0 4/24 ok=0 fallback=1 6.1s
+  beam=1 rep=1.3 eot=4.0 5/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.3 eot=4.0 6/24 ok=1 fallback=0 2.7s
+  beam=1 rep=1.3 eot=4.0 7/24 ok=0 fallback=1 9.2s
+  beam=1 rep=1.3 eot=4.0 8/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.3 eot=4.0 9/24 ok=0 fallback=1 9.1s
+  beam=1 rep=1.3 eot=4.0 10/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=4.0 11/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.3 eot=4.0 12/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=4.0 13/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.3 eot=4.0 14/24 ok=0 fallback=1 5.7s
+  beam=1 rep=1.3 eot=4.0 15/24 ok=0 fallback=1 10.0s
+  beam=1 rep=1.3 eot=4.0 16/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.3 eot=4.0 17/24 ok=0 fallback=1 12.2s
+  beam=1 rep=1.3 eot=4.0 18/24 ok=0 fallback=1 12.2s
+  beam=1 rep=1.3 eot=4.0 19/24 ok=0 fallback=1 6.9s
+  beam=1 rep=1.3 eot=4.0 20/24 ok=0 fallback=1 10.8s
+  beam=1 rep=1.3 eot=4.0 21/24 ok=0 fallback=1 6.0s
+  beam=1 rep=1.3 eot=4.0 22/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.3 eot=4.0 23/24 ok=0 fallback=1 10.8s
+  beam=1 rep=1.3 eot=4.0 24/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.5 eot=0.0 1/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.5 eot=0.0 2/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.5 eot=0.0 3/24 ok=0 fallback=1 8.5s
+  beam=1 rep=1.5 eot=0.0 4/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.5 eot=0.0 5/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=0.0 6/24 ok=0 fallback=1 6.3s
+  beam=1 rep=1.5 eot=0.0 7/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=0.0 8/24 ok=0 fallback=1 6.6s
+  beam=1 rep=1.5 eot=0.0 9/24 ok=0 fallback=1 10.7s
+  beam=1 rep=1.5 eot=0.0 10/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=0.0 11/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=0.0 12/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.5 eot=0.0 13/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.5 eot=0.0 14/24 ok=0 fallback=1 5.7s
+  beam=1 rep=1.5 eot=0.0 15/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.5 eot=0.0 16/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.5 eot=0.0 17/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.5 eot=0.0 18/24 ok=0 fallback=1 9.9s
+  beam=1 rep=1.5 eot=0.0 19/24 ok=0 fallback=1 8.6s
+  beam=1 rep=1.5 eot=0.0 20/24 ok=0 fallback=1 9.9s
+  beam=1 rep=1.5 eot=0.0 21/24 ok=0 fallback=1 7.2s
+  beam=1 rep=1.5 eot=0.0 22/24 ok=0 fallback=1 10.8s
+  beam=1 rep=1.5 eot=0.0 23/24 ok=0 fallback=1 11.1s
+  beam=1 rep=1.5 eot=0.0 24/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=1.0 1/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=1.0 2/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.5 eot=1.0 3/24 ok=0 fallback=1 3.7s
+  beam=1 rep=1.5 eot=1.0 4/24 ok=0 fallback=1 10.3s
+  beam=1 rep=1.5 eot=1.0 5/24 ok=0 fallback=1 12.3s
+  beam=1 rep=1.5 eot=1.0 6/24 ok=0 fallback=1 6.7s
+  beam=1 rep=1.5 eot=1.0 7/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.5 eot=1.0 8/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.5 eot=1.0 9/24 ok=0 fallback=1 10.5s
+  beam=1 rep=1.5 eot=1.0 10/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.5 eot=1.0 11/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.5 eot=1.0 12/24 ok=0 fallback=1 11.9s
+  beam=1 rep=1.5 eot=1.0 13/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=1.0 14/24 ok=0 fallback=1 5.7s
+  beam=1 rep=1.5 eot=1.0 15/24 ok=0 fallback=1 11.4s
+  beam=1 rep=1.5 eot=1.0 16/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.5 eot=1.0 17/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.5 eot=1.0 18/24 ok=0 fallback=1 10.2s
+  beam=1 rep=1.5 eot=1.0 19/24 ok=0 fallback=1 9.0s
+  beam=1 rep=1.5 eot=1.0 20/24 ok=0 fallback=1 10.1s
+  beam=1 rep=1.5 eot=1.0 21/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.5 eot=1.0 22/24 ok=0 fallback=1 10.9s
+  beam=1 rep=1.5 eot=1.0 23/24 ok=0 fallback=1 11.1s
+  beam=1 rep=1.5 eot=1.0 24/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=2.0 1/24 ok=0 fallback=1 7.2s
+  beam=1 rep=1.5 eot=2.0 2/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=2.0 3/24 ok=0 fallback=1 3.4s
+  beam=1 rep=1.5 eot=2.0 4/24 ok=0 fallback=1 8.3s
+  beam=1 rep=1.5 eot=2.0 5/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.5 eot=2.0 6/24 ok=0 fallback=1 6.3s
+  beam=1 rep=1.5 eot=2.0 7/24 ok=0 fallback=1 11.7s
+  beam=1 rep=1.5 eot=2.0 8/24 ok=0 fallback=1 6.4s
+  beam=1 rep=1.5 eot=2.0 9/24 ok=0 fallback=1 10.5s
+  beam=1 rep=1.5 eot=2.0 10/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=2.0 11/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=2.0 12/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=2.0 13/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=2.0 14/24 ok=0 fallback=1 5.7s
+  beam=1 rep=1.5 eot=2.0 15/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=2.0 16/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.5 eot=2.0 17/24 ok=0 fallback=1 12.2s
+  beam=1 rep=1.5 eot=2.0 18/24 ok=0 fallback=1 10.5s
+  beam=1 rep=1.5 eot=2.0 19/24 ok=0 fallback=1 9.0s
+  beam=1 rep=1.5 eot=2.0 20/24 ok=0 fallback=1 10.0s
+  beam=1 rep=1.5 eot=2.0 21/24 ok=0 fallback=1 6.3s
+  beam=1 rep=1.5 eot=2.0 22/24 ok=0 fallback=1 8.1s
+  beam=1 rep=1.5 eot=2.0 23/24 ok=0 fallback=1 11.2s
+  beam=1 rep=1.5 eot=2.0 24/24 ok=0 fallback=1 12.0s
+  beam=1 rep=1.5 eot=4.0 1/24 ok=0 fallback=1 4.3s
+  beam=1 rep=1.5 eot=4.0 2/24 ok=0 fallback=1 10.5s
+  beam=1 rep=1.5 eot=4.0 3/24 ok=0 fallback=1 2.9s
+  beam=1 rep=1.5 eot=4.0 4/24 ok=0 fallback=1 6.3s
+  beam=1 rep=1.5 eot=4.0 5/24 ok=0 fallback=1 11.5s
+  beam=1 rep=1.5 eot=4.0 6/24 ok=1 fallback=0 5.9s
+  beam=1 rep=1.5 eot=4.0 7/24 ok=0 fallback=1 11.8s
+  beam=1 rep=1.5 eot=4.0 8/24 ok=0 fallback=1 6.5s
+  beam=1 rep=1.5 eot=4.0 9/24 ok=0 fallback=1 10.7s
+  beam=1 rep=1.5 eot=4.0 10/24 ok=0 fallback=1 7.0s
+  beam=1 rep=1.5 eot=4.0 11/24 ok=0 fallback=1 7.4s
+  beam=1 rep=1.5 eot=4.0 12/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=4.0 13/24 ok=0 fallback=1 10.7s
+  beam=1 rep=1.5 eot=4.0 14/24 ok=0 fallback=1 5.8s
+  beam=1 rep=1.5 eot=4.0 15/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=4.0 16/24 ok=0 fallback=1 7.6s
+  beam=1 rep=1.5 eot=4.0 17/24 ok=0 fallback=1 11.6s
+  beam=1 rep=1.5 eot=4.0 18/24 ok=0 fallback=1 9.1s
+  beam=1 rep=1.5 eot=4.0 19/24 ok=0 fallback=1 8.3s
+  beam=1 rep=1.5 eot=4.0 20/24 ok=0 fallback=1 10.1s
+  beam=1 rep=1.5 eot=4.0 21/24 ok=0 fallback=1 5.9s
+  beam=1 rep=1.5 eot=4.0 22/24 ok=0 fallback=1 6.5s
+  beam=1 rep=1.5 eot=4.0 23/24 ok=0 fallback=1 9.8s
+  beam=1 rep=1.5 eot=4.0 24/24 ok=0 fallback=1 11.7s
+decode-abtest @ step 63800;同子集 n=24;16 臂;domain=sample.domain;beam→greedy 回退=关
+  beam=1 rep=1.0 eot=0.0: parseable=0/24 fallback=24 elapsed=256.7s 拒因:DYCK=24 TERMINAL=23 TS_MISSING=21 MEASURE=9 TS_PARSE=6 parse_error=6 TS_NONMONOTONE=5
+  beam=1 rep=1.0 eot=1.0: parseable=0/24 fallback=24 elapsed=233.7s 拒因:DYCK=24 TERMINAL=22 TS_MISSING=21 MEASURE=10 TS_NONMONOTONE=5 TS_PARSE=5 parse_error=5
+  beam=1 rep=1.0 eot=2.0: parseable=0/24 fallback=24 elapsed=224.5s 拒因:DYCK=24 TERMINAL=21 TS_MISSING=21 MEASURE=10 TS_NONMONOTONE=5 TS_PARSE=3 parse_error=3
+  beam=1 rep=1.0 eot=4.0: parseable=0/24 fallback=24 elapsed=208.4s 拒因:DYCK=24 TS_MISSING=20 TERMINAL=19 MEASURE=12 TS_NONMONOTONE=4 TS_PARSE=3 parse_error=3
+  beam=1 rep=1.1 eot=0.0: parseable=0/24 fallback=24 elapsed=250.8s 拒因:DYCK=24 TERMINAL=21 TS_MISSING=21 MEASURE=10 TS_PARSE=6 parse_error=6 TS_NONMONOTONE=3
+  beam=1 rep=1.1 eot=1.0: parseable=0/24 fallback=24 elapsed=245.0s 拒因:DYCK=24 TERMINAL=21 TS_MISSING=21 MEASURE=11 TS_PARSE=5 parse_error=5 TS_NONMONOTONE=3
+  beam=1 rep=1.1 eot=2.0: parseable=0/24 fallback=24 elapsed=234.9s 拒因:DYCK=24 TERMINAL=22 TS_MISSING=21 MEASURE=10 TS_PARSE=5 parse_error=5 TS_NONMONOTONE=3
+  beam=1 rep=1.1 eot=4.0: parseable=1/24 fallback=23 elapsed=214.1s 拒因:DYCK=23 TS_MISSING=21 TERMINAL=20 MEASURE=10 TS_PARSE=3 parse_error=3 TS_NONMONOTONE=2 通过=1
+  beam=1 rep=1.3 eot=0.0: parseable=0/24 fallback=24 elapsed=249.3s 拒因:DYCK=23 TERMINAL=22 TS_MISSING=21 MEASURE=8 TS_PARSE=6 parse_error=6 TS_NONMONOTONE=3
+  beam=1 rep=1.3 eot=1.0: parseable=0/24 fallback=24 elapsed=242.8s 拒因:DYCK=23 TERMINAL=21 TS_MISSING=21 MEASURE=9 TS_PARSE=5 parse_error=5 TS_NONMONOTONE=3
+  beam=1 rep=1.3 eot=2.0: parseable=0/24 fallback=24 elapsed=245.6s 拒因:DYCK=23 TERMINAL=21 TS_MISSING=20 MEASURE=8 TS_PARSE=5 parse_error=5 TS_NONMONOTONE=3
+  beam=1 rep=1.3 eot=4.0: parseable=1/24 fallback=23 elapsed=218.9s 拒因:DYCK=23 TERMINAL=19 TS_MISSING=19 MEASURE=11 TS_PARSE=3 parse_error=3 TS_NONMONOTONE=2 通过=1
+  beam=1 rep=1.5 eot=0.0: parseable=0/24 fallback=24 elapsed=245.6s 拒因:DYCK=23 TERMINAL=19 TS_MISSING=19 MEASURE=8 TS_PARSE=8 parse_error=8
+  beam=1 rep=1.5 eot=1.0: parseable=0/24 fallback=24 elapsed=242.6s 拒因:DYCK=23 TERMINAL=20 TS_MISSING=19 MEASURE=8 TS_PARSE=7 parse_error=7
+  beam=1 rep=1.5 eot=2.0: parseable=0/24 fallback=24 elapsed=231.5s 拒因:DYCK=24 TERMINAL=20 TS_MISSING=20 MEASURE=8 TS_PARSE=7 parse_error=7
+  beam=1 rep=1.5 eot=4.0: parseable=1/24 fallback=23 elapsed=205.0s 拒因:DYCK=23 TERMINAL=20 TS_MISSING=18 MEASURE=8 TS_PARSE=3 parse_error=3 通过=1
+完成,逐样本证据=D:\vscode_projects\ee_download\Rubato\reports\DECODE_SWEEP_STEP63800.json;汇总追加=D:\vscode_projects\ee_download\Rubato\reports\eval_autolog.md

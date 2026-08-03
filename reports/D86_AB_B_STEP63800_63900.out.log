@@ -1,0 +1,73 @@
+CUDA allocator 预配置: PYTORCH_ALLOC_CONF=expandable_segments:True
+  [INFO] nASAP test work_keys (from nasap_split.json): 12
+  [INFO] ASAP-Beyer: 14 works / 25 real recordings (Beyer-Dai public split)
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] 时长缓存加载 373410 条(audio_dur_cache.jsonl)
+=== 装配统计(每一步丢弃都计数,不静默)===
+  pdmx     rows= 424284 kept= 371610 no_audio=  37181 no_dialect=     0 bad_schema=    0 dup=14239 filtered= 1254
+  nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0 filtered=    0
+  maestro  rows= 374084 kept= 374084 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0 filtered=    0
+  -- per file --
+  pdmx_perf_labels.jsonl                 kind=pdmx     rows=  35288 kept=  35101 no_audio=      0 no_dialect=     0 dup=    0 filtered=  187
+  pdmx_a2s_labels.jsonl                  kind=pdmx     rows= 135977 kept=  83786 no_audio=  37181 no_dialect=     0 dup=14239 filtered=  771
+  nasap_labels.jsonl                     kind=nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows.jsonl              kind=maestro  rows= 144087 kept= 144087 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows_o10.jsonl          kind=maestro  rows= 114571 kept= 114571 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows_o5.jsonl           kind=maestro  rows= 115426 kept= 115426 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  pdmx_a2s_labels_s2.jsonl               kind=pdmx     rows=  83818 kept=  83786 no_audio=      0 no_dialect=     0 dup=    0 filtered=   32
+  pdmx_perf_labels_s2.jsonl              kind=pdmx     rows=  30607 kept=  30598 no_audio=      0 no_dialect=     0 dup=    0 filtered=    9
+  pdmx_perf_labels_r3_native.jsonl       kind=pdmx     rows= 138594 kept= 138339 no_audio=      0 no_dialect=     0 dup=    0 filtered=  255
+  ⚠ manifest 无映射隔离: pdmx_perf_labels.jsonl 5 个 unique piece；样例=['QmRRAFR5Z9UdYUVUydBLEjNJHNfVzydetDgwjjZmyPBAxU', 'QmRiFhzfpp3QcQSLbLmhk2aewBLn63pT6MWzoCx4fGAN28', 'QmU6re1UeyZdkUTXvcc5DLAbx3G4dewA5Yz2Cx3cwE6cws', 'QmWHjTTbQJFLQHZ94V55odFCFxDY5n2sKoDBy9sSLBthdj', 'QmX5qq4Bf1AqNFpbZegBnC21g7n6fHSb7pQCLe9ugmsWaD']
+  ⚠ manifest 无映射隔离: pdmx_a2s_labels.jsonl 6 个 unique piece；样例=['QmPwgnJdJfP3zfi8wNa3v8vjm2QjxdJSZhXmFAtgNdMq8U', 'QmRiFhzfpp3QcQSLbLmhk2aewBLn63pT6MWzoCx4fGAN28', 'QmU6re1UeyZdkUTXvcc5DLAbx3G4dewA5Yz2Cx3cwE6cws', 'QmWHjTTbQJFLQHZ94V55odFCFxDY5n2sKoDBy9sSLBthdj', 'QmYCUeW8CyA9Hjfe8qHreit94DQkEo41QdPTaVJZYC1V49']
+  TOTAL utts=752792 by_dialect={'A2S': 378708, 'A2S_lite': 378554, 'TAST': 198237, 'AMT': 374084}
+        by_kind={'pdmx': 371610, 'nasap': 7098, 'maestro': 374084} by_split={'train': 704024, 'test': 25260, 'val': 8939, 'quarantine_leak': 1239, 'validation': 13330}
+  ⚠ 撞名 utt_id 样本: ['pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_000', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_001', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_002', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_003', 'pdmx_QmYgjwZY5rA8cbpZmzdeTuP42DZHGz6VRWorf5fEdcNC9s_000', 'pdmx_QmYgjwZY5rA8cbpZmzdeTuP42DZHGz6VRWorf5fEdcNC9s_001', 'pdmx_QmYgFj1QfizKWfDyprpMff8fouzo5gNBAhLMCDQd8YoxiZ_000', 'pdmx_QmYgFj1QfizKWfDyprpMff8fouzo5gNBAhLMCDQd8YoxiZ_001', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_000', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_001', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_002', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_003', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_000', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_001', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_002', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_003', 'pdmx_QmYgD78XzmFp7wH1yt2Kh2LoZoBmB8Dqc8bk357uG4Evik_004', 'pdmx_QmYgD78XzmFp7wH1yt2Kh2LoZoBmB8Dqc8bk357uG4Evik_005', 'pdmx_QmYgjUdsTn9cod9QS7bf5msP2mnRKcXKNYT5C1TNQG12JB_000', 'pdmx_QmYgjUdsTn9cod9QS7bf5msP2mnRKcXKNYT5C1TNQG12JB_001']
+  train=704024 nasap_val=539 maestro_val=13330 nasap_test(保留终评)=603 maestro_test(保留终评)=14934 other=1239(隔离/未知split,训练/验证/终评均不进)
+  PDMX 内容泄漏证书: PASS (train_unique=158510 refs=242)
+[NeMo I 2026-08-03 23:15:04 mixins:208] _setup_tokenizer: detected an aggregate tokenizer
+[NeMo I 2026-08-03 23:15:04 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1152 tokens
+[NeMo I 2026-08-03 23:15:04 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 23:15:04 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 23:15:04 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 23:15:04 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 23:15:04 aggregate_tokenizer:73] Aggregate vocab size: 5248
+[NeMo I 2026-08-03 23:15:06 save_restore_connector:285] Model EncDecMultiTaskModel was successfully restored from D:\vscode_projects\ee_download\canary-180m-flash.nemo.
+build_model: {'replaced_embeddings': 1, 'replaced_linears': 1, 'old_vocab': 5248, 'new_vocab': 8000, 'shared_weight_groups_untied': 1, 'removed_unique_params': 5379200, 'added_unique_params': 16392000, 'param_growth': 11012800, 'total_before': 182643840, 'total_after': 193656640, 'expected_total_after': 193656640, 'exact_param_count_ok': True} encoder_ok=True
+体检: tokenizer=8000 位置表最小=None
+  Embedding transf_decoder._embedding.token_embedding: 8000 × 1024
+  大 Linear transf_decoder._decoder.layers.0.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.1.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.2.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.3.third_sub_layer.dense_in: out=4096
+  大 Linear log_softmax.mlp.layer0: out=8000
+  · Linear transf_decoder._decoder.layers.0.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.1.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.2.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.3.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  目标序列上限 = 1024 tok(体检实测位置表);超长样本将丢弃并记账…
+  epoch0 混比报告: A2S[池347848 额243214 过采x0.7] A2S_lite[池348790 额104235 过采x0.3] AMT[池345820 额208469 过采x0.6] TAST[池180371 额138980 过采x0.77]
+  超长过滤: 保留 1222829 对,丢弃 {'TAST': 13452, 'A2S': 10356, 'A2S_lite': 9275}
+训练配置回显: clip_norm=25.0 config=D:\vscode_projects\ee_download\Rubato\configs\train.yaml lr_enc=1.0e-04 lr_dec=3.0e-04 accum=2000s batch_sec=60.0 precision=bf16 max_steps=100000 stop_after=63900 eval_every=1000 eval_max=48 eval_decode_every=5000 mix=A2S:0.350,A2S_lite:0.150,AMT:0.300,TAST:0.200 prefetch=关 aug_acoustic=开 amt_aux=关 allocator=expandable_segments:True mem_check=25step/4096MiB
+【执行端贴回】① 上面的配置回显行(应含 prefetch=关) ② 续训:恢复… 行 ③ 跑 1 小时后:连续 5 行带 td=/tc= 的日志(不含 eval 的窗口) ④ 任务管理器→详细信息→python.exe 的「专用 GPU 内存」和「共享 GPU 内存」两个数(必贴)
+续训:恢复 step=63800 epoch=7 batch_cursor=174414(优化器/调度器状态一并恢复;lr 按当前配置重刷 enc=3.68e-05 dec=1.10e-04)
+  音高 piece 掩码: 346 个 | 加权 ×2.5
+  遮上文 input_dropout=0.1(ramp 5000 步→全率,替换 unk id=0) | 音频依赖损失 weight=0.1 margin=0.1
+CUDA_MEM reason=train_start action=observe alloc=2245MiB reserved=2246MiB cached=1MiB inactive_split=1MiB driver_free=12763MiB driver_untracked=1294MiB peak_reserved=2246MiB released=0MiB retries=0 ooms=0 backend=native
+  epoch7 混比报告: A2S[池347848 额243214 过采x0.7] A2S_lite[池348790 额104235 过采x0.3] AMT[池345820 额208469 过采x0.6] TAST[池180371 额138980 过采x0.77]
+  epoch7 超 batch 上限隔离: 52 对 (max=194.1s > 60.0s; 样例=[{'utt_id': 'pdmxperf_QmNfQBVAVmQT6g84ZVGLxYgioync67ZuWUbZ3ozk36FWPJ_002', 'dialect': 'A2S', 'dur_s': 194.073}, {'utt_id': 'pdmxperf_QmNfQBVAVmQT6g84ZVGLxYgioync67ZuWUbZ3ozk36FWPJ_002', 'dialect': 'A2S_lite', 'dur_s': 194.073}, {'utt_id': 'pdmxperf_QmUNFfNM5cDNevAvEybzMDxV4RmDSiqjgmVs1a2gUCsdsa_002', 'dialect': 'A2S_lite', 'dur_s': 177.441}, {'utt_id': 'pdmxperf_QmS1zekn9DAZ8GFCLR7EHiSLnNZuBmPaaqoHxsyytPF3pP_002', 'dialect': 'A2S', 'dur_s': 168.742}, {'utt_id': 'pdmxperf_QmThv2hLANJvaKLkdatnrMVMJNZJmvH8uc6Un352Gvo4Do_002', 'dialect': 'A2S', 'dur_s': 162.98}])
+  epoch7 精确续跑:跳过已完成 174414/411450 批(只跳 metadata，不重复读音频)
+CUDA_MEM reason=step63825 action=empty_cache alloc=2262MiB reserved=2288MiB cached=26MiB inactive_split=26MiB driver_free=12637MiB driver_untracked=1378MiB peak_reserved=18680MiB released=16392MiB retries=0 ooms=0 backend=native
+step 63850 loss=60.8204 avg50=55.6437 sem=2.7994 ts=3.2576 pv=3.166 ad=+0.829 id=0.10 gn=73.6/avg47.6 enc=30.9 dec=66.7 lrE=3.67e-05 lrD=1.10e-04 audio=2020s micro=48 seq=85 td=0.9s/avg1.1 tc=80.6s/avg27.7 | A2S=2.85 A2S_lite=2.91 AMT=2.47 TAST=2.35
+CUDA_MEM reason=step63850 action=empty_cache alloc=2262MiB reserved=2288MiB cached=26MiB inactive_split=26MiB driver_free=12633MiB driver_untracked=1382MiB peak_reserved=18782MiB released=16494MiB retries=0 ooms=0 backend=native
+CUDA_MEM reason=step63875 action=empty_cache alloc=2262MiB reserved=2288MiB cached=26MiB inactive_split=26MiB driver_free=12627MiB driver_untracked=1388MiB peak_reserved=17928MiB released=15640MiB retries=0 ooms=0 backend=native
+step 63900 loss=55.3875 avg50=52.3447 sem=2.7496 ts=3.1789 pv=3.007 ad=+0.862 id=0.10 gn=17.9/avg31.4 enc=14.4 dec=10.7 lrE=3.67e-05 lrD=1.10e-04 audio=2024s micro=49 seq=71 td=1.1s/avg1.0 tc=11.0s/avg13.6 | A2S=2.83 A2S_lite=2.85 AMT=2.45 TAST=2.30
+CUDA_MEM reason=step63900 action=empty_cache alloc=2262MiB reserved=2288MiB cached=26MiB inactive_split=26MiB driver_free=12627MiB driver_untracked=1388MiB peak_reserved=16980MiB released=14692MiB retries=0 ooms=0 backend=native
+
+train 收尾: stop_after_step_reached final_loss=52.3447 final_sem=2.6714 final_ts=3.0388
