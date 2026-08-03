@@ -170,9 +170,24 @@ _cli = SimpleNamespace(
     smoke_steps=800, probe_n=8, abtest_n=48, smoke=0, prefetch=0,
     eval_decode_every=0, pitch_loss_weight=1,
     amt_aux_weight=0, amt_align_weight=0.25, amt_align_margin=0.1,
+    input_dropout=0.0, input_dropout_ramp=5000,
+    audio_dep_weight=0.0, audio_dep_margin=0.1,
     max_steps=100000, stop_after_step=None, lr_enc=None, lr_dec=None)
 validate_cli_args(_cli)
 check("valid_cli_passes", True)
+try:
+    validate_cli_args(SimpleNamespace(**{**vars(_cli), "input_dropout": 1.0}))
+    _id_gate = False
+except ValueError:
+    _id_gate = True
+check("input_dropout_full_rate_rejected", _id_gate)
+try:
+    validate_cli_args(SimpleNamespace(
+        **{**vars(_cli), "audio_dep_margin": 0.0}))
+    _ad_gate = False
+except ValueError:
+    _ad_gate = True
+check("audio_dep_zero_margin_rejected", _ad_gate)
 try:
     validate_cli_args(SimpleNamespace(**{**vars(_cli), "eval_every": 0}))
     _cli_gate = False

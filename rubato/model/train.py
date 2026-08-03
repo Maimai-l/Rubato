@@ -148,6 +148,8 @@ def new_step_metrics() -> dict:
         "acoustic_aux_sum": 0.0, "acoustic_event_sum": 0.0,
         "acoustic_align_sum": 0.0, "acoustic_f1_sum": 0.0,
         "n_acoustic": 0,
+        "audio_dep_sum": 0.0, "audio_dep_gap_sum": 0.0, "n_audio_dep": 0,
+        "input_dropped": 0, "input_eligible": 0,
         "dialect_sem": {},
     }
 
@@ -179,6 +181,13 @@ def accumulate_step_metrics(state: dict, parts: dict):
             state["acoustic_f1_sum"] += (
                 float(parts["acoustic_frame_f1"]) * n_acoustic)
         state["n_acoustic"] += n_acoustic
+    n_dep = int(parts.get("n_audio_dep", 0) or 0)
+    if n_dep:
+        state["audio_dep_sum"] += float(parts["audio_dep_loss"]) * n_dep
+        state["audio_dep_gap_sum"] += float(parts["audio_dep_gap"]) * n_dep
+        state["n_audio_dep"] += n_dep
+    state["input_dropped"] += int(parts.get("n_input_dropped", 0) or 0)
+    state["input_eligible"] += int(parts.get("n_input_eligible", 0) or 0)
     for d, (v, n) in (parts.get("dialect_sem") or {}).items():
         old_sum, old_n = state["dialect_sem"].get(d, (0.0, 0))
         state["dialect_sem"][d] = (old_sum + float(v) * int(n), old_n + int(n))
@@ -209,6 +218,13 @@ def finalize_step_metrics(state: dict) -> dict:
             state["acoustic_f1_sum"] / state["n_acoustic"]
             if state["n_acoustic"] else None),
         "n_acoustic": int(state["n_acoustic"]),
+        "audio_dep_loss": (state["audio_dep_sum"] / state["n_audio_dep"]
+                           if state["n_audio_dep"] else None),
+        "audio_dep_gap": (state["audio_dep_gap_sum"] / state["n_audio_dep"]
+                          if state["n_audio_dep"] else None),
+        "n_audio_dep": int(state["n_audio_dep"]),
+        "input_drop_rate": (state["input_dropped"] / state["input_eligible"]
+                            if state["input_eligible"] else None),
         "dialect_sem": {d: (s / n, n) for d, (s, n) in state["dialect_sem"].items()
                         if n},
         "batch_audio_sec": float(state["audio_sec"]),
@@ -395,6 +411,41 @@ def resolve_log_probs(output):
     raise TypeError(f"无法从 forward 输出提取 log_probs: {type(output)}")
 
 
+def resolve_unk_id(tokenizer, vocab_size: int | None = None) -> int:
+    """
+    1c 遮上文的替换 token:拿 tokenizer 的 unk id,拿不到就【抛错】。
+    静默用 0 号或随机 id 会把"遮住"悄悄变成"注入别的语义",实验就不再是实验。
+    """
+    cand = None
+    v = getattr(tokenizer, "unk_id", None)
+    if callable(v):
+        try:
+            v = v()
+        except TypeError:
+            v = None
+    if isinstance(v, int) and v >= 0:
+        cand = v
+    if cand is None:
+        for meth in ("token_to_id", "piece_to_id"):
+            f = getattr(tokenizer, meth, None)
+            if f is None:
+                continue
+            try:
+                got = f("<unk>")
+            except Exception:
+                continue
+            if isinstance(got, int) and got >= 0:
+                cand = got
+                break
+    if cand is None:
+        raise RuntimeError(
+            "tokenizer 无法解析 unk id(试过 unk_id / token_to_id('<unk>') / "
+            "piece_to_id('<unk>'))—— input dropout 不能启用")
+    if vocab_size is not None and not (0 <= cand < int(vocab_size)):
+        raise RuntimeError(f"unk id {cand} 超出词表 [0,{int(vocab_size) - 1}]")
+    return cand
+
+
 def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=None,
                         guards: dict | None = None):
     """
@@ -487,6 +538,28 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
                 f"目标序列长 {input_ids.shape[1]} > 位置表 {p} 行 —— "
                 "超长过滤没生效或上限读错")
 
+    cfg = loss_cfg or {}
+
+    # 【1c 遮上文(D86)】曝光偏差第一档解药:teacher-forcing 输入按概率遮成 unk,
+    # 模型不能总靠"抄上文"预测下一 token,被迫向音频/更远上文要信息。
+    # 可遮位 = 内容 token:labels[j-1] 计分 ⇔ input_ids[j] 是内容(右移一位关系);
+    # j=0 与全部 prompt 位永不遮。labels/loss_mask/ts_bins 全不动 —— 监督目标与
+    # 监控口径零改变,只有模型看到的上文变残。守卫在此块之前,校验的是原始 batch。
+    p_drop = float(cfg.get("input_dropout_p", 0.0) or 0.0)
+    n_dropped = n_eligible = 0
+    if p_drop > 0:
+        unk = cfg.get("input_dropout_token")
+        if unk is None:
+            raise ValueError(
+                "input_dropout_p>0 但 loss_cfg 缺 input_dropout_token(unk id)"
+                " —— 启动期 resolve_unk_id 没接上,不能静默不遮")
+        eligible = torch.zeros_like(loss_mask)
+        eligible[:, 1:] = loss_mask[:, :-1]
+        hit = eligible & (torch.rand(input_ids.shape, device=device) < p_drop)
+        input_ids = torch.where(
+            hit, torch.full_like(input_ids, int(unk)), input_ids)
+        n_dropped, n_eligible = int(hit.sum()), int(eligible.sum())
+
     # 1. raw wav → mel(必须走 canary 自带 preprocessor,R-S10.3 前端一致性)
     processed, processed_len = model.preprocessor(input_signal=audio, length=audio_len)
 
@@ -511,7 +584,6 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
     if not bool(torch.isfinite(log_probs).all()):
         raise FloatingPointError("模型 forward 产生 NaN/Inf log_probs")
 
-    cfg = loss_cfg or {}
     parts = batch_sequence_loss(
         log_probs, labels, token_types, loss_mask, ts_bins, ts_token_ids,
         label_smoothing=cfg.get("sem_label_smooth", 0.1),
@@ -566,6 +638,59 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         supervised_ratio = (
             float(aux_report["n_supervised"]) / max(int(audio.shape[0]), 1))
         loss = loss + aux_weight * aux_report["loss"] * supervised_ratio
+
+    # 【交叉注意力音频依赖损失(D86)】AMT 辅助头 A/B 的判决指向:头学得动但不迁移
+    # 到 decoder ⇒ 下一杆必须直接作用在 decoder 的音频通道上。做法:同一 batch 内
+    # 把 encoder 状态错配(roll 1),decoder-only 第二次 forward(encoder 不重跑),
+    # 要求"错音频算内容 CE"比"对音频"差出 margin —— decoder 只有真用交叉注意力
+    # 才能同时保住两头。margin 形式与 acoustic_aux.alignment_loss 同约定:
+    # relu(margin + own − wrong).mean(),两侧带梯度,主 CE 锚住 own 不劣化。
+    dep_cfg = dict(cfg.get("audio_dep") or {})
+    dep_weight = float(dep_cfg.get("weight", 0.0))
+    dep_report = None
+    if dep_weight > 0:
+        if not isinstance(output, (tuple, list)) or len(output) < 4:
+            raise TypeError(
+                "audio-dep loss 需要 Canary forward 四元组 "
+                "(log_probs, encoded_len, enc_states, enc_mask)")
+        dep_enc, dep_enc_mask = output[2], output[3]
+        dec = getattr(model, "transf_decoder", None)
+        lsm = getattr(model, "log_softmax", None)
+        if dec is None or lsm is None:
+            raise RuntimeError(
+                "audio-dep loss 需要 model.transf_decoder + model.log_softmax"
+                "(与 infer 快速路径同一成员);当前模型没有,不能静默跳过")
+        b_now = int(labels.shape[0])
+        sem_scored = loss_mask & (token_types == 0)
+        n_sem_seq = sem_scored.sum(-1)
+        has_sem = n_sem_seq > 0
+        if b_now >= 2 and int(has_sem.sum()) >= 2:
+            margin = float(dep_cfg.get("margin", 0.1))
+            tok_ce_mat = -log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+            ce_mat = (tok_ce_mat * sem_scored).sum(-1) / n_sem_seq.clamp(min=1)
+            perm = torch.roll(torch.arange(b_now, device=device), 1)
+            dec_out = dec(
+                input_ids=input_ids, decoder_mask=valid_positions.long(),
+                encoder_embeddings=dep_enc[perm],
+                encoder_mask=dep_enc_mask[perm])
+            log_probs_mis = lsm(hidden_states=dec_out)
+            tok_ce_mis = -log_probs_mis.gather(
+                -1, labels.unsqueeze(-1)).squeeze(-1)
+            ce_mis = (tok_ce_mis * sem_scored).sum(-1) / n_sem_seq.clamp(min=1)
+            penalty = torch.relu(
+                margin + ce_mat - ce_mis)[has_sem].mean()
+            gap = (ce_mis - ce_mat)[has_sem].mean()
+            loss = loss + dep_weight * penalty
+            dep_report = {
+                "audio_dep_loss": penalty.detach(),
+                "audio_dep_gap": gap.detach(),
+                "n_audio_dep": int(has_sem.sum()),
+            }
+        else:
+            # 批内错配需要 ≥2 条可计分序列;长音频单条批合法出现,跳过并计数,
+            # 监控端看 n_audio_dep 覆盖率而不是让训练崩掉。
+            dep_report = {"audio_dep_loss": None, "audio_dep_gap": None,
+                          "n_audio_dep": 0}
     if not loss.requires_grad:
         raise RuntimeError("loss 无梯度 —— forward 图断了(检查 no_grad/detach)")
     if not bool(torch.isfinite(loss)):
@@ -594,7 +719,11 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         "batch_audio_sec": float(audio_len.sum().item()) / 16000.0,
         "batch_size": int(labels.shape[0]),
         "seq_lengths": batch.get("seq_lengths", loss_mask.sum(-1)),
+        "n_input_dropped": n_dropped, "n_input_eligible": n_eligible,
+        "input_dropout_p": p_drop,
     }
+    if dep_report is not None:
+        result.update(dep_report)
     if aux_report is not None:
         result.update({
             "acoustic_aux_loss": aux_report["loss"].detach(),
@@ -1401,6 +1530,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
     recent_aux: list = []                           # encoder AMT auxiliary BCE
     recent_aux_align: list = []                     # correct-vs-mismatched margin
     recent_aux_f1: list = []                        # encoder frame occupancy F1
+    recent_ad: list = []                            # 音频依赖 gap=ce_mis−ce_mat(D86,decoder 听没听直读)
+    recent_id: list = []                            # 遮上文实际命中率(1c 生效自证)
     recent_gn: list = []                            # 裁剪前梯度范数(有效 lr 是否被裁剪吃掉)
     recent_td: list = []                            # 完整 optimizer-step 的装批等待
     recent_tc: list = []                            # 完整 optimizer-step 的计算墙钟
@@ -1421,6 +1552,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
         report["final_acoustic_frame_f1"] = (
             round(sum(recent_aux_f1) / len(recent_aux_f1), 4)
             if recent_aux_f1 else None)
+        report["final_audio_dep_gap"] = (
+            round(sum(recent_ad) / len(recent_ad), 4) if recent_ad else None)
+        report["final_input_drop_rate"] = (
+            round(sum(recent_id) / len(recent_id), 4) if recent_id else None)
         report["final_sem_by_dialect"] = {d: round(sum(v) / len(v), 4)
                                           for d, v in recent_dia.items() if v}
         return report
@@ -1496,6 +1631,25 @@ def train(model, datamodule, cfg: dict, tokenizer,
                        or tokenizer.get_piece_size()))
     print(f"  音高 piece 掩码: {int(loss_cfg['pitch_mask'].sum())} 个 | "
           f"加权 ×{loss_cfg['pitch_weight']:g}", flush=True)
+    # 【D86】两根新杆的配置回显(生效自证,与 aug_acoustic=/pv= 同一纪律):
+    # 1c 遮上文(缺省 0=关) + 交叉注意力音频依赖损失(缺省 0=关,经 100 步 A/B 门进入)
+    id_target = float(cfg.get("input_dropout", 0.0) or 0.0)
+    id_ramp = max(int(cfg.get("input_dropout_ramp", 5000) or 5000), 1)
+    if id_target > 0:
+        if not (0.0 < id_target < 1.0):
+            raise ValueError(f"input_dropout 必须在 (0,1),得到 {id_target}")
+        loss_cfg["input_dropout_token"] = resolve_unk_id(
+            tokenizer, cfg.get("guards", {}).get("vocab"))
+    loss_cfg["audio_dep"] = {
+        "weight": float(cfg.get("audio_dep_weight", 0.0) or 0.0),
+        "margin": float(cfg.get("audio_dep_margin", 0.1) or 0.1),
+    }
+    print(f"  遮上文 input_dropout={id_target:g}"
+          + (f"(ramp {id_ramp} 步→全率,替换 unk id="
+             f"{loss_cfg['input_dropout_token']})" if id_target > 0 else "(关)")
+          + f" | 音频依赖损失 weight={loss_cfg['audio_dep']['weight']:g}"
+          + (f" margin={loss_cfg['audio_dep']['margin']:g}"
+             if loss_cfg['audio_dep']['weight'] > 0 else "(关)"), flush=True)
     use_bf16 = (str(cfg.get("precision", "")).startswith("bf16")
                 and torch.cuda.is_available())
     autocast = (lambda: torch.autocast("cuda", dtype=torch.bfloat16)) if use_bf16 \
@@ -1552,6 +1706,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
                     f"audio_s={_audio_s} "
                     f"tokens={batch['input_lens'].tolist()}",
                     flush=True)
+            if id_target > 0:
+                # 线性 ramp:step(已完成 optimizer 步)/ramp,封顶目标率;续训自然接续
+                loss_cfg["input_dropout_p"] = id_target * min(1.0, step / id_ramp)
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,
                                             ts_token_ids=ts_token_ids, loss_cfg=loss_cfg,
@@ -1604,6 +1761,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                            (recent_aux, step_m.get("acoustic_aux_loss")),
                            (recent_aux_align, step_m.get("acoustic_align_loss")),
                            (recent_aux_f1, step_m.get("acoustic_frame_f1")),
+                           (recent_ad, step_m.get("audio_dep_gap")),
+                           (recent_id, step_m.get("input_drop_rate")),
                            (recent_td, step_data_sec),
                            (recent_tc, step_comp_sec)):
                 if v is None:
@@ -1629,6 +1788,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
                          f"axm={sum(recent_aux_align)/len(recent_aux_align):.3f} "
                          f"af1={sum(recent_aux_f1)/len(recent_aux_f1):.3f} "
                          if recent_aux else "")
+                      + (f"ad={sum(recent_ad)/len(recent_ad):+.3f} "
+                         if recent_ad else "")
+                      + (f"id={sum(recent_id)/len(recent_id):.2f} "
+                         if recent_id else "")
                       +
                       f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
                       f"enc={gn_groups[0]:.1f} dec={gn_groups[1]:.1f} "

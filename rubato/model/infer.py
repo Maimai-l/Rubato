@@ -202,7 +202,8 @@ def _apply_rep_penalty(row, ids: list[int], n_prompt: int,
 def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
                            max_new: int = 900, rep_penalty: float = 1.1,
                            rep_window: int = 128, beam_size: int = 1,
-                           length_penalty: float = 1.0) -> str:
+                           length_penalty: float = 1.0,
+                           eot_boost: float = 0.0) -> str:
     """
     自回归解码。beam_size=1 是贪心，>1 是真实 beam search；两者都复用训练验证过的
     forward 和同一份 encoder states。旧实现的“beam=4”参数从未进入自研解码，实际只是
@@ -271,6 +272,9 @@ def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
             for _ in range(max_new):
                 row = _apply_rep_penalty(lp[0, -1], ids, n_prompt,
                                          rep_penalty, rep_window)
+                if eot_boost:
+                    row = row.clone()
+                    row[eot] = row[eot] + eot_boost      # D86 扫参:终止符 logit 偏置
                 nxt = int(row.argmax())
                 if nxt == eot:
                     stop = "eot"
@@ -297,6 +301,9 @@ def autoregressive_decode(model, audio, tokenizer, prompt_pieces: list[str],
                 for bi, (seq, score, _done, _why) in enumerate(active):
                     row = _apply_rep_penalty(rows[bi, -1], seq, n_prompt,
                                              rep_penalty, rep_window)
+                    if eot_boost:
+                        row = row.clone()
+                        row[eot] = row[eot] + eot_boost
                     vals, toks = torch.topk(row, k=min(beam_size, int(row.numel())))
                     for val, tok in zip(vals.tolist(), toks.tolist()):
                         tok = int(tok)
@@ -342,7 +349,8 @@ def single_window_infer(model, audio_window, sr: int, tokenizer,
 def single_window_tast(model, audio_window, sr: int, tokenizer,
                        beam_size: int = 4, truncate: bool = True,
                        domain: str | None = None,
-                       fallback_greedy: bool = True) -> str:
+                       fallback_greedy: bool = True,
+                       rep_penalty: float = 1.1, eot_boost: float = 0.0) -> str:
     """
     单窗 TAST 解码,返回截断后的【带时间戳】TAST 文本(剥戳后过 validate 才采用);失败返回 ''。
     保留时间戳是自适应 hop 的关键——下一窗起点 = 本窗最后小节线的时间戳。
@@ -355,6 +363,7 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
         # autoregressive beam search；stub 分支保留给沙盒测试。
         if hasattr(model, "preprocessor") and hasattr(model, "forward"):
             return autoregressive_decode(model, audio_window, tokenizer, prompt,
+                                          rep_penalty=rep_penalty, eot_boost=eot_boost,
                                          beam_size=beam)
         if hasattr(model, "generate"):
             out = model.generate(audio_window, prompt=prompt, num_beams=beam)
@@ -409,7 +418,8 @@ def _last_barline_sec(tast_text: str, ts_ms: int = 10) -> float | None:
 
 def infer_a2s(model, audio, tokenizer, sr: int = 16000,
               domain: str | None = None, beam_size: int = 1,
-              fallback_greedy: bool = True) -> str:
+              fallback_greedy: bool = True,
+              rep_penalty: float = 1.1, eot_boost: float = 0.0) -> str:
     """
     S12 主入口。train.py eval hook 调用:infer_a2s(model, audio, tokenizer) -> str。
     model=None 或推理失败 → 返回合法空谱以保证调用方不崩；同时 LAST_INFER_STATS
@@ -432,7 +442,8 @@ def infer_a2s(model, audio, tokenizer, sr: int = 16000,
     try:
         return _infer_impl(model, audio, tokenizer, sr, domain=domain,
                            beam_size=beam_size,
-                           fallback_greedy=fallback_greedy)
+                           fallback_greedy=fallback_greedy,
+                           rep_penalty=rep_penalty, eot_boost=eot_boost)
     except Exception as e:
         import traceback
         LAST_INFER_ERROR = f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=4)}"
@@ -443,7 +454,8 @@ def infer_a2s(model, audio, tokenizer, sr: int = 16000,
 
 
 def _infer_impl(model, audio, tokenizer, sr: int, domain: str | None = None,
-                beam_size: int = 1, fallback_greedy: bool = True) -> str:
+                beam_size: int = 1, fallback_greedy: bool = True,
+                rep_penalty: float = 1.1, eot_boost: float = 0.0) -> str:
     """
     R-S12.1/12.3 自适应 hop 推理(修复固定 20s hop 与"截断到最后小节线"互相拆台的架构问题):
     每窗 40s 编码(右侧看未来),解码 TAST 截断到 20s 前最后一条小节线;
@@ -474,7 +486,8 @@ def _infer_impl(model, audio, tokenizer, sr: int, domain: str | None = None,
         is_last = (t_start + win >= n)
         tast = single_window_tast(model, seg, sr, tokenizer, truncate=not is_last,
                                   domain=domain, beam_size=beam_size,
-                                  fallback_greedy=fallback_greedy)
+                                  fallback_greedy=fallback_greedy,
+                                  rep_penalty=rep_penalty, eot_boost=eot_boost)
         if not tast:                     # 解码失败:按默认 hop 前进(计 n_fail),不静默错位/死循环
             n_fail += 1
             if len(window_failures) < 3:

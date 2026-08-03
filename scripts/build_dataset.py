@@ -676,6 +676,14 @@ def validate_cli_args(args) -> None:
         bad.append(f"amt_align_weight={args.amt_align_weight}")
     if args.amt_align_margin < 0:
         bad.append(f"amt_align_margin={args.amt_align_margin}")
+    if not (0.0 <= args.input_dropout < 1.0):
+        bad.append(f"input_dropout={args.input_dropout}")
+    if args.input_dropout_ramp <= 0:
+        bad.append(f"input_dropout_ramp={args.input_dropout_ramp}")
+    if args.audio_dep_weight < 0:
+        bad.append(f"audio_dep_weight={args.audio_dep_weight}")
+    if args.audio_dep_margin <= 0:
+        bad.append(f"audio_dep_margin={args.audio_dep_margin}")
     if args.stop_after_step is not None and args.stop_after_step <= 0:
         bad.append(f"stop_after_step={args.stop_after_step}")
     if (args.stop_after_step is not None
@@ -937,6 +945,18 @@ def main():
                     help="AMT 辅助头的错配目标 margin 权重；无需第二次 forward")
     ap.add_argument("--amt-align-margin", type=float, default=None,
                     help="正确音频事件损失优于批内错配事件损失的目标 margin")
+    ap.add_argument("--input-dropout", type=float, default=0.0,
+                    help="1c 遮上文(D86):teacher-forcing 输入的内容 token 以此概率替换为"
+                         " unk,prompt 永不遮;0=关。从 0 线性 ramp,生效自证看启动回显"
+                         " input_dropout= 与日志 id= 列(实际命中率)")
+    ap.add_argument("--input-dropout-ramp", type=int, default=5000,
+                    help="遮上文从 0 线性升到全率所用步数(按已完成 optimizer 步计)")
+    ap.add_argument("--audio-dep-weight", type=float, default=0.0,
+                    help="交叉注意力音频依赖损失权重(D86):批内错配 encoder 状态做第二次"
+                         " decoder forward,要求错音频的内容 CE 比对音频差出 margin;"
+                         "0=关。生效自证看启动回显与日志 ad= 列(gap=错配CE−匹配CE)")
+    ap.add_argument("--audio-dep-margin", type=float, default=0.1,
+                    help="音频依赖损失 margin(nat):gap ≥ margin 才零罚")
     ap.add_argument("--max-steps", type=int, default=None,
                     help="覆盖 cosine 学习率调度总步数及生产训练上限；短 A/B 不应修改它")
     ap.add_argument("--stop-after-step", type=int, default=None,
@@ -955,6 +975,12 @@ def main():
                          "诊断时关闭 beam→greedy 静默回退，不训练")
     ap.add_argument("--decode-abtest-beams", default="1,4",
                     help="decode-abtest 的 beam 列表，逗号分隔（缺省 1,4）")
+    ap.add_argument("--decode-abtest-rep", default="1.1",
+                    help="D86 扫参:重复惩罚列表,逗号分隔(缺省 1.1=现行值;1.0=关)。"
+                         "与 beams/eot 做笛卡尔积,每组合一臂")
+    ap.add_argument("--decode-abtest-eot", default="0",
+                    help="D86 扫参:终止符 logit 加成列表,逗号分隔(缺省 0=关)。"
+                         "针对 stop=cap/生成不收口的暴露偏差症状,校准提前终止倾向")
     ap.add_argument("--abtest-n", type=int, default=48,
                     help="prompt/decode abtest 每臂样本数(与 eval 同源的确定性 nasap 子集)")
     ap.add_argument("--prefetch", type=int, default=0,
@@ -1217,6 +1243,25 @@ def main():
         if not beams or any(x < 1 for x in beams):
             raise ValueError("--decode-abtest-beams 必须至少含一个正整数")
         beams = list(dict.fromkeys(beams))
+        try:
+            reps = [float(x.strip()) for x in args.decode_abtest_rep.split(",")
+                    if x.strip()]
+        except ValueError as e:
+            raise ValueError("--decode-abtest-rep 必须是逗号分隔的数字") from e
+        if not reps or any(x < 1.0 for x in reps):
+            raise ValueError("--decode-abtest-rep 每项必须 ≥1.0(1.0=关闭惩罚)")
+        reps = list(dict.fromkeys(reps))
+        try:
+            eots = [float(x.strip()) for x in args.decode_abtest_eot.split(",")
+                    if x.strip()]
+        except ValueError as e:
+            raise ValueError("--decode-abtest-eot 必须是逗号分隔的数字") from e
+        if not eots or any(x < 0.0 for x in eots):
+            raise ValueError("--decode-abtest-eot 每项必须 ≥0(0=关闭加成)")
+        eots = list(dict.fromkeys(eots))
+        grid = [(b, r, e) for b in beams for r in reps for e in eots]
+        # 缺省网格 (rep=1.1, eot=0) 与旧两臂 beam 对比逐字节同行为
+        sweep = len(reps) > 1 or len(eots) > 1 or reps != [1.1] or eots != [0.0]
 
         last = runtime_ckpt_dir / "last.pt"
         if not last.exists():
@@ -1232,7 +1277,7 @@ def main():
 
         subset = _eval_subset(nasap_val, int(args.abtest_n))
         result = {
-            "experiment": "decode_beam_ab",
+            "experiment": "decode_sweep" if sweep else "decode_beam_ab",
             "checkpoint": str(last),
             "step": step0,
             "n_requested": int(args.abtest_n),
@@ -1240,14 +1285,17 @@ def main():
             "fallback_greedy": False,
             "domain_prompt": "sample.domain (与正式 eval 一致)",
             "beams": beams,
+            "rep_penalties": reps,
+            "eot_boosts": eots,
+            "n_arms": len(grid),
             "arms": [],
         }
-        print(f"--decode-abtest @ step {step0}: beams={beams}, "
-              f"同一确定性 nASAP 子集 n={len(subset)},"
+        print(f"--decode-abtest @ step {step0}: beams={beams} rep={reps} "
+              f"eot={eots} → {len(grid)} 臂 × n={len(subset)},"
               "domain=sample.domain,beam→greedy 回退=关", flush=True)
 
         with torch.no_grad():
-            for beam in beams:
+            for beam, rep, eot in grid:
                 started = _time.perf_counter()
                 n_ok = n_fb = n_seen = 0
                 neds = []
@@ -1260,6 +1308,7 @@ def main():
                     n_seen += 1
                     one_started = _time.perf_counter()
                     pred = infer_a2s(model, audio, tok, beam_size=beam,
+                                     rep_penalty=rep, eot_boost=eot,
                                      domain=sample.get("domain"),
                                      fallback_greedy=False)
                     elapsed = _time.perf_counter() - one_started
@@ -1293,11 +1342,13 @@ def main():
                         "ned": ned,
                         "prediction_prefix": pred[:320],
                     })
-                    print(f"  beam={beam} {si + 1}/{len(subset)} "
+                    print(f"  beam={beam} rep={rep} eot={eot} {si + 1}/{len(subset)} "
                           f"ok={int(ok)} fallback={int(fb)} {elapsed:.1f}s", flush=True)
                 tally = viol_tally(entries)
                 result["arms"].append({
                     "beam_size": beam,
+                    "rep_penalty": rep,
+                    "eot_boost": eot,
                     "n_seen": n_seen,
                     "n_parseable": n_ok,
                     "parseable_rate": n_ok / max(n_seen, 1),
@@ -1310,16 +1361,18 @@ def main():
                 })
 
         out = (Path(__file__).resolve().parents[1] / "reports" /
-               f"DECODE_AB_STEP{step0}_DOMAIN.json")
+               (f"DECODE_SWEEP_STEP{step0}.json" if sweep
+                else f"DECODE_AB_STEP{step0}_DOMAIN.json"))
         out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         lines = [f"decode-abtest @ step {step0};同子集 n={len(subset)};"
-                 "domain=sample.domain;beam→greedy 回退=关"]
+                 f"{len(result['arms'])} 臂;domain=sample.domain;beam→greedy 回退=关"]
         for arm in result["arms"]:
             rejects = " ".join(
                 f"{k}={v}" for k, v in sorted(
                     arm["violation_tally"].items(), key=lambda kv: (-kv[1], kv[0])))
             lines.append(
-                f"  beam={arm['beam_size']}: parseable={arm['n_parseable']}/"
+                f"  beam={arm['beam_size']} rep={arm['rep_penalty']} "
+                f"eot={arm['eot_boost']}: parseable={arm['n_parseable']}/"
                 f"{arm['n_seen']} fallback={arm['n_fallback']} "
                 f"elapsed={arm['elapsed_s']:.1f}s 拒因:{rejects}")
         for line in lines:
@@ -1530,6 +1583,10 @@ def main():
         "clip_norm": args.clip_norm,
         "eval_decode_every": args.eval_decode_every,
         "pitch_loss_weight": args.pitch_loss_weight,
+        "input_dropout": float(args.input_dropout),
+        "input_dropout_ramp": int(args.input_dropout_ramp),
+        "audio_dep_weight": float(args.audio_dep_weight),
+        "audio_dep_margin": float(args.audio_dep_margin),
         "acoustic_aux": {
             "weight": float(args.amt_aux_weight),
             "alignment_weight": float(args.amt_align_weight),
