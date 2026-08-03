@@ -21,7 +21,7 @@
 | pv= | 音高 piece 的未加权 CE 滚动均值(D82;--pitch-loss-weight 只改梯度占比,不改本列口径) | 降 = 音高在学;二轮 61k 实测 2.81→2.54 |
 | aux= axm= af1= | encoder AMT 辅助头三件(BCE / 错配 margin / 帧占用 F1;--amt-aux-weight>0 才出现) | 2a 门测已判"头学得动不迁移",正跑不开则无此列 |
 | id= | 遮上文实际命中率(1c,--input-dropout>0 才出现) | 应 ≈ 目标率(ramp 后);离谱 = 掩码算错,停手贴回 |
-| ad= | 音频依赖 gap = 错配CE − 匹配CE(2c,--audio-dep-weight>0 才出现) | **decoder 听没听的直读数**:≥margin 才健康;贴 0 = decoder 无视音频 |
+| ad= | 音频依赖 gap = 错配CE − 匹配CE(--audio-dep-weight>0 每步出;或 --audio-dep-monitor-every N 仪表模式每 N 步 no_grad 出,不进梯度) | **decoder 听没听的直读数**;63.8k 基准 +0.83~0.86(合成域主导);随训练下滑 = decoder 在丢音频通道,红灯 |
 | td= tc= | 本 optimizer 步的装批等待 / 计算墙钟(当步/avg50) | 步时诊断;td 高 = 数据侧瓶颈,tc 高 = 计算侧 |
 | A2S= 等四项 | 【训练批】逐方言 sem 滚动均值(近200条,按字母序 A2S/A2S_lite/AMT/TAST) | 四条学习曲线,A2S 是主线;注意这是**训练侧**数字,不是 val |
 

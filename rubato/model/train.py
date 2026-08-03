@@ -645,10 +645,15 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
     # 要求"错音频算内容 CE"比"对音频"差出 margin —— decoder 只有真用交叉注意力
     # 才能同时保住两头。margin 形式与 acoustic_aux.alignment_loss 同约定:
     # relu(margin + own − wrong).mean(),两侧带梯度,主 CE 锚住 own 不劣化。
+    # 【D87 修订】63.8k 门测实测 gap=+0.83~0.86 ≫ margin 0.1 ⇒ 罚项在训练混合上
+    # 空转,而第二次带梯度 forward 花 +77% 步时 —— 训练版搁置。仪表价值保留:
+    # monitor_now(weight=0 时生效)= 同一计算在 no_grad 下每 N 步跑一次,只出
+    # ad= 读数不进梯度,开销 ≈ +77%/N。
     dep_cfg = dict(cfg.get("audio_dep") or {})
     dep_weight = float(dep_cfg.get("weight", 0.0))
+    dep_monitor = bool(dep_cfg.get("monitor_now")) and dep_weight <= 0
     dep_report = None
-    if dep_weight > 0:
+    if dep_weight > 0 or dep_monitor:
         if not isinstance(output, (tuple, list)) or len(output) < 4:
             raise TypeError(
                 "audio-dep loss 需要 Canary forward 四元组 "
@@ -666,21 +671,27 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         has_sem = n_sem_seq > 0
         if b_now >= 2 and int(has_sem.sum()) >= 2:
             margin = float(dep_cfg.get("margin", 0.1))
-            tok_ce_mat = -log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
-            ce_mat = (tok_ce_mat * sem_scored).sum(-1) / n_sem_seq.clamp(min=1)
-            perm = torch.roll(torch.arange(b_now, device=device), 1)
-            dec_out = dec(
-                input_ids=input_ids, decoder_mask=valid_positions.long(),
-                encoder_embeddings=dep_enc[perm],
-                encoder_mask=dep_enc_mask[perm])
-            log_probs_mis = lsm(hidden_states=dec_out)
-            tok_ce_mis = -log_probs_mis.gather(
-                -1, labels.unsqueeze(-1)).squeeze(-1)
-            ce_mis = (tok_ce_mis * sem_scored).sum(-1) / n_sem_seq.clamp(min=1)
-            penalty = torch.relu(
-                margin + ce_mat - ce_mis)[has_sem].mean()
-            gap = (ce_mis - ce_mat)[has_sem].mean()
-            loss = loss + dep_weight * penalty
+            import contextlib
+            grad_ctx = (contextlib.nullcontext() if dep_weight > 0
+                        else torch.no_grad())
+            lp_mat = log_probs if dep_weight > 0 else log_probs.detach()
+            with grad_ctx:
+                tok_ce_mat = -lp_mat.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
+                ce_mat = (tok_ce_mat * sem_scored).sum(-1) / n_sem_seq.clamp(min=1)
+                perm = torch.roll(torch.arange(b_now, device=device), 1)
+                dec_out = dec(
+                    input_ids=input_ids, decoder_mask=valid_positions.long(),
+                    encoder_embeddings=dep_enc[perm],
+                    encoder_mask=dep_enc_mask[perm])
+                log_probs_mis = lsm(hidden_states=dec_out)
+                tok_ce_mis = -log_probs_mis.gather(
+                    -1, labels.unsqueeze(-1)).squeeze(-1)
+                ce_mis = (tok_ce_mis * sem_scored).sum(-1) / n_sem_seq.clamp(min=1)
+                penalty = torch.relu(
+                    margin + ce_mat - ce_mis)[has_sem].mean()
+                gap = (ce_mis - ce_mat)[has_sem].mean()
+            if dep_weight > 0:
+                loss = loss + dep_weight * penalty
             dep_report = {
                 "audio_dep_loss": penalty.detach(),
                 "audio_dep_gap": gap.detach(),
@@ -1644,12 +1655,18 @@ def train(model, datamodule, cfg: dict, tokenizer,
         "weight": float(cfg.get("audio_dep_weight", 0.0) or 0.0),
         "margin": float(cfg.get("audio_dep_margin", 0.1) or 0.1),
     }
+    # 【D87】ad= 纯仪表节奏:weight=0 时每 N 步 no_grad 测一次错配-匹配 CE gap,
+    # 不进梯度;weight>0(训练版)时忽略本项,ad= 每步都有。
+    ad_monitor_every = max(int(cfg.get("audio_dep_monitor_every", 0) or 0), 0)
     print(f"  遮上文 input_dropout={id_target:g}"
           + (f"(ramp {id_ramp} 步→全率,替换 unk id="
              f"{loss_cfg['input_dropout_token']})" if id_target > 0 else "(关)")
           + f" | 音频依赖损失 weight={loss_cfg['audio_dep']['weight']:g}"
           + (f" margin={loss_cfg['audio_dep']['margin']:g}"
-             if loss_cfg['audio_dep']['weight'] > 0 else "(关)"), flush=True)
+             if loss_cfg['audio_dep']['weight'] > 0 else "(关)")
+          + (f" | ad 仪表:每 {ad_monitor_every} 步(no_grad)"
+             if ad_monitor_every and loss_cfg['audio_dep']['weight'] <= 0
+             else ""), flush=True)
     use_bf16 = (str(cfg.get("precision", "")).startswith("bf16")
                 and torch.cuda.is_available())
     autocast = (lambda: torch.autocast("cuda", dtype=torch.bfloat16)) if use_bf16 \
@@ -1709,6 +1726,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
             if id_target > 0:
                 # 线性 ramp:step(已完成 optimizer 步)/ramp,封顶目标率;续训自然接续
                 loss_cfg["input_dropout_p"] = id_target * min(1.0, step / id_ramp)
+            if ad_monitor_every:
+                loss_cfg["audio_dep"]["monitor_now"] = (
+                    step % ad_monitor_every == 0)
             with autocast():
                 parts = training_step_logic(model, batch, tokenizer,
                                             ts_token_ids=ts_token_ids, loss_cfg=loss_cfg,

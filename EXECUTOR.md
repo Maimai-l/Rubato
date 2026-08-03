@@ -4,14 +4,81 @@
 
 - **项目终点**:复现 Rubato 论文 —— 真实钢琴录音 → 可用乐谱(终评对标 OMR-NED 64.3 /
   AMT F1 97.0,在官方 test 集上)。
-- **当前阶段目标**:二轮跑到 100k 不停(61k 判读 D85:教师强制侧在学,病灶=自由生成
-  不收口)。pull 之后按**追加 29** 执行:一个暂停窗跑完 解码扫参 + 双杆 100 步安全门,
-  然后按门果决定 v4(素跑)或 v5(带新杆)重启。
+- **当前阶段目标**:二轮素跑继续到 100k 不停。上一暂停窗(追加 29)已执行完毕,
+  判定验收见 D87:扫参关案(解码侧不治本)、双杆门未过已正确回滚。下一窗(不急,
+  你方便时)按**追加 30**:1c 半剂量(0.05)重门 + ad 纯仪表,门过 v6 / 不过 v4。
   **本地运维(内存/性能/路径/存储/磁盘)从此全权归你,不再报备**(D63,用户令)。
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 29(2026-08-03,D86):pull 后的一个暂停窗 —— 解码扫参 + 双杆安全门
+## 当前阶段追加 30(2026-08-03,D87):下一个暂停窗 —— 1c 半剂量重门(可选,不急)
+
+上一窗验收结论(D87):你的判定与回滚全部正确,教科书式执行。数字分解出两件事:
+loss +20.8% 几乎全是遮上文的**机械通胀**(目标按设计变难,100 步内 55.6→52.3 在快速
+适应,不是失稳);+76.6% 步时几乎全是音频依赖损失的第二次 forward,而它的罚项因
+gap(+0.83)≫ margin(0.1) **全程为零 = 白花钱**。处置:音频依赖训练版搁置,降级成
+纯仪表(--audio-dep-monitor-every,不进梯度,开销 ~+1.5%);遮上文半剂量重门。
+
+**这一窗不着急**:主线素跑继续,到下一个自然暂停点(或你方便时)再做,总预算 ~1.5-2 小时。
+判据已预登记如下,先于数据,不许现场改。
+
+原子分叉(先停训练,记 PID;S = 停时日志最后的 step 数):
+```powershell
+$R = "D:\vscode_projects\ee_download\Rubato"
+New-Item -ItemType Directory -Force "$R\outputs\ckpt_ab_d87A" | Out-Null
+New-Item -ItemType Directory -Force "$R\outputs\ckpt_ab_d87B" | Out-Null
+Copy-Item "$R\outputs\ckpt\last.pt" "$R\outputs\ckpt_ab_d87A\last.pt"
+Copy-Item "$R\outputs\ckpt\last.pt" "$R\outputs\ckpt_ab_d87B\last.pt"
+```
+
+A 臂(对照;跑完再跑 B,不并发;`<S+100>` 两臂用同一个数):
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--ckpt-dir','D:\vscode_projects\ee_download\Rubato\outputs\ckpt_ab_d87A','--stop-after-step','<S+100>' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\ab_d87_A.out.log" `
+  -RedirectStandardError  "$W\ab_d87_A.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+
+B 臂(遮上文半剂量 0.05 + ad 纯仪表每 50 步;没有 --audio-dep-weight,这是与上一窗
+B 臂的本质区别):
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--input-dropout','0.05','--input-dropout-ramp','5000','--audio-dep-monitor-every','50','--ckpt-dir','D:\vscode_projects\ee_download\Rubato\outputs\ckpt_ab_d87B','--stop-after-step','<S+100>' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\ab_d87_B.out.log" `
+  -RedirectStandardError  "$W\ab_d87_B.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+
+**门判据(预登记,自 D86 实测重标)**:①不炸(无 NaN/OOM/越界);②B 臂 id=≈0.05±0.01,
+ad= 在监控步出数(每 50 步一个,量级不判);③tc:B avg ≤ A avg ×1.08(没有第二次带梯度
+forward 了,只剩仪表的 1/50);④loss avg50:B ≤ A ×1.12(p=0.10 实测 +20.8%,折半外推
+≈+10.4%,留非线性余量)。
+
+**门过 → v6 重启主线**(= v4 + 半剂量遮上文 + ad 仪表;续主 ckpt,开局必须有"续训:恢复"):
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--input-dropout','0.05','--input-dropout-ramp','5000','--audio-dep-monitor-every','50' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r2_v6.out.log" `
+  -RedirectStandardError  "$W\train_r2_v6.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+门不过 → v4 素跑重启,贴回两臂日志。
+**贴回**:两臂配置回显行 + 各自最后 5 条训练行 + B 臂任意一条含 ad= 的行。
+1c 疗效不由门判,由进正跑后的解码腿(每 5000 步)看 TS_MISSING/TERMINAL 拒因数与
+parseable、探针看 maestro 真pitch —— 到 5k/10k 步再判读。
+旧分叉目录 ckpt_ab_d86A/B 可删;本窗新建 ckpt_ab_d87A/B 用完也可删。
+
+## 【已执行,验收+判定见 D87;命令勿再跑】当前阶段追加 29(2026-08-03,D86):pull 后的一个暂停窗 —— 解码扫参 + 双杆安全门
 
 **pull 本身零风险**:新代码三样(解码扫参 / 遮上文 / 音频依赖损失)全部缺省 0=关,
 不带新旗标的重启行为与 pull 前逐字节相同;追加 28 的 v4 块仍是素跑正典。

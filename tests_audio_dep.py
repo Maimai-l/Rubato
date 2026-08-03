@@ -181,6 +181,39 @@ def test_missing_decoder_fails_loud():
     assert raised, "缺 transf_decoder/log_softmax 不能静默跳过"
 
 
+def test_monitor_mode_gauges_without_touching_loss():
+    model = DepNemo()
+    batch = _mk_batch()
+    base = training_step_logic(model, batch, None, ts_token_ids=TS_IDS,
+                               loss_cfg={})
+    mon = training_step_logic(
+        model, batch, None, ts_token_ids=TS_IDS,
+        loss_cfg={"audio_dep": {"weight": 0.0, "margin": 0.2,
+                                "monitor_now": True}})
+    assert torch.equal(base["loss"], mon["loss"]), "仪表模式不许碰 loss"
+    assert mon["n_audio_dep"] == 2
+    assert torch.isfinite(mon["audio_dep_gap"])
+    assert not mon["audio_dep_gap"].requires_grad, "仪表读数不得挂梯度图"
+    off = training_step_logic(
+        model, batch, None, ts_token_ids=TS_IDS,
+        loss_cfg={"audio_dep": {"weight": 0.0, "monitor_now": False}})
+    assert "audio_dep_gap" not in off, "monitor_now=False 不该做第二次 forward"
+
+
+def test_monitor_yields_to_live_weight():
+    model = DepNemo()
+    batch = _mk_batch()
+    base = training_step_logic(model, batch, None, ts_token_ids=TS_IDS,
+                               loss_cfg={})
+    live = training_step_logic(
+        model, batch, None, ts_token_ids=TS_IDS,
+        loss_cfg={"audio_dep": {"weight": 0.3, "margin": 0.2,
+                                "monitor_now": True}})
+    expect = float(base["loss"].detach()) + 0.3 * float(live["audio_dep_loss"])
+    assert abs(float(live["loss"].detach()) - expect) < 1e-5, \
+        "weight>0 时 monitor_now 必须让位于训练版(罚项照加)"
+
+
 def test_metrics_aggregation_weighted_mean():
     st = new_step_metrics()
     base = {"batch_size": 2, "loss": torch.tensor(1.0), "semantic_loss": 1.0,

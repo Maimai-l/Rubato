@@ -171,7 +171,7 @@ _cli = SimpleNamespace(
     eval_decode_every=0, pitch_loss_weight=1,
     amt_aux_weight=0, amt_align_weight=0.25, amt_align_margin=0.1,
     input_dropout=0.0, input_dropout_ramp=5000,
-    audio_dep_weight=0.0, audio_dep_margin=0.1,
+    audio_dep_weight=0.0, audio_dep_margin=0.1, audio_dep_monitor_every=0,
     max_steps=100000, stop_after_step=None, lr_enc=None, lr_dec=None)
 validate_cli_args(_cli)
 check("valid_cli_passes", True)

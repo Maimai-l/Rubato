@@ -684,6 +684,8 @@ def validate_cli_args(args) -> None:
         bad.append(f"audio_dep_weight={args.audio_dep_weight}")
     if args.audio_dep_margin <= 0:
         bad.append(f"audio_dep_margin={args.audio_dep_margin}")
+    if args.audio_dep_monitor_every < 0:
+        bad.append(f"audio_dep_monitor_every={args.audio_dep_monitor_every}")
     if args.stop_after_step is not None and args.stop_after_step <= 0:
         bad.append(f"stop_after_step={args.stop_after_step}")
     if (args.stop_after_step is not None
@@ -957,6 +959,10 @@ def main():
                          "0=关。生效自证看启动回显与日志 ad= 列(gap=错配CE−匹配CE)")
     ap.add_argument("--audio-dep-margin", type=float, default=0.1,
                     help="音频依赖损失 margin(nat):gap ≥ margin 才零罚")
+    ap.add_argument("--audio-dep-monitor-every", type=int, default=0,
+                    help="D87 ad= 纯仪表:每 N 步 no_grad 测一次错配−匹配 CE gap,"
+                         "不进梯度不加 loss(开销 ≈ 第二次 decoder forward ÷ N);"
+                         "0=关;--audio-dep-weight>0 时忽略本项(训练版每步出数)")
     ap.add_argument("--max-steps", type=int, default=None,
                     help="覆盖 cosine 学习率调度总步数及生产训练上限；短 A/B 不应修改它")
     ap.add_argument("--stop-after-step", type=int, default=None,
@@ -1587,6 +1593,7 @@ def main():
         "input_dropout_ramp": int(args.input_dropout_ramp),
         "audio_dep_weight": float(args.audio_dep_weight),
         "audio_dep_margin": float(args.audio_dep_margin),
+        "audio_dep_monitor_every": int(args.audio_dep_monitor_every),
         "acoustic_aux": {
             "weight": float(args.amt_aux_weight),
             "alignment_weight": float(args.amt_align_weight),
