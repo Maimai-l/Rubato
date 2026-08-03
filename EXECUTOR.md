@@ -4,12 +4,121 @@
 
 - **项目终点**:复现 Rubato 论文 —— 真实钢琴录音 → 可用乐谱(终评对标 OMR-NED 64.3 /
   AMT F1 97.0,在官方 test 集上)。
-- **当前阶段目标**:贴两行判试验死因(追加 17)+ push 新流水线代码供审。
+- **当前阶段目标**:二轮跑到 100k 不停(61k 判读 D85:教师强制侧在学,病灶=自由生成
+  不收口)。pull 之后按**追加 29** 执行:一个暂停窗跑完 解码扫参 + 双杆 100 步安全门,
+  然后按门果决定 v4(素跑)或 v5(带新杆)重启。
   **本地运维(内存/性能/路径/存储/磁盘)从此全权归你,不再报备**(D63,用户令)。
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 28(2026-07-26,D83):二轮启动·最终版(增广 + 音高加权 ×2.5)
+## 当前阶段追加 29(2026-08-03,D86):pull 后的一个暂停窗 —— 解码扫参 + 双杆安全门
+
+**pull 本身零风险**:新代码三样(解码扫参 / 遮上文 / 音频依赖损失)全部缺省 0=关,
+不带新旗标的重启行为与 pull 前逐字节相同;追加 28 的 v4 块仍是素跑正典。
+运行中的训练进程不受 pull 影响(模块已加载),不必为 pull 停训。
+
+以下三步在**同一个训练暂停窗**做完(总预算 ~3-4 小时;D74 教训:任何解码/评测
+不得与训练并发抢 GPU)。每步独立可跳,跳了就在贴回里说一声。
+
+### 第 1 步:解码扫参(零训练风险,~1.5 小时)
+
+同 ckpt 网格比较 重复惩罚 × 终止符加成(DECODE_AB_STEP61200 的既定下一步)。
+先停训练:`Stop-Process -Id <训练PID> -Force`(PID 忘了就
+`Get-Process python* | Format-Table Id,StartTime`)。然后:
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--decode-abtest','--decode-abtest-beams','1','--decode-abtest-rep','1.0,1.1,1.3,1.5','--decode-abtest-eot','0,1,2,4','--abtest-n','24' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\decode_sweep.out.log" `
+  -RedirectStandardError  "$W\decode_sweep.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+
+16 臂 × 24 样本,自动读 outputs/ckpt/last.pt,不动任何权重。
+**贴回**:decode_sweep.out.log 末尾的 16 行"beam=1 rep=… eot=…: parseable=…"汇总 +
+`git add reports/DECODE_SWEEP_STEP*.json reports/eval_autolog.md` 后 commit+push。
+判读口径(预登记):任一臂 parseable>0 或拒因谱明显移动(DYCK/TS_* 降)= 解码侧有肉,
+规划端再发细网格;16 臂全 0 = 曝光偏差结论加固,重心全压训练侧两杆,扫参关案。
+
+### 第 2 步:双杆 100 步安全门(照 EXPERIMENT_AMT_DISTILL 同款,~1-2 小时)
+
+新杆:**1c 遮上文**(--input-dropout,教师强制输入随机遮成 unk,治"只会抄上文")
++ **2c 音频依赖损失**(--audio-dep-weight,批内错配音频第二次 decoder forward,
+逼 decoder 真用交叉注意力)。两杆都是温和剂量,按 D81 配方制**打包成一个 B 臂**;
+门是**安全门**(不炸/开销/仪表活),不是疗效门(疗效看进正跑后的 pv/id/ad/探针)。
+
+原子分叉(训练已停的状态下):
+```powershell
+$R = "D:\vscode_projects\ee_download\Rubato"
+New-Item -ItemType Directory -Force "$R\outputs\ckpt_ab_d86A" | Out-Null
+New-Item -ItemType Directory -Force "$R\outputs\ckpt_ab_d86B" | Out-Null
+Copy-Item "$R\outputs\ckpt\last.pt" "$R\outputs\ckpt_ab_d86A\last.pt"
+Copy-Item "$R\outputs\ckpt\last.pt" "$R\outputs\ckpt_ab_d86B\last.pt"
+```
+
+停步数:先看 `Get-Content "D:\vscode_projects\ee_download\work\train_r2_v4.out.log" -Tail 3`
+里最后的 step 数,记作 S;下面两条命令的 `<S+100>` 都换成同一个数字(S+100)。
+A 臂(对照,先跑,跑完再跑 B 臂,不并发):
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--ckpt-dir','D:\vscode_projects\ee_download\Rubato\outputs\ckpt_ab_d86A','--stop-after-step','<S+100>' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\ab_d86_A.out.log" `
+  -RedirectStandardError  "$W\ab_d86_A.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+
+B 臂(两杆齐开,其余与 A 一字不差):
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--input-dropout','0.10','--input-dropout-ramp','5000','--audio-dep-weight','0.10','--audio-dep-margin','0.10','--ckpt-dir','D:\vscode_projects\ee_download\Rubato\outputs\ckpt_ab_d86B','--stop-after-step','<S+100>' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\ab_d86_B.out.log" `
+  -RedirectStandardError  "$W\ab_d86_B.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+
+(ramp 按全局步计,分叉点已远超 5000 → B 臂立即全率 0.10,门测的就是全率,口径一致。)
+
+**门判据(预登记,先于数据)**:①B 臂 100 步不炸(无 NaN/OOM/越界);②新列活着:
+B 臂日志出现 id=(应 ≈0.10)与 ad=(出数即可,量级不判);③开销:B 臂 tc avg
+≤ A 臂 ×1.20(音频依赖多一次 decoder forward 的预算);④B 臂 loss avg50 ≤ A 臂 ×1.10
+(遮上文抬 loss 属预期,温和即可)。
+**贴回**:两臂启动回显里的"遮上文 input_dropout=… | 音频依赖损失 weight=…"行 +
+各自最后 5 条训练行(含 id=/ad= 列)+ 两臂 `_finish` 后日志尾 3 行。
+
+### 第 3 步:重启主线训练
+
+- 门全过 → **v5 块**(= v4 + 两杆四旗标,注意日志名换 v5;主 ckpt 目录不动,续
+  61k+ 权重,开局必须有"续训:恢复 step=…"行,**没有这行立即停手贴回**):
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--input-dropout','0.10','--input-dropout-ramp','5000','--audio-dep-weight','0.10','--audio-dep-margin','0.10' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r2_v5.out.log" `
+  -RedirectStandardError  "$W\train_r2_v5.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+
+- 任一门不过 → 素跑 **v4 块**(追加 28)原样重启,把两臂日志贴回,规划端拆单变量。
+- 开局核对(v5):配置回显四样 + "遮上文 input_dropout=0.1(ramp 5000…)| 音频依赖
+  损失 weight=0.1 margin=0.1"行 + "续训:恢复"行 + 训练行有 id=/ad= 两新列。
+- 之后节奏不变:每 10k 发 autolog;解码腿每 5000 步自动跑,parseable 与拒因谱
+  就是两杆疗效的终审仪表。A/B 分叉目录用完可删(ckpt_ab_d86A/B,各 ~2GB)。
+
+## 【素跑正典;带杆重启见追加 29 第 3 步 v5 块】当前阶段追加 28(2026-07-26,D83):二轮启动·最终版(增广 + 音高加权 ×2.5)
 
 配方钉板:池 v3 + 从零 + C1a 现版 + 音高加权 ×2.5(加强版 C1a 已砍;遮上文 10k 再议)。
 四步照抄:

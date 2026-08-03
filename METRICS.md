@@ -7,7 +7,8 @@
 
 ## 一、训练行(每步)
 
-    step N loss=… avg50=… sem=… ts=… gn=…/avg… enc=… dec=… lrE=… lrD=… audio=…s | A2S=… A2S_lite=… AMT=… TAST=…
+    step N loss=… avg50=… sem=… ts=… pv=… [aux=… axm=… af1=…] [ad=…] [id=…] gn=…/avg… enc=… dec=… lrE=… lrD=… audio=…s micro=… seq=… td=… tc=… | A2S=… A2S_lite=… AMT=… TAST=…
+    (方括号列 = 对应旗标开了才出现)
 
 | 字段 | 是什么 | 怎么读 |
 |---|---|---|
@@ -17,6 +18,11 @@
 | enc= dec= | 编码器 / 解码器分组范数 | 校验关系 gn²≈enc²+dec²;哪端在学一眼可见 |
 | lrE / lrD | 两参数组当前学习率 | cosine + warmup1500:enc 自 1e-4、dec 自 3e-4 缓降 |
 | audio= | 本步累积音频秒(梯度累积) | 目标 ≈2000s/步;长期显著偏低 = 数据供给有问题 |
+| pv= | 音高 piece 的未加权 CE 滚动均值(D82;--pitch-loss-weight 只改梯度占比,不改本列口径) | 降 = 音高在学;二轮 61k 实测 2.81→2.54 |
+| aux= axm= af1= | encoder AMT 辅助头三件(BCE / 错配 margin / 帧占用 F1;--amt-aux-weight>0 才出现) | 2a 门测已判"头学得动不迁移",正跑不开则无此列 |
+| id= | 遮上文实际命中率(1c,--input-dropout>0 才出现) | 应 ≈ 目标率(ramp 后);离谱 = 掩码算错,停手贴回 |
+| ad= | 音频依赖 gap = 错配CE − 匹配CE(2c,--audio-dep-weight>0 才出现) | **decoder 听没听的直读数**:≥margin 才健康;贴 0 = decoder 无视音频 |
+| td= tc= | 本 optimizer 步的装批等待 / 计算墙钟(当步/avg50) | 步时诊断;td 高 = 数据侧瓶颈,tc 高 = 计算侧 |
 | A2S= 等四项 | 【训练批】逐方言 sem 滚动均值(近200条,按字母序 A2S/A2S_lite/AMT/TAST) | 四条学习曲线,A2S 是主线;注意这是**训练侧**数字,不是 val |
 
 sem(A2S)参考线:地板 ≈1.2(label smoothing 0.1 的代价,到不了 0,估算);
