@@ -1,0 +1,66 @@
+CUDA allocator 预配置: PYTORCH_ALLOC_CONF=expandable_segments:True
+  [INFO] nASAP test work_keys (from nasap_split.json): 12
+  [INFO] ASAP-Beyer: 14 works / 25 real recordings (Beyer-Dai public split)
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] PDMX duration quarantine utt_ids: 3
+  [INFO] PDMX content quarantine piece_ids: 65
+  [INFO] 时长缓存加载 373410 条(audio_dur_cache.jsonl)
+=== 装配统计(每一步丢弃都计数,不静默)===
+  pdmx     rows= 424284 kept= 371610 no_audio=  37181 no_dialect=     0 bad_schema=    0 dup=14239 filtered= 1254
+  nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0 filtered=    0
+  maestro  rows= 374084 kept= 374084 no_audio=      0 no_dialect=     0 bad_schema=    0 dup=    0 filtered=    0
+  -- per file --
+  pdmx_perf_labels.jsonl                 kind=pdmx     rows=  35288 kept=  35101 no_audio=      0 no_dialect=     0 dup=    0 filtered=  187
+  pdmx_a2s_labels.jsonl                  kind=pdmx     rows= 135977 kept=  83786 no_audio=  37181 no_dialect=     0 dup=14239 filtered=  771
+  nasap_labels.jsonl                     kind=nasap    rows=   7098 kept=   7098 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows.jsonl              kind=maestro  rows= 144087 kept= 144087 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows_o10.jsonl          kind=maestro  rows= 114571 kept= 114571 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  maestro_amt_windows_o5.jsonl           kind=maestro  rows= 115426 kept= 115426 no_audio=      0 no_dialect=     0 dup=    0 filtered=    0
+  pdmx_a2s_labels_s2.jsonl               kind=pdmx     rows=  83818 kept=  83786 no_audio=      0 no_dialect=     0 dup=    0 filtered=   32
+  pdmx_perf_labels_s2.jsonl              kind=pdmx     rows=  30607 kept=  30598 no_audio=      0 no_dialect=     0 dup=    0 filtered=    9
+  pdmx_perf_labels_r3_native.jsonl       kind=pdmx     rows= 138594 kept= 138339 no_audio=      0 no_dialect=     0 dup=    0 filtered=  255
+  ⚠ manifest 无映射隔离: pdmx_perf_labels.jsonl 5 个 unique piece；样例=['QmRRAFR5Z9UdYUVUydBLEjNJHNfVzydetDgwjjZmyPBAxU', 'QmRiFhzfpp3QcQSLbLmhk2aewBLn63pT6MWzoCx4fGAN28', 'QmU6re1UeyZdkUTXvcc5DLAbx3G4dewA5Yz2Cx3cwE6cws', 'QmWHjTTbQJFLQHZ94V55odFCFxDY5n2sKoDBy9sSLBthdj', 'QmX5qq4Bf1AqNFpbZegBnC21g7n6fHSb7pQCLe9ugmsWaD']
+  ⚠ manifest 无映射隔离: pdmx_a2s_labels.jsonl 6 个 unique piece；样例=['QmPwgnJdJfP3zfi8wNa3v8vjm2QjxdJSZhXmFAtgNdMq8U', 'QmRiFhzfpp3QcQSLbLmhk2aewBLn63pT6MWzoCx4fGAN28', 'QmU6re1UeyZdkUTXvcc5DLAbx3G4dewA5Yz2Cx3cwE6cws', 'QmWHjTTbQJFLQHZ94V55odFCFxDY5n2sKoDBy9sSLBthdj', 'QmYCUeW8CyA9Hjfe8qHreit94DQkEo41QdPTaVJZYC1V49']
+  TOTAL utts=752792 by_dialect={'A2S': 378708, 'A2S_lite': 378554, 'TAST': 198237, 'AMT': 374084}
+        by_kind={'pdmx': 371610, 'nasap': 7098, 'maestro': 374084} by_split={'train': 704024, 'test': 25260, 'val': 8939, 'quarantine_leak': 1239, 'validation': 13330}
+  ⚠ 撞名 utt_id 样本: ['pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_000', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_001', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_002', 'pdmx_QmYgwWp4TUJYPWe5TMMPeEfeadR6KJSPBrd2MSwjHxPRoW_003', 'pdmx_QmYgjwZY5rA8cbpZmzdeTuP42DZHGz6VRWorf5fEdcNC9s_000', 'pdmx_QmYgjwZY5rA8cbpZmzdeTuP42DZHGz6VRWorf5fEdcNC9s_001', 'pdmx_QmYgFj1QfizKWfDyprpMff8fouzo5gNBAhLMCDQd8YoxiZ_000', 'pdmx_QmYgFj1QfizKWfDyprpMff8fouzo5gNBAhLMCDQd8YoxiZ_001', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_000', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_001', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_002', 'pdmx_QmYg4UnV2bD5p3iNa569Cb5S9EdB5muKgVnrNb1iYHjGEr_003', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_000', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_001', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_002', 'pdmx_QmYgsXKR95WWyp4tbfY2bHQ9f3RuFLmQ9RFHbXCm72iChk_003', 'pdmx_QmYgD78XzmFp7wH1yt2Kh2LoZoBmB8Dqc8bk357uG4Evik_004', 'pdmx_QmYgD78XzmFp7wH1yt2Kh2LoZoBmB8Dqc8bk357uG4Evik_005', 'pdmx_QmYgjUdsTn9cod9QS7bf5msP2mnRKcXKNYT5C1TNQG12JB_000', 'pdmx_QmYgjUdsTn9cod9QS7bf5msP2mnRKcXKNYT5C1TNQG12JB_001']
+  train=704024 nasap_val=539 maestro_val=13330 nasap_test(保留终评)=603 maestro_test(保留终评)=14934 other=1239(隔离/未知split,训练/验证/终评均不进)
+  PDMX 内容泄漏证书: PASS (train_unique=158510 refs=242)
+[NeMo I 2026-08-03 14:42:31 mixins:208] _setup_tokenizer: detected an aggregate tokenizer
+[NeMo I 2026-08-03 14:42:31 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1152 tokens
+[NeMo I 2026-08-03 14:42:31 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 14:42:31 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 14:42:31 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 14:42:31 mixins:347] Tokenizer SentencePieceTokenizer initialized with 1024 tokens
+[NeMo I 2026-08-03 14:42:31 aggregate_tokenizer:73] Aggregate vocab size: 5248
+[NeMo I 2026-08-03 14:42:33 save_restore_connector:285] Model EncDecMultiTaskModel was successfully restored from D:\vscode_projects\ee_download\canary-180m-flash.nemo.
+build_model: {'replaced_embeddings': 1, 'replaced_linears': 1, 'old_vocab': 5248, 'new_vocab': 8000, 'shared_weight_groups_untied': 1, 'removed_unique_params': 5379200, 'added_unique_params': 16392000, 'param_growth': 11012800, 'total_before': 182643840, 'total_after': 193656640, 'expected_total_after': 193656640, 'exact_param_count_ok': True} encoder_ok=True
+体检: tokenizer=8000 位置表最小=None
+  Embedding transf_decoder._embedding.token_embedding: 8000 × 1024
+  大 Linear transf_decoder._decoder.layers.0.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.1.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.2.third_sub_layer.dense_in: out=4096
+  大 Linear transf_decoder._decoder.layers.3.third_sub_layer.dense_in: out=4096
+  大 Linear log_softmax.mlp.layer0: out=8000
+  · Linear transf_decoder._decoder.layers.0.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.1.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.2.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+  · Linear transf_decoder._decoder.layers.3.third_sub_layer.dense_in: out=4096(FFN 隐层等非词表大层,不动它)
+--decode-abtest @ step 61200: beams=[1, 4], 同一确定性 nASAP 子集 n=4,domain=sample.domain,beam→greedy 回退=关
+  beam=1 1/4 ok=0 fallback=1 12.5s
+  beam=1 2/4 ok=0 fallback=1 11.9s
+  beam=1 3/4 ok=0 fallback=1 9.5s
+  beam=1 4/4 ok=0 fallback=1 11.7s
+  beam=4 1/4 ok=0 fallback=1 33.8s
+  beam=4 2/4 ok=0 fallback=1 34.0s
+  beam=4 3/4 ok=0 fallback=1 23.1s
+  beam=4 4/4 ok=0 fallback=1 32.4s
+decode-abtest @ step 61200;同子集 n=4;domain=sample.domain;beam→greedy 回退=关
+  beam=1: parseable=0/4 fallback=4 elapsed=45.6s 拒因:DYCK=4 TERMINAL=4 TS_PARSE=3 parse_error=3 TS_MISSING=2
+  beam=4: parseable=0/4 fallback=4 elapsed=123.4s 拒因:TS_PARSE=3 parse_error=3 DYCK=2 TERMINAL=2 MEASURE=1 TS_MISSING=1
+完成,逐样本证据=D:\vscode_projects\ee_download\Rubato\reports\DECODE_AB_STEP61200_DOMAIN.json;汇总追加=D:\vscode_projects\ee_download\Rubato\reports\eval_autolog.md

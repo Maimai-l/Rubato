@@ -4,7 +4,7 @@ import numpy as np
 sys.path.insert(0, ".")
 from rubato.model.infer import (
     split_audio, build_tast_prompt, strip_timestamps, truncate_after_20s,
-    validate_a2s, infer_a2s, _EMPTY_A2S,
+    validate_a2s, infer_a2s, single_window_tast, _EMPTY_A2S,
 )
 
 PASS = 0
@@ -68,6 +68,21 @@ class BrokenModel:
 # 会抛异常但 infer_a2s 应兜底返回合法谱
 result2 = infer_a2s(BrokenModel(), np.zeros(30*16000, dtype=np.float32), None)
 check("broken_returns_valid", not validate_a2s(result2), f"{result2}: {validate_a2s(result2)}")
+
+print("[9] beam 诊断可关闭 greedy 回退（生产缺省仍回退）")
+class InvalidBeamModel:
+    def __init__(self): self.beams = []
+    def generate(self, audio_window, prompt=None, num_beams=1):
+        self.beams.append(num_beams)
+        return "invalid"
+
+bm = InvalidBeamModel()
+single_window_tast(bm, np.zeros(1000, dtype=np.float32), sr, None,
+                   beam_size=4, fallback_greedy=False)
+check("diagnostic_no_greedy_fallback", bm.beams == [4], bm.beams)
+bm2 = InvalidBeamModel()
+single_window_tast(bm2, np.zeros(1000, dtype=np.float32), sr, None, beam_size=4)
+check("default_keeps_greedy_fallback", bm2.beams == [4, 1], bm2.beams)
 
 print(f"\n全部通过: {PASS} 项")
 print("注:single_window_infer 调 NeMo model.generate/transcribe 需 GPU,带三形态兜底+beam重试,")

@@ -1,0 +1,223 @@
+[NeMo W 2026-08-03 14:46:32 megatron_init:62] Megatron num_microbatches_calculator not found, using Apex version.
+W0803 14:46:32.313000 32092 site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
+OneLogger: Setting error_handling_strategy to DISABLE_QUIETLY_AND_REPORT_METRIC_ERROR for rank (rank=0) with OneLogger disabled. To override: explicitly set error_handling_strategy parameter.
+No exporters were provided. This means that no telemetry data will be collected.
+W0803 14:46:33.760000 32092 site-packages\torch\utils\flop_counter.py:29] triton not found; flop counting will not work for triton kernels
+[NeMo W 2026-08-03 14:46:34 modelPT:188] If you intend to do training or fine-tuning, please call the ModelPT.setup_training_data() method and provide a valid configuration file to setup the train data loader.
+    Train config :
+    use_lhotse: true
+    input_cfg: null
+    tarred_audio_filepaths: null
+    manifest_filepath: null
+    sample_rate: 16000
+    shuffle: true
+    num_workers: 8
+    pin_memory: true
+    prompt_format: canary2
+    max_tps: 25
+    max_duration: 40.0
+    text_field: answer
+    lang_field: target_lang
+    use_bucketing: true
+    bucket_duration_bins:
+    - - 3.56
+      - 30
+    - - 3.56
+      - 77
+    - - 4.608
+      - 38
+    - - 4.608
+      - 88
+    - - 5.48
+      - 49
+    - - 5.48
+      - 106
+    - - 6.05
+      - 52
+    - - 6.05
+      - 109
+    - - 6.85
+      - 54
+    - - 6.85
+      - 124
+    - - 7.914
+      - 59
+    - - 7.914
+      - 137
+    - - 8.52
+      - 67
+    - - 8.52
+      - 158
+    - - 9.51
+      - 67
+    - - 9.51
+      - 153
+    - - 10.29
+      - 78
+    - - 10.29
+      - 202
+    - - 10.89
+      - 88
+    - - 10.89
+      - 197
+    - - 11.45
+      - 92
+    - - 11.45
+      - 217
+    - - 12.1
+      - 98
+    - - 12.1
+      - 222
+    - - 12.69
+      - 123
+    - - 12.69
+      - 257
+    - - 13.09
+      - 133
+    - - 13.09
+      - 245
+    - - 13.57
+      - 104
+    - - 13.57
+      - 225
+    - - 14.02
+      - 108
+    - - 14.02
+      - 238
+    - - 14.53
+      - 117
+    - - 14.53
+      - 235
+    - - 15.08
+      - 135
+    - - 15.08
+      - 253
+    - - 15.53
+      - 130
+    - - 15.53
+      - 273
+    - - 15.945
+      - 123
+    - - 15.945
+      - 270
+    - - 16.4
+      - 126
+    - - 16.4
+      - 284
+    - - 16.9
+      - 126
+    - - 16.9
+      - 294
+    - - 17.44
+      - 127
+    - - 17.44
+      - 296
+    - - 17.96
+      - 131
+    - - 17.96
+      - 290
+    - - 18.41
+      - 133
+    - - 18.41
+      - 308
+    - - 18.91
+      - 137
+    - - 18.91
+      - 320
+    - - 19.42
+      - 135
+    - - 19.42
+      - 313
+    - - 20.0
+      - 138
+    - - 20.0
+      - 311
+    - - 34.547
+      - 195
+    - - 34.547
+      - 434
+    - - 40.0
+      - 263
+    - - 40.0
+      - 381
+    bucket_batch_size:
+    - 1044
+    - 835
+    - 786
+    - 662
+    - 662
+    - 558
+    - 594
+    - 501
+    - 534
+    - 450
+    - 465
+    - 391
+    - 417
+    - 342
+    - 378
+    - 318
+    - 340
+    - 271
+    - 322
+    - 258
+    - 295
+    - 248
+    - 284
+    - 234
+    - 250
+    - 210
+    - 250
+    - 210
+    - 250
+    - 210
+    - 241
+    - 203
+    - 232
+    - 196
+    - 216
+    - 187
+    - 207
+    - 174
+    - 207
+    - 174
+    - 199
+    - 163
+    - 194
+    - 163
+    - 188
+    - 158
+    - 186
+    - 156
+    - 172
+    - 145
+    - 173
+    - 142
+    - 167
+    - 140
+    - 160
+    - 135
+    - 86
+    - 74
+    - 70
+    - 64
+    bucket_buffer_size: 40000
+    shuffle_buffer_size: 10000
+    concurrent_bucketing: false
+    augmentor: null
+
+[NeMo W 2026-08-03 14:46:34 modelPT:195] If you intend to do validation, please call the ModelPT.setup_validation_data() or ModelPT.setup_multiple_validation_data() method and provide a valid configuration file to setup the validation data loader(s).
+    Validation config :
+    use_lhotse: true
+    prompt_format: canary2
+    manifest_filepath: /data/ASR/librispeech/test_other.json
+    sample_rate: 16000
+    batch_size: 32
+    shuffle: false
+    num_workers: 2
+    pin_memory: true
+    text_field: answer
+    lang_field: target_lang
+    tarred_audio_filepaths: null
+
+Error getting class at nemo.collections.asr.modules.transformer.get_nemo_transformer: Located non-class of type 'function' while loading 'nemo.collections.asr.modules.transformer.get_nemo_transformer'

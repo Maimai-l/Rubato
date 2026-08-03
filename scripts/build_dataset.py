@@ -950,8 +950,13 @@ def main():
                     help="D44 判定实验:同 ckpt/同样本/同解码,仅 prompt 变 —— G0 无域(现状)/"
                          "G1 real(与训练一致)/G2 synth(反向对照)。不训练,结果进 autolog。"
                          "判据预登记 EXPERIMENT_PROMPT.md")
+    ap.add_argument("--decode-abtest", action="store_true",
+                    help="同 ckpt/同确定性 nASAP 子集比较 greedy 与真实 beam；"
+                         "诊断时关闭 beam→greedy 静默回退，不训练")
+    ap.add_argument("--decode-abtest-beams", default="1,4",
+                    help="decode-abtest 的 beam 列表，逗号分隔（缺省 1,4）")
     ap.add_argument("--abtest-n", type=int, default=48,
-                    help="prompt-abtest 每臂样本数(与 eval 同源的确定性 nasap 子集)")
+                    help="prompt/decode abtest 每臂样本数(与 eval 同源的确定性 nasap 子集)")
     ap.add_argument("--prefetch", type=int, default=0,
                     help="【实验性,默认关】预取批深度。线程版/进程版两次实测均为负收益"
                          "(D40/D41:串行 10.5s/步 → 18s/步),默认 0=串行直迭代(已知好)。"
@@ -1188,6 +1193,142 @@ def main():
             fh.write(f"\n## probe-only 三源探针 @ step {step0} "
                      f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n" + "\n".join(lines) + "\n")
         print(f"完成,证据已落盘 {autolog} —— git add + commit + push;训练继续保持暂停。")
+        return
+
+    if args.decode_abtest:
+        # 同权重、同音频、同 prompt、同验证器，只改变 beam。诊断时必须关闭
+        # beam→greedy 自动回退，否则 B 臂失败样本混入 A 臂会造成假阴性。
+        import copy
+        import gc
+        import json
+        import time as _time
+        import torch
+        from rubato.intermo.core import text_to_units, validate_units
+        from rubato.model.evaluate import text_ned
+        import rubato.model.infer as _inf
+        from rubato.model.infer import infer_a2s, _EMPTY_A2S
+        from rubato.model.train import _eval_subset, _sample_audio, viol_tally
+
+        try:
+            beams = [int(x.strip()) for x in args.decode_abtest_beams.split(",")
+                     if x.strip()]
+        except ValueError as e:
+            raise ValueError("--decode-abtest-beams 必须是逗号分隔的正整数") from e
+        if not beams or any(x < 1 for x in beams):
+            raise ValueError("--decode-abtest-beams 必须至少含一个正整数")
+        beams = list(dict.fromkeys(beams))
+
+        last = runtime_ckpt_dir / "last.pt"
+        if not last.exists():
+            raise FileNotFoundError(f"--decode-abtest 需要现有 checkpoint: {last}")
+        snap = torch.load(str(last), map_location="cpu")
+        model.load_state_dict(snap["model"])
+        step0 = int(snap.get("step", 0))
+        del snap
+        gc.collect()
+        if torch.cuda.is_available() and not args.cpu:
+            model = model.cuda()
+        model.eval()
+
+        subset = _eval_subset(nasap_val, int(args.abtest_n))
+        result = {
+            "experiment": "decode_beam_ab",
+            "checkpoint": str(last),
+            "step": step0,
+            "n_requested": int(args.abtest_n),
+            "n_subset": len(subset),
+            "fallback_greedy": False,
+            "domain_prompt": "sample.domain (与正式 eval 一致)",
+            "beams": beams,
+            "arms": [],
+        }
+        print(f"--decode-abtest @ step {step0}: beams={beams}, "
+              f"同一确定性 nASAP 子集 n={len(subset)},"
+              "domain=sample.domain,beam→greedy 回退=关", flush=True)
+
+        with torch.no_grad():
+            for beam in beams:
+                started = _time.perf_counter()
+                n_ok = n_fb = n_seen = 0
+                neds = []
+                entries = []
+                samples = []
+                for si, sample in enumerate(subset):
+                    audio = _sample_audio(sample)
+                    if audio is None:
+                        continue
+                    n_seen += 1
+                    one_started = _time.perf_counter()
+                    pred = infer_a2s(model, audio, tok, beam_size=beam,
+                                     domain=sample.get("domain"),
+                                     fallback_greedy=False)
+                    elapsed = _time.perf_counter() - one_started
+                    stats = copy.deepcopy(getattr(_inf, "LAST_INFER_STATS", {}) or {})
+                    tv = list(getattr(_inf, "LAST_VIOLS", []) or [])
+                    fb = bool(stats.get("fallback")) or pred == _EMPTY_A2S
+                    try:
+                        viol = validate_units(text_to_units(pred)) if pred else ["empty"]
+                    except Exception as e:
+                        viol = [f"parse_error:{type(e).__name__}"]
+                    ok = (not fb) and not viol
+                    n_ok += int(ok)
+                    n_fb += int(fb)
+                    entries.append((False, []) if ok else (fb and not tv, tv or viol))
+                    ref = (labels.get(sample.get("utt_id"), {}) or {}).get("A2S") or ""
+                    ned = text_ned(pred, ref) if ok and ref else None
+                    if ned is not None:
+                        neds.append(ned)
+                    samples.append({
+                        "index": si,
+                        "utt_id": sample.get("utt_id"),
+                        "domain": sample.get("domain"),
+                        "audio_s": round(len(audio) / 16000.0, 3),
+                        "elapsed_s": round(elapsed, 3),
+                        "parseable": ok,
+                        "fallback": fb,
+                        "violations": (tv or viol)[:12],
+                        "infer_stats": stats,
+                        "gen_stats": copy.deepcopy(getattr(_inf, "LAST_GEN_STATS", None)),
+                        "decode_debug": copy.deepcopy(getattr(_inf, "LAST_DECODE_DEBUG", None)),
+                        "ned": ned,
+                        "prediction_prefix": pred[:320],
+                    })
+                    print(f"  beam={beam} {si + 1}/{len(subset)} "
+                          f"ok={int(ok)} fallback={int(fb)} {elapsed:.1f}s", flush=True)
+                tally = viol_tally(entries)
+                result["arms"].append({
+                    "beam_size": beam,
+                    "n_seen": n_seen,
+                    "n_parseable": n_ok,
+                    "parseable_rate": n_ok / max(n_seen, 1),
+                    "n_fallback": n_fb,
+                    "elapsed_s": round(_time.perf_counter() - started, 3),
+                    "ned_median": (sorted(neds)[len(neds) // 2] if neds else None),
+                    "n_ned": len(neds),
+                    "violation_tally": tally,
+                    "samples": samples,
+                })
+
+        out = (Path(__file__).resolve().parents[1] / "reports" /
+               f"DECODE_AB_STEP{step0}_DOMAIN.json")
+        out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        lines = [f"decode-abtest @ step {step0};同子集 n={len(subset)};"
+                 "domain=sample.domain;beam→greedy 回退=关"]
+        for arm in result["arms"]:
+            rejects = " ".join(
+                f"{k}={v}" for k, v in sorted(
+                    arm["violation_tally"].items(), key=lambda kv: (-kv[1], kv[0])))
+            lines.append(
+                f"  beam={arm['beam_size']}: parseable={arm['n_parseable']}/"
+                f"{arm['n_seen']} fallback={arm['n_fallback']} "
+                f"elapsed={arm['elapsed_s']:.1f}s 拒因:{rejects}")
+        for line in lines:
+            print(line, flush=True)
+        with open(runtime_eval_autolog, "a", encoding="utf-8") as fh:
+            fh.write(f"\n## decode-abtest @ step {step0} "
+                     f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n"
+                     + "\n".join(lines) + "\n")
+        print(f"完成,逐样本证据={out};汇总追加={runtime_eval_autolog}", flush=True)
         return
 
     if args.prompt_abtest:

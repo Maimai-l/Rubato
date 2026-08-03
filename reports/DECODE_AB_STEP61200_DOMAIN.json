@@ -1,0 +1,788 @@
+{
+  "experiment": "decode_beam_ab",
+  "checkpoint": "D:\\vscode_projects\\ee_download\\outputs\\ckpt\\last.pt",
+  "step": 61200,
+  "n_requested": 4,
+  "n_subset": 4,
+  "fallback_greedy": false,
+  "domain_prompt": "sample.domain (与正式 eval 一致)",
+  "beams": [
+    1,
+    4
+  ],
+  "arms": [
+    {
+      "beam_size": 1,
+      "n_seen": 4,
+      "n_parseable": 0,
+      "parseable_rate": 0.0,
+      "n_fallback": 4,
+      "elapsed_s": 45.57,
+      "ned_median": null,
+      "n_ned": 0,
+      "violation_tally": {
+        "DYCK": 4,
+        "parse_error": 3,
+        "TERMINAL": 4,
+        "TS_PARSE": 3,
+        "TS_MISSING": 2
+      },
+      "samples": [
+        {
+          "index": 0,
+          "utt_id": "nasap_Bult-ItoS02M_171360e0_004",
+          "domain": "real",
+          "audio_s": 36.641,
+          "elapsed_s": 12.455,
+          "parseable": false,
+          "fallback": true,
+          "violations": [
+            "DYCK_DOUBLE_ONSET:('PR', SPitch(step='F', alter=0, octave=4))@11/4",
+            "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='D', alter=-1, octave=4))@29/8",
+            "DYCK_DOUBLE_ONSET:('PR', SPitch(step='D', alter=-1, octave=4))@39/8",
+            "DYCK_ORPHAN_OFFSET:('PR', SPitch(step='D', alter=-1, octave=4))@59/8",
+            "DYCK_ORPHAN_OFFSET:('PR', SPitch(step='D', alter=-1, octave=4))@43/4",
+            "DYCK_ORPHAN_OFFSET:('PR', SPitch(step='D', alter=-1, octave=4))@93/8",
+            "DYCK_ORPHAN_OFFSET:('PR', SPitch(step='D', alter=-1, octave=4))@12",
+            "DYCK_ORPHAN_OFFSET:('PR', SPitch(step='D', alter=-1, octave=4))@105/8",
+            "DYCK_UNCLOSED:[('PL', SPitch(step='A', alter=-1, octave=2)), ('PL', SPitch(step='E', alter=-1, octave=3)), ('PR', SPitch(step='D', alter=-1, octave=4))]",
+            "TERMINAL_BAR_MISSING",
+            "TS_MISSING:125",
+            "parse_error:ParseError"
+          ],
+          "infer_stats": {
+            "status": "all_windows_failed",
+            "fallback": true,
+            "n_windows": 2,
+            "n_failed_windows": 2,
+            "window_failures": [
+              {
+                "window": 0,
+                "start_s": 0.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "DYCK_DOUBLE_ONSET:('PR', SPitch(step='F', alter=0, octave=4))@11/4",
+                    "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='D', alter=-1, octave=4))@29/8",
+                    "DYCK_DOUBLE_ONSET:('PR', SPitch(step='D', alter=-1, octave=4))@39/8",
+                    "DYCK_ORPHAN_OFFSET:('PR', SPitch(step='D', alter=-1, octave=4))@59/8"
+                  ],
+                  "raw": "|6/8k-4PL:C3E-3C4PR:A-4 <|0.02|> 1/8a-4C5 <|0.42|> 1/8c5F5 <|0.75|> 1/8f5E5 <|1.02|> 1/8PL:c3e-3c4F3A-3C4PR:e5F5 <|1.44|> 1/8f5C5 <|1.84|> 1/8c5B-4 <|2.15|> 1/8b-4A-4 <|2.39|> 1/8PL:f3a-3c4PR:a-4 <|2.62|> |6/8k-4PL:F3D-4PR:D-5 <|2.62|> 1/8d-5A-4 <|2.98|> 1/8a-4G4 <|3.23|> 1/8g4B-4 <|3.51|> 1/8PL:f3d-4G3D-4PR:b-4E4 <|3.",
+                  "truncated": "|6/8k-4PL:C3E-3C4PR:A-4 <|0.02|> 1/8a-4C5 <|0.42|> 1/8c5F5 <|0.75|> 1/8f5E5 <|1.02|> 1/8PL:c3e-3c4F3",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 1
+                  }
+                }
+              },
+              {
+                "window": 1,
+                "start_s": 20.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "parse_error:ParseError",
+                    "TS_PARSE:ParseError"
+                  ],
+                  "raw": "|4/2k-1PL:B-2D3F3 <|0.02|> 1/8b-2d3f3G2G3 <|0.48|> 1/8g3D4 <|0.79|> 1/8d4B-3 <|1.02|> 1/8b-3C4 <|1.33|> 1/8c4G3 <|1.65|> 1/8g3B-3 <|1.95|> 1/8b-3C4 <|2.28|> 1/8c4E4 <|2.62|> 1/8e4F4 <|2.98|> 1/8f4 <|3.26|> |4/2k-1PL:F2A3C4PR:F4 <|3.26|> 1/8PL:f2a3c4F2A3C4 <|3.63|> 1/8f2a3c4F2A3C4 <|4.02|> 1/8f2a3c4F2A3C4 <|4.36|> 1/8f2",
+                  "truncated": "|4/2k-1PL:B-2D3F3 <|0.02|> 1/8b-2d3f3G2G3 <|0.48|> 1/8g3D4 <|0.79|> 1/8d4B-3 <|1.02|> 1/8b-3C4 <|1.3",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 1
+                  }
+                }
+              }
+            ]
+          },
+          "gen_stats": {
+            "n_new": 900,
+            "stop": "cap",
+            "fast": true,
+            "beam_size": 1
+          },
+          "decode_debug": {
+            "stage": "validate_reject",
+            "viol": [
+              "parse_error:ParseError",
+              "TS_PARSE:ParseError"
+            ],
+            "raw": "|4/2k-1PL:B-2D3F3 <|0.02|> 1/8b-2d3f3G2G3 <|0.48|> 1/8g3D4 <|0.79|> 1/8d4B-3 <|1.02|> 1/8b-3C4 <|1.33|> 1/8c4G3 <|1.65|> 1/8g3B-3 <|1.95|> 1/8b-3C4 <|2.28|> 1/8c4E4 <|2.62|> 1/8e4F4 <|2.98|> 1/8f4 <|3.26|> |4/2k-1PL:F2A3C4PR:F4 <|3.26|> 1/8PL:f2a3c4F2A3C4 <|3.63|> 1/8f2a3c4F2A3C4 <|4.02|> 1/8f2a3c4F2A3C4 <|4.36|> 1/8f2",
+            "truncated": "|4/2k-1PL:B-2D3F3 <|0.02|> 1/8b-2d3f3G2G3 <|0.48|> 1/8g3D4 <|0.79|> 1/8d4B-3 <|1.02|> 1/8b-3C4 <|1.3",
+            "gen": {
+              "n_new": 900,
+              "stop": "cap",
+              "fast": true,
+              "beam_size": 1
+            }
+          },
+          "ned": null,
+          "prediction_prefix": "|4/4k0"
+        },
+        {
+          "index": 1,
+          "utt_id": "nasap_Hou01M_adeab67f_001",
+          "domain": "real",
+          "audio_s": 39.207,
+          "elapsed_s": 11.853,
+          "parseable": false,
+          "fallback": true,
+          "violations": [
+            "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='E', alter=1, octave=3))@5/2",
+            "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='E', alter=1, octave=3))@23/8",
+            "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='E', alter=1, octave=3))@57/16",
+            "DYCK_UNCLOSED:[('PL', SPitch(step='E', alter=1, octave=3)), ('PL', SPitch(step='G', alter=1, octave=3)), ('PR', SPitch(step='A', alter=1, octave=4))]",
+            "TERMINAL_BAR_MISSING",
+            "TS_MISSING:173",
+            "DYCK_DOUBLE_ONSET:('PL', SPitch(step='F', alter=1, octave=3))@21/2",
+            "DYCK_DOUBLE_ONSET:('PL', SPitch(step='F', alter=1, octave=3))@119/8",
+            "DYCK_UNCLOSED:[('PL', SPitch(step='G', alter=1, octave=3))]",
+            "TERMINAL_BAR_MISSING"
+          ],
+          "infer_stats": {
+            "status": "all_windows_failed",
+            "fallback": true,
+            "n_windows": 2,
+            "n_failed_windows": 2,
+            "window_failures": [
+              {
+                "window": 0,
+                "start_s": 0.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='E', alter=1, octave=3))@5/2",
+                    "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='E', alter=1, octave=3))@23/8",
+                    "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='E', alter=1, octave=3))@57/16",
+                    "DYCK_UNCLOSED:[('PL', SPitch(step='E', alter=1, octave=3)), ('PL', SPitch(step='G', alter=1, octave=3)), ('PR', SPitch(step='A', alter=1, octave=4))]"
+                  ],
+                  "raw": "|3/4k#3PL:B3PR:D#5 <|0.01|> 1/16PL:b3D#4PR:d#5E5 <|0.21|> 1/16PL:d#4B2PR:e5D#5 <|0.34|> 1/16PL:b2F#3PR:d#5C#5 <|0.50|> 1/16PL:f#3B3PR:c#5B4 <|0.58|> 1/16PL:b3C#4PR:b4A#4 <|0.75|> 1/16PL:c#4B3PR:a#4G#4 <|0.91|> 1/16g#4F#4 <|1.05|> 1/16PL:b3A#3PR:f#4E#4 <|1.20|> 1/16PL:a#3C#4PR:e#4C#4 <|1.36|> 1/16PL:c#4G#3PR:c#4E#4 <|1.",
+                  "truncated": "|3/4k#3PL:B3PR:D#5 <|0.01|> 1/16PL:b3D#4PR:d#5E5 <|0.21|> 1/16PL:d#4B2PR:e5D#5 <|0.34|> 1/16PL:b2F#3",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 1
+                  }
+                }
+              },
+              {
+                "window": 1,
+                "start_s": 20.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "DYCK_DOUBLE_ONSET:('PL', SPitch(step='F', alter=1, octave=3))@21/2",
+                    "DYCK_DOUBLE_ONSET:('PL', SPitch(step='F', alter=1, octave=3))@119/8",
+                    "DYCK_UNCLOSED:[('PL', SPitch(step='G', alter=1, octave=3))]",
+                    "TERMINAL_BAR_MISSING"
+                  ],
+                  "raw": "|6/4k#6PL:B3 <|0.02|> 1/8b3G#3 <|0.21|> 1/8g#3F#3 <|0.38|> 1/8f#3G#3 <|0.54|> 1/8g#3A#3 <|0.72|> 1/8a#3B3 <|0.89|> 1/8b3A#3 <|1.06|> 1/8a#3G#3 <|1.20|> 1/8g#3F#3 <|1.36|> 1/8f#3E3 <|1.52|> 1/8e3 <|1.68|> |6/4k#6B2 <|1.68|> 1/8b2F#3 <|1.85|> 1/8f#3G#3 <|1.95|> 1/8g#3F#3 <|2.11|> 1/8f#3G#3 <|2.23|> 1/8g#3F#3 <|2.39|> 1/8",
+                  "truncated": "|6/4k#6PL:B3 <|0.02|> 1/8b3G#3 <|0.21|> 1/8g#3F#3 <|0.38|> 1/8f#3G#3 <|0.54|> 1/8g#3A#3 <|0.72|> 1/8",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 1
+                  }
+                }
+              }
+            ]
+          },
+          "gen_stats": {
+            "n_new": 900,
+            "stop": "cap",
+            "fast": true,
+            "beam_size": 1
+          },
+          "decode_debug": {
+            "stage": "validate_reject",
+            "viol": [
+              "DYCK_DOUBLE_ONSET:('PL', SPitch(step='F', alter=1, octave=3))@21/2",
+              "DYCK_DOUBLE_ONSET:('PL', SPitch(step='F', alter=1, octave=3))@119/8",
+              "DYCK_UNCLOSED:[('PL', SPitch(step='G', alter=1, octave=3))]",
+              "TERMINAL_BAR_MISSING"
+            ],
+            "raw": "|6/4k#6PL:B3 <|0.02|> 1/8b3G#3 <|0.21|> 1/8g#3F#3 <|0.38|> 1/8f#3G#3 <|0.54|> 1/8g#3A#3 <|0.72|> 1/8a#3B3 <|0.89|> 1/8b3A#3 <|1.06|> 1/8a#3G#3 <|1.20|> 1/8g#3F#3 <|1.36|> 1/8f#3E3 <|1.52|> 1/8e3 <|1.68|> |6/4k#6B2 <|1.68|> 1/8b2F#3 <|1.85|> 1/8f#3G#3 <|1.95|> 1/8g#3F#3 <|2.11|> 1/8f#3G#3 <|2.23|> 1/8g#3F#3 <|2.39|> 1/8",
+            "truncated": "|6/4k#6PL:B3 <|0.02|> 1/8b3G#3 <|0.21|> 1/8g#3F#3 <|0.38|> 1/8f#3G#3 <|0.54|> 1/8g#3A#3 <|0.72|> 1/8",
+            "gen": {
+              "n_new": 900,
+              "stop": "cap",
+              "fast": true,
+              "beam_size": 1
+            }
+          },
+          "ned": null,
+          "prediction_prefix": "|4/4k0"
+        },
+        {
+          "index": 2,
+          "utt_id": "nasap_WangA01M_75e19e2f_006",
+          "domain": "real",
+          "audio_s": 35.726,
+          "elapsed_s": 9.528,
+          "parseable": false,
+          "fallback": true,
+          "violations": [
+            "DYCK_UNCLOSED:[('PR', SPitch(step='E', alter=-1, octave=5))]",
+            "TERMINAL_BAR_MISSING",
+            "parse_error:ParseError",
+            "TS_PARSE:ParseError"
+          ],
+          "infer_stats": {
+            "status": "all_windows_failed",
+            "fallback": true,
+            "n_windows": 2,
+            "n_failed_windows": 2,
+            "window_failures": [
+              {
+                "window": 0,
+                "start_s": 0.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "DYCK_UNCLOSED:[('PR', SPitch(step='E', alter=-1, octave=5))]",
+                    "TERMINAL_BAR_MISSING"
+                  ],
+                  "raw": "|6/4k-6PL:F3A-3F4PR:A-4 <|0.02|> 1/8a-4C5 <|0.42|> 1/8c5B-4 <|0.85|> 1/8b-4D-5 <|1.15|> 1/8PL:f3a-3f4G3B-3E4PR:d-5D-5 <|1.57|> 1/8d-5C5 <|1.95|> 1/8c5B-4 <|2.28|> 1/8PL:g3b-3e4F3A-3C4PR:b-4A-4 <|2.62|> 1/8a-4G5 <|2.98|> 1/8g5F5 <|3.41|> 1/8PL:f3a-3c4PR:f5 <|3.73|> |6/4k-6PL:E3A-3B3PR:A-4 <|3.73|> 1/8a-4A-4 <|4.05|> 1/8",
+                  "truncated": "|6/4k-6PL:F3A-3F4PR:A-4 <|0.02|> 1/8a-4C5 <|0.42|> 1/8c5B-4 <|0.85|> 1/8b-4D-5 <|1.15|> 1/8PL:f3a-3f",
+                  "gen": {
+                    "n_new": 632,
+                    "stop": "eot",
+                    "fast": true,
+                    "beam_size": 1
+                  }
+                }
+              },
+              {
+                "window": 1,
+                "start_s": 20.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "parse_error:ParseError",
+                    "TS_PARSE:ParseError"
+                  ],
+                  "raw": "|6/4k-6PL:F2F3PR:A3F4 2/4PL:f2f3PR:a3f4 |6/4k-6PL:F2F3PR:A3F4 2/4PL:f2f3PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4k-6PL:f2PR:a3f4 2/4PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4k-",
+                  "truncated": "|6/4k-6PL:F2F3PR:A3F4 2/4PL:f2f3PR:a3f4 |6/4k-6PL:F2F3PR:A3F4 2/4PL:f2f3PR:a3f4 |6/4k-6PL:F2PR:A3F4 ",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 1
+                  }
+                }
+              }
+            ]
+          },
+          "gen_stats": {
+            "n_new": 900,
+            "stop": "cap",
+            "fast": true,
+            "beam_size": 1
+          },
+          "decode_debug": {
+            "stage": "validate_reject",
+            "viol": [
+              "parse_error:ParseError",
+              "TS_PARSE:ParseError"
+            ],
+            "raw": "|6/4k-6PL:F2F3PR:A3F4 2/4PL:f2f3PR:a3f4 |6/4k-6PL:F2F3PR:A3F4 2/4PL:f2f3PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4k-6PL:f2PR:a3f4 2/4PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4PL:f2PR:a3f4 |6/4k-6PL:F2PR:A3F4 2/4k-",
+            "truncated": "|6/4k-6PL:F2F3PR:A3F4 2/4PL:f2f3PR:a3f4 |6/4k-6PL:F2F3PR:A3F4 2/4PL:f2f3PR:a3f4 |6/4k-6PL:F2PR:A3F4 ",
+            "gen": {
+              "n_new": 900,
+              "stop": "cap",
+              "fast": true,
+              "beam_size": 1
+            }
+          },
+          "ned": null,
+          "prediction_prefix": "|4/4k0"
+        },
+        {
+          "index": 3,
+          "utt_id": "nasap_LeeN01M_ad221e3a_004",
+          "domain": "real",
+          "audio_s": 35.639,
+          "elapsed_s": 11.703,
+          "parseable": false,
+          "fallback": true,
+          "violations": [
+            "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='E', alter=-1, octave=3))@13/4",
+            "DYCK_DOUBLE_ONSET:('PR', SPitch(step='A', alter=-1, octave=4))@39/8",
+            "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=-1, octave=4))@43/4",
+            "DYCK_DOUBLE_ONSET:('PR', SPitch(step='A', alter=-1, octave=4))@87/8",
+            "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=-1, octave=4))@47/4",
+            "DYCK_DOUBLE_ONSET:('PR', SPitch(step='A', alter=-1, octave=4))@95/8",
+            "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=-1, octave=4))@51/4",
+            "DYCK_DOUBLE_ONSET:('PR', SPitch(step='A', alter=-1, octave=4))@51/4",
+            "DYCK_UNCLOSED:[('PL', SPitch(step='C', alter=0, octave=3)), ('PR', SPitch(step='A', alter=-1, octave=4))]",
+            "TERMINAL_BAR_MISSING",
+            "parse_error:ParseError",
+            "TS_PARSE:ParseError"
+          ],
+          "infer_stats": {
+            "status": "all_windows_failed",
+            "fallback": true,
+            "n_windows": 2,
+            "n_failed_windows": 2,
+            "window_failures": [
+              {
+                "window": 0,
+                "start_s": 0.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='E', alter=-1, octave=3))@13/4",
+                    "DYCK_DOUBLE_ONSET:('PR', SPitch(step='A', alter=-1, octave=4))@39/8",
+                    "DYCK_ORPHAN_OFFSET:('PL', SPitch(step='A', alter=-1, octave=4))@43/4",
+                    "DYCK_DOUBLE_ONSET:('PR', SPitch(step='A', alter=-1, octave=4))@87/8"
+                  ],
+                  "raw": "|6/8k-4PL:E-3PR:A-4E-5 <|0.02|> 1/8PL:e-3F3PR:a-4e-5D-5 <|0.42|> 1/8PL:f3D-3PR:d-5C-5 <|0.67|> 1/8PL:d-3D-3PR:c-5B-4 <|0.97|> 1/8PL:d-3E-3PR:b-4A-4 <|1.25|> 1/8PL:e-3PR:a-4 <|1.52|> |6/8k-4PL:E-3PR:G4 <|1.52|> 1/8PL:e-3E-3PR:g4A-4 <|1.78|> 1/8PL:e-3E-3PR:a-4G4 <|2.06|> 1/8PL:e-3E-3PR:g4A-4 <|2.31|> 1/8PL:e-3E-3PR:a-4B-",
+                  "truncated": "|6/8k-4PL:E-3PR:A-4E-5 <|0.02|> 1/8PL:e-3F3PR:a-4e-5D-5 <|0.42|> 1/8PL:f3D-3PR:d-5C-5 <|0.67|> 1/8PL",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 1
+                  }
+                }
+              },
+              {
+                "window": 1,
+                "start_s": 20.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "parse_error:ParseError",
+                    "TS_PARSE:ParseError"
+                  ],
+                  "raw": "|4/4k-3PL:E-3PR:E-4 <|0.02|> 1/8e-4D-4 <|0.48|> 1/8PL:e-3F3PR:d-4D-4 <|0.91|> 1/8PL:f3A-3PR:d-4C4 <|1.33|> 1/8c4D-4 <|1.77|> 1/8PL:a-3A-2E-3PR:d-4C4 <|2.16|> 1/8PL:a-2e-3A-2E-3PR:c4C4 <|2.61|> 1/8PL:a-2e-3A-2E-3PR:c4C4 |4/4k-3PL:a-2e-3A-2E-3PR:c4C4 5/4PL:a-2e-3PR:c4 |4k-3PL:A-2E-3PR:C4A-4 5/4PL:a-2e-3PR:c4a-4 |4k-3PL:A",
+                  "truncated": "|4/4k-3PL:E-3PR:E-4 <|0.02|> 1/8e-4D-4 <|0.48|> 1/8PL:e-3F3PR:d-4D-4 <|0.91|> 1/8PL:f3A-3PR:d-4C4 <|",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 1
+                  }
+                }
+              }
+            ]
+          },
+          "gen_stats": {
+            "n_new": 900,
+            "stop": "cap",
+            "fast": true,
+            "beam_size": 1
+          },
+          "decode_debug": {
+            "stage": "validate_reject",
+            "viol": [
+              "parse_error:ParseError",
+              "TS_PARSE:ParseError"
+            ],
+            "raw": "|4/4k-3PL:E-3PR:E-4 <|0.02|> 1/8e-4D-4 <|0.48|> 1/8PL:e-3F3PR:d-4D-4 <|0.91|> 1/8PL:f3A-3PR:d-4C4 <|1.33|> 1/8c4D-4 <|1.77|> 1/8PL:a-3A-2E-3PR:d-4C4 <|2.16|> 1/8PL:a-2e-3A-2E-3PR:c4C4 <|2.61|> 1/8PL:a-2e-3A-2E-3PR:c4C4 |4/4k-3PL:a-2e-3A-2E-3PR:c4C4 5/4PL:a-2e-3PR:c4 |4k-3PL:A-2E-3PR:C4A-4 5/4PL:a-2e-3PR:c4a-4 |4k-3PL:A",
+            "truncated": "|4/4k-3PL:E-3PR:E-4 <|0.02|> 1/8e-4D-4 <|0.48|> 1/8PL:e-3F3PR:d-4D-4 <|0.91|> 1/8PL:f3A-3PR:d-4C4 <|",
+            "gen": {
+              "n_new": 900,
+              "stop": "cap",
+              "fast": true,
+              "beam_size": 1
+            }
+          },
+          "ned": null,
+          "prediction_prefix": "|4/4k0"
+        }
+      ]
+    },
+    {
+      "beam_size": 4,
+      "n_seen": 4,
+      "n_parseable": 0,
+      "parseable_rate": 0.0,
+      "n_fallback": 4,
+      "elapsed_s": 123.355,
+      "ned_median": null,
+      "n_ned": 0,
+      "violation_tally": {
+        "DYCK": 2,
+        "TS_PARSE": 3,
+        "parse_error": 3,
+        "TERMINAL": 2,
+        "TS_MISSING": 1,
+        "MEASURE": 1
+      },
+      "samples": [
+        {
+          "index": 0,
+          "utt_id": "nasap_Bult-ItoS02M_171360e0_004",
+          "domain": "real",
+          "audio_s": 36.641,
+          "elapsed_s": 33.776,
+          "parseable": false,
+          "fallback": true,
+          "violations": [
+            "DYCK_UNCLOSED:[('PL', SPitch(step='B', alter=-1, octave=3)), ('PL', SPitch(step='G', alter=0, octave=3)), ('PR', SPitch(step='A', alter=-1, octave=3))]",
+            "TERMINAL_BAR_MISSING",
+            "parse_error:ParseError",
+            "TS_PARSE:ParseError"
+          ],
+          "infer_stats": {
+            "status": "all_windows_failed",
+            "fallback": true,
+            "n_windows": 2,
+            "n_failed_windows": 2,
+            "window_failures": [
+              {
+                "window": 0,
+                "start_s": 0.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "DYCK_UNCLOSED:[('PL', SPitch(step='B', alter=-1, octave=3)), ('PL', SPitch(step='G', alter=0, octave=3)), ('PR', SPitch(step='A', alter=-1, octave=3))]",
+                    "TERMINAL_BAR_MISSING"
+                  ],
+                  "raw": "|12/8k-3PL:C3E-3C4PR:A-4 <|0.02|> 1/8a-4C5 <|0.40|> 1/8c5F5 <|0.63|> 1/8f5E5 <|0.87|> 1/8PL:c3e-3c4F3A-3C4PR:e5F5 <|1.27|> 1/8f5C5 <|1.66|> 1/8c5B-4 <|1.95|> 1/8b-4A-4 <|2.20|> 1/8PL:f3a-3c4F3B-3D-4PR:a-4D-5 <|2.54|> 1/8d-5A-4 <|2.77|> 1/8a-4G4 <|3.05|> 1/8g4B-4 <|3.36|> 1/8PL:f3b-3d-4PR:b-4 <|3.66|> |12/8k-3PL:G3B-3E4",
+                  "truncated": "|12/8k-3PL:C3E-3C4PR:A-4 <|0.02|> 1/8a-4C5 <|0.40|> 1/8c5F5 <|0.63|> 1/8f5E5 <|0.87|> 1/8PL:c3e-3c4F",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 4
+                  }
+                }
+              },
+              {
+                "window": 1,
+                "start_s": 20.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "parse_error:ParseError",
+                    "TS_PARSE:ParseError"
+                  ],
+                  "raw": "|12/8k-1PL:F2C3F3PR:A3 <|0.14|> 1/8PL:f2c3f3G2C3G3PR:a3D4 <|0.79|> 1/8PL:g2c3g3B-2F3B-3PR:d4B-3 2/8b-3C4 348c4G4 341/48g4B-3 348b-3C4 341/48c4E4 348e4F4 341/48PL:b-2f3b-3PR:f4 |12/4k-1PL:F2C3F3A3PR:C4F4 9/48PL:f2c3f3a3F2C3F3A3PR:c4C4F4 341/48PL:f2c3f3a3PR:c4f4 |12/4k-1PL:F2C3F3A3PR:C4F4 9/48PL:f2c3f3a3PR:c4f4 |1/4k-1PL",
+                  "truncated": "|12/8k-1PL:F2C3F3PR:A3 <|0.14|> 1/8PL:f2c3f3G2C3G3PR:a3D4 <|0.79|> 1/8PL:g2c3g3B-2F3B-3PR:d4B-3 2/8b",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 4
+                  }
+                }
+              }
+            ]
+          },
+          "gen_stats": {
+            "n_new": 900,
+            "stop": "cap",
+            "fast": true,
+            "beam_size": 4
+          },
+          "decode_debug": {
+            "stage": "validate_reject",
+            "viol": [
+              "parse_error:ParseError",
+              "TS_PARSE:ParseError"
+            ],
+            "raw": "|12/8k-1PL:F2C3F3PR:A3 <|0.14|> 1/8PL:f2c3f3G2C3G3PR:a3D4 <|0.79|> 1/8PL:g2c3g3B-2F3B-3PR:d4B-3 2/8b-3C4 348c4G4 341/48g4B-3 348b-3C4 341/48c4E4 348e4F4 341/48PL:b-2f3b-3PR:f4 |12/4k-1PL:F2C3F3A3PR:C4F4 9/48PL:f2c3f3a3F2C3F3A3PR:c4C4F4 341/48PL:f2c3f3a3PR:c4f4 |12/4k-1PL:F2C3F3A3PR:C4F4 9/48PL:f2c3f3a3PR:c4f4 |1/4k-1PL",
+            "truncated": "|12/8k-1PL:F2C3F3PR:A3 <|0.14|> 1/8PL:f2c3f3G2C3G3PR:a3D4 <|0.79|> 1/8PL:g2c3g3B-2F3B-3PR:d4B-3 2/8b",
+            "gen": {
+              "n_new": 900,
+              "stop": "cap",
+              "fast": true,
+              "beam_size": 4
+            }
+          },
+          "ned": null,
+          "prediction_prefix": "|4/4k0"
+        },
+        {
+          "index": 1,
+          "utt_id": "nasap_Hou01M_adeab67f_001",
+          "domain": "real",
+          "audio_s": 39.207,
+          "elapsed_s": 33.995,
+          "parseable": false,
+          "fallback": true,
+          "violations": [
+            "DYCK_DOUBLE_ONSET:('PL', SPitch(step='A', alter=1, octave=3))@11/8",
+            "DYCK_UNCLOSED:[('PL', SPitch(step='G', alter=1, octave=3)), ('PR', SPitch(step='C', alter=1, octave=5))]",
+            "TERMINAL_BAR_MISSING",
+            "TS_MISSING:175",
+            "DYCK_DOUBLE_ONSET:('PL', SPitch(step='D', alter=1, octave=3))@29/4",
+            "DYCK_UNCLOSED:[('PL', SPitch(step='F', alter=1, octave=3))]",
+            "TERMINAL_BAR_MISSING",
+            "TS_MISSING:171"
+          ],
+          "infer_stats": {
+            "status": "all_windows_failed",
+            "fallback": true,
+            "n_windows": 2,
+            "n_failed_windows": 2,
+            "window_failures": [
+              {
+                "window": 0,
+                "start_s": 0.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "DYCK_DOUBLE_ONSET:('PL', SPitch(step='A', alter=1, octave=3))@11/8",
+                    "DYCK_UNCLOSED:[('PL', SPitch(step='G', alter=1, octave=3)), ('PR', SPitch(step='C', alter=1, octave=5))]",
+                    "TERMINAL_BAR_MISSING",
+                    "TS_MISSING:175"
+                  ],
+                  "raw": "|6/4k#6PL:B3PR:D#5 <|0.02|> 1/16d#5E5 <|0.20|> 1/16PL:b3B2PR:e5D#5 <|0.21|> 1/16PL:b2B3PR:d#5D#5 <|0.38|> 1/16d#5C#5 <|0.54|> 1/16PL:b3A#3PR:c#5B4 <|0.72|> 1/16PL:a#3B3PR:b4G#4 <|0.89|> 1/16g#4F#4 <|1.02|> 1/16f#4E#4 <|1.19|> 1/16e#4C#4 <|1.34|> 1/16PL:b3G#3PR:c#4E#4 <|1.52|> 1/16PL:g#3E#3PR:e#4G#4 <|1.70|> 1/16PL:e#3E",
+                  "truncated": "|6/4k#6PL:B3PR:D#5 <|0.02|> 1/16d#5E5 <|0.20|> 1/16PL:b3B2PR:e5D#5 <|0.21|> 1/16PL:b2B3PR:d#5D#5 <|0",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 4
+                  }
+                }
+              },
+              {
+                "window": 1,
+                "start_s": 20.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "DYCK_DOUBLE_ONSET:('PL', SPitch(step='D', alter=1, octave=3))@29/4",
+                    "DYCK_UNCLOSED:[('PL', SPitch(step='F', alter=1, octave=3))]",
+                    "TERMINAL_BAR_MISSING",
+                    "TS_MISSING:171"
+                  ],
+                  "raw": "|6/4k#6PL:A#3C#4 <|0.02|> 1/8a#3c#4A#3 <|0.21|> 1/8a#3G#3 <|0.38|> 1/8g#3F#3 <|0.54|> 1/8f#3G#3 <|0.72|> 1/8g#3A#3 <|0.89|> 1/8a#3B3 <|1.05|> 1/8b3A#3 <|1.20|> 1/8a#3 <|1.36|> |6/4k#6A#3 <|1.36|> 1/8a#3G#3 <|1.52|> 1/8g#3A#3 <|1.68|> 1/8a#3G#3 <|1.82|> 1/8g#3F#3 <|1.95|> 1/8f#3E3 <|2.11|> 1/8e3D#3 <|2.22|> 1/8d#3C#3 <|",
+                  "truncated": "|6/4k#6PL:A#3C#4 <|0.02|> 1/8a#3c#4A#3 <|0.21|> 1/8a#3G#3 <|0.38|> 1/8g#3F#3 <|0.54|> 1/8f#3G#3 <|0.",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 4
+                  }
+                }
+              }
+            ]
+          },
+          "gen_stats": {
+            "n_new": 900,
+            "stop": "cap",
+            "fast": true,
+            "beam_size": 4
+          },
+          "decode_debug": {
+            "stage": "validate_reject",
+            "viol": [
+              "DYCK_DOUBLE_ONSET:('PL', SPitch(step='D', alter=1, octave=3))@29/4",
+              "DYCK_UNCLOSED:[('PL', SPitch(step='F', alter=1, octave=3))]",
+              "TERMINAL_BAR_MISSING",
+              "TS_MISSING:171"
+            ],
+            "raw": "|6/4k#6PL:A#3C#4 <|0.02|> 1/8a#3c#4A#3 <|0.21|> 1/8a#3G#3 <|0.38|> 1/8g#3F#3 <|0.54|> 1/8f#3G#3 <|0.72|> 1/8g#3A#3 <|0.89|> 1/8a#3B3 <|1.05|> 1/8b3A#3 <|1.20|> 1/8a#3 <|1.36|> |6/4k#6A#3 <|1.36|> 1/8a#3G#3 <|1.52|> 1/8g#3A#3 <|1.68|> 1/8a#3G#3 <|1.82|> 1/8g#3F#3 <|1.95|> 1/8f#3E3 <|2.11|> 1/8e3D#3 <|2.22|> 1/8d#3C#3 <|",
+            "truncated": "|6/4k#6PL:A#3C#4 <|0.02|> 1/8a#3c#4A#3 <|0.21|> 1/8a#3G#3 <|0.38|> 1/8g#3F#3 <|0.54|> 1/8f#3G#3 <|0.",
+            "gen": {
+              "n_new": 900,
+              "stop": "cap",
+              "fast": true,
+              "beam_size": 4
+            }
+          },
+          "ned": null,
+          "prediction_prefix": "|4/4k0"
+        },
+        {
+          "index": 2,
+          "utt_id": "nasap_WangA01M_75e19e2f_006",
+          "domain": "real",
+          "audio_s": 35.726,
+          "elapsed_s": 23.13,
+          "parseable": false,
+          "fallback": true,
+          "violations": [
+            "MEASURE_SUM:1 got 15/8 want 3/2",
+            "MEASURE_SUM:2 got 2 want 3/2",
+            "MEASURE_SUM:3 got 11/4 want 3/2",
+            "MEASURE_SUM:4 got 4 want 3/2",
+            "parse_error:ParseError",
+            "TS_PARSE:ParseError"
+          ],
+          "infer_stats": {
+            "status": "all_windows_failed",
+            "fallback": true,
+            "n_windows": 2,
+            "n_failed_windows": 2,
+            "window_failures": [
+              {
+                "window": 0,
+                "start_s": 0.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "MEASURE_SUM:1 got 15/8 want 3/2",
+                    "MEASURE_SUM:2 got 2 want 3/2",
+                    "MEASURE_SUM:3 got 11/4 want 3/2",
+                    "MEASURE_SUM:4 got 4 want 3/2"
+                  ],
+                  "raw": "|12/8k-3PL:F3A-3F4PR:A-4 <|0.06|> 1/8a-4C5 <|0.46|> 1/8c5B-4 <|0.86|> 1/8b-4D-5 <|1.14|> 1/8PL:f3a-3f4G3B-3E4PR:d-5D-5 <|1.57|> 1/8d-5C5 <|1.95|> 1/8c5B-4 <|2.28|> 1/8PL:g3b-3e4F3A-3C4PR:b-4A-4 <|2.62|> 1/8a-4G5 <|3.00|> 1/8g5F5 <|3.32|> 1/8f5A-5 <|3.64|> 1/8PL:f3a-3c4E3A-3C-4PR:a-5B-4 <|4.07|> 1/8PL:e3a-3c-4PR:b-4 <|4",
+                  "truncated": "|12/8k-3PL:F3A-3F4PR:A-4 <|0.06|> 1/8a-4C5 <|0.46|> 1/8c5B-4 <|0.86|> 1/8b-4D-5 <|1.14|> 1/8PL:f3a-3",
+                  "gen": {
+                    "n_new": 845,
+                    "stop": "eot",
+                    "fast": true,
+                    "beam_size": 4
+                  }
+                }
+              },
+              {
+                "window": 1,
+                "start_s": 20.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "parse_error:ParseError",
+                    "TS_PARSE:ParseError"
+                  ],
+                  "raw": "|6/4k-5PL:D-3F3D-4PR:F4 2/4PL:d-3f3d-4PR:f4 |6/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5/4k-5PL:D-3F3D-4PR:A-4 5/4PL:",
+                  "truncated": "|6/4k-5PL:D-3F3D-4PR:F4 2/4PL:d-3f3d-4PR:f4 |6/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5PL:",
+                  "gen": {
+                    "n_new": 452,
+                    "stop": "eot",
+                    "fast": true,
+                    "beam_size": 4
+                  }
+                }
+              }
+            ]
+          },
+          "gen_stats": {
+            "n_new": 452,
+            "stop": "eot",
+            "fast": true,
+            "beam_size": 4
+          },
+          "decode_debug": {
+            "stage": "validate_reject",
+            "viol": [
+              "parse_error:ParseError",
+              "TS_PARSE:ParseError"
+            ],
+            "raw": "|6/4k-5PL:D-3F3D-4PR:F4 2/4PL:d-3f3d-4PR:f4 |6/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5/4k-5PL:D-3F3D-4PR:A-4 5/4PL:",
+            "truncated": "|6/4k-5PL:D-3F3D-4PR:F4 2/4PL:d-3f3d-4PR:f4 |6/4k-5PL:D-3F3D-4PR:A-4 5/4PL:d-3f3d-4PR:a-4 |6/4k-5PL:",
+            "gen": {
+              "n_new": 452,
+              "stop": "eot",
+              "fast": true,
+              "beam_size": 4
+            }
+          },
+          "ned": null,
+          "prediction_prefix": "|4/4k0"
+        },
+        {
+          "index": 3,
+          "utt_id": "nasap_LeeN01M_ad221e3a_004",
+          "domain": "real",
+          "audio_s": 35.639,
+          "elapsed_s": 32.422,
+          "parseable": false,
+          "fallback": true,
+          "violations": [
+            "parse_error:ParseError",
+            "TS_PARSE:ParseError",
+            "parse_error:ParseError",
+            "TS_PARSE:ParseError"
+          ],
+          "infer_stats": {
+            "status": "all_windows_failed",
+            "fallback": true,
+            "n_windows": 2,
+            "n_failed_windows": 2,
+            "window_failures": [
+              {
+                "window": 0,
+                "start_s": 0.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "parse_error:ParseError",
+                    "TS_PARSE:ParseError"
+                  ],
+                  "raw": "|12/8k#4PL:E3G#3PR:G#4E5 <|0.02|> 1/8PL:e3g#3E3G#3PR:g#4e5G#4E5 <|0.46|> 1/8PL:e3g#3C#3E3G#3PR:g#4e5G#4E5 <|0.79|> 1/8PL:c#3e3g#3C#3E3G#3PR:g#4e5G#4E5 <|1.18|> 1/8PL:c#3e3g#3C#3E3G#3PR:g#4e5G#4E5 <|1.59|> 1/8PL:c#3e3g#3C#3E3G#3PR:g#4e5G#4E5 <|1.95|> 1/8PL:c#3e3g#3C#3E3G#3PR:g#4e5G#4E5 <|2.28|> 1/8PL:c#3e3g#3C#3E3G#3PR:",
+                  "truncated": "|12/8k#4PL:E3G#3PR:G#4E5 <|0.02|> 1/8PL:e3g#3E3G#3PR:g#4e5G#4E5 <|0.46|> 1/8PL:e3g#3C#3E3G#3PR:g#4e5",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 4
+                  }
+                }
+              },
+              {
+                "window": 1,
+                "start_s": 20.0,
+                "stage": "decode",
+                "debug": {
+                  "stage": "validate_reject",
+                  "viol": [
+                    "parse_error:ParseError",
+                    "TS_PARSE:ParseError"
+                  ],
+                  "raw": "|4/2k-3PL:E-3PR:E-4 <|0.02|> 1/8e-4D-4 <|0.48|> 1/8d-4C4 <|0.79|> 1/8c4D-4 <|1.10|> 1/8d-4C4 <|1.45|> 1/8c4D-4 <|1.84|> 1/8d-4 <|2.15|> |4/2k-3PL:A-2E-3PR:C4 <|2.15|> 1/8c4D-4 <|2.50|> 1/8PL:a-2e-3A-2E-3PR:d-4C4 <|2.82|> 1/8c4D-4 <|3.15|> 1/8PL:a-2e-3A-2E-3PR:d-4C4 <|3.69|> 1/8c4D-4 <|4.05|> 1/8PL:a-2e-3A-2E-3PR:d-4C4 ",
+                  "truncated": "|4/2k-3PL:E-3PR:E-4 <|0.02|> 1/8e-4D-4 <|0.48|> 1/8d-4C4 <|0.79|> 1/8c4D-4 <|1.10|> 1/8d-4C4 <|1.45|",
+                  "gen": {
+                    "n_new": 900,
+                    "stop": "cap",
+                    "fast": true,
+                    "beam_size": 4
+                  }
+                }
+              }
+            ]
+          },
+          "gen_stats": {
+            "n_new": 900,
+            "stop": "cap",
+            "fast": true,
+            "beam_size": 4
+          },
+          "decode_debug": {
+            "stage": "validate_reject",
+            "viol": [
+              "parse_error:ParseError",
+              "TS_PARSE:ParseError"
+            ],
+            "raw": "|4/2k-3PL:E-3PR:E-4 <|0.02|> 1/8e-4D-4 <|0.48|> 1/8d-4C4 <|0.79|> 1/8c4D-4 <|1.10|> 1/8d-4C4 <|1.45|> 1/8c4D-4 <|1.84|> 1/8d-4 <|2.15|> |4/2k-3PL:A-2E-3PR:C4 <|2.15|> 1/8c4D-4 <|2.50|> 1/8PL:a-2e-3A-2E-3PR:d-4C4 <|2.82|> 1/8c4D-4 <|3.15|> 1/8PL:a-2e-3A-2E-3PR:d-4C4 <|3.69|> 1/8c4D-4 <|4.05|> 1/8PL:a-2e-3A-2E-3PR:d-4C4 ",
+            "truncated": "|4/2k-3PL:E-3PR:E-4 <|0.02|> 1/8e-4D-4 <|0.48|> 1/8d-4C4 <|0.79|> 1/8c4D-4 <|1.10|> 1/8d-4C4 <|1.45|",
+            "gen": {
+              "n_new": 900,
+              "stop": "cap",
+              "fast": true,
+              "beam_size": 4
+            }
+          },
+          "ned": null,
+          "prediction_prefix": "|4/4k0"
+        }
+      ]
+    }
+  ]
+}
