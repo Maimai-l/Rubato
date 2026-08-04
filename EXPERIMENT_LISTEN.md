@@ -19,6 +19,7 @@ loss 压下去一大截;外加一轮 13 epoch 的高重复池允许**背题**(�
 | 2a | **编码器 AMT 辅助头**(帧级 onset/occupancy/offset) | 绕开文本 loss,直接逼编码器携带音高信息 | **已建成并已门测:头学得动(af1 +45%,aux BCE −33%)但不迁移到 decoder** → 判决:别加大头,打 decoder(转 2c) | 已触发过;除非 2c 也败,不再加码 |
 | 2b | **AMT 课程表**(开局若干步临时提高 AMT 配比) | 让听觉梯度先占场,文本任务后进 | 动 D2 混比,**需用户批** | 2c 门测失败再议 |
 | 2c | **交叉注意力音频依赖损失**(批内错配 encoder 状态,margin 罚) | 2a 判决的直接后继:同批 roll 音频做第二次 decoder forward,错音频算内容 CE 必须比对音频差出 margin | **首门实测改判(63.8k):gap=+0.83~0.86 ≫ margin 0.1 ⇒ 罚项空转,+77% 步时只买了仪表 —— decoder 在合成域并不聋,聋是真钢琴域特异**。训练版搁置;降级为纯仪表 --audio-dep-monitor-every(no_grad 每 N 步出 ad=,≈+1.5%@N=50) | 定向真音频域版(按域掩码)另立项,需批内域标签 |
+| R3 | **decoder 从零 + 形式语言 pre-pretraining**(round-3 设计要素,D90) | 论文只借 Canary 架构、权重从零(§3 原文);其表示节把音高状态钉为 k-Shuffle-Dyck 并引形式语言 pre-pretraining 论文 —— 我们头号拒因 DYCK/MEASURE 恰是这两个形式性质;合成语料纯文本零音频,intermo 生成器现成 | 语料生成器待用户点头;from_scratch 开关现成(SPEC D1) | 100k 终点判读(D88⑦)触发 round-3 时为基线设计 |
 | 3 | 架构级(交叉注意力门控等) | 最后手段 | 不建 | 前面全败再议 |
 
 ## 二轮中期更新(step≈61k,证据 reports/DECODE_AB_STEP61200.md + eval_autolog)
