@@ -13,8 +13,11 @@ import torch
 
 sys.path.insert(0, ".")
 
-from scripts.pretrain_decoder import (freeze_except_decoder, pretrain_step,
-                                      rows_to_batch, save_decoder_init)
+from scripts.pretrain_decoder import (classify_health, default_nemo_path,
+                                      freeze_except_decoder, pretrain_step,
+                                      load_resume_state, reset_decoder_parameters,
+                                      rows_to_batch, save_decoder_init,
+                                      save_resume_state)
 
 V, D = 96, 16
 
@@ -140,6 +143,77 @@ def test_save_load_roundtrip_and_strict_mismatch():
         except RuntimeError:
             raised = True
         assert raised, "词表不符的 decoder_init 不许静默载入"
+
+
+def test_scratch_reset_and_exact_resume_roundtrip():
+    model = StubModel()
+    before = model.transf_decoder.emb.weight.detach().clone()
+    torch.manual_seed(123)
+    assert reset_decoder_parameters(model) > 0
+    assert not torch.equal(before, model.transf_decoder.emb.weight.detach()), \
+        "scratch 模式必须真的重置 decoder"
+    freeze_except_decoder(model)
+    opt = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad], lr=1e-3)
+    tok = StubTok()
+    batch, _ = rows_to_batch(ROWS, tok)
+    loss, _ = pretrain_step(model, batch, enc_dim=D, device="cpu")
+    opt.zero_grad(set_to_none=True)
+    loss.backward()
+    opt.step()
+    signature = {"corpus_sha256": "abc", "seed": 7}
+    rng = __import__("random").Random(7)
+    _ = [rng.randrange(100) for _ in range(3)]
+    expected_rng = [rng.randrange(100) for _ in range(5)]
+    # Recreate the state at save time for the actual snapshot.
+    rng = __import__("random").Random(7)
+    _ = [rng.randrange(100) for _ in range(3)]
+    saved = {k: v.detach().clone() for k, v in model.transf_decoder.state_dict().items()}
+    with tempfile.TemporaryDirectory() as td:
+        path = str(Path(td) / "resume.pt")
+        save_resume_state(model, opt, path, step=11, recent=[2.0, 1.5],
+                          rng=rng, n_skipped=4, signature=signature)
+        assert Path(path).is_file()
+        assert not list(Path(td).glob("*.tmp.*")), "原子保存不应遗留临时文件"
+        model2 = StubModel()
+        freeze_except_decoder(model2)
+        opt2 = torch.optim.AdamW(
+            [p for p in model2.parameters() if p.requires_grad], lr=1e-3)
+        state = load_resume_state(model2, opt2, path, signature, "cpu")
+        assert state["step"] == 11 and state["recent"] == [2.0, 1.5]
+        assert state["n_skipped_total"] == 4
+        assert [state["rng"].randrange(100) for _ in range(5)] == expected_rng
+        for k, v in saved.items():
+            assert torch.equal(v, model2.transf_decoder.state_dict()[k])
+        try:
+            load_resume_state(model2, opt2, path, {"corpus_sha256": "wrong"}, "cpu")
+            raised = False
+        except RuntimeError:
+            raised = True
+        assert raised, "语料/配置指纹变化必须拒绝近似恢复"
+
+
+def test_default_nemo_path_matches_workspace_layout():
+    with tempfile.TemporaryDirectory() as td:
+        parent = Path(td)
+        repo = parent / "Rubato"
+        repo.mkdir()
+        external = parent / "canary-180m-flash.nemo"
+        external.write_bytes(b"external")
+        assert default_nemo_path(repo) == external
+        external.unlink()
+        local = repo / "canary-180m-flash.nemo"
+        local.write_bytes(b"local")
+        assert default_nemo_path(repo) == local
+
+
+def test_smoke_health_requires_finite_loss():
+    # High-but-finite is diagnostic in a short smoke; NaN/Inf is always fatal.
+    assert classify_health(4.3, is_smoke=True, free_ok=False) == ("FAIL", True)
+    assert classify_health(float("nan"), is_smoke=True, free_ok=True)[1] is False
+    assert classify_health(float("inf"), is_smoke=True, free_ok=True)[1] is False
+    assert classify_health(2.0, is_smoke=False, free_ok=True) == ("GRAY", True)
+    assert classify_health(2.0, is_smoke=False, free_ok=False) == ("GRAY", False)
 
 
 if __name__ == "__main__":

@@ -383,6 +383,19 @@ def reinit_all_parameters(model) -> int:
     return n
 
 
+def validate_decoder_init_meta(meta: dict | None,
+                               path: str | Path = "<decoder-init>") -> dict:
+    """Reject artifacts that the pretrain producer marked unsafe for training."""
+    meta = meta or {}
+    if meta.get("complete") is False:
+        raise RuntimeError(f"decoder_init 标记为未完成，拒绝载入: {path}")
+    if meta.get("health_pass") is False:
+        raise RuntimeError(f"decoder_init 健康门未通过，拒绝载入: {path}")
+    if meta.get("artifact_role") == "smoke":
+        raise RuntimeError(f"decoder_init 是 smoke 产物，拒绝用于正式训练: {path}")
+    return meta
+
+
 def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
                 frontend_wav_paths: list[str] | None = None,
                 backbone_ref: int | None = None,
@@ -484,12 +497,12 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
         if not _dp.exists():
             raise FileNotFoundError(f"--decoder-init 文件不存在: {_dp}")
         snap = torch.load(str(_dp), map_location="cpu")
+        meta = validate_decoder_init_meta(snap.get("meta"), _dp)
         for part in ("transf_decoder", "log_softmax"):
             if part not in snap:
                 raise RuntimeError(f"decoder_init 缺 {part} state_dict: {_dp}")
             getattr(model, part).load_state_dict(snap[part], strict=True)
-        report["decoder_init"] = {
-            "path": str(_dp), "meta": snap.get("meta", {})}
+        report["decoder_init"] = {"path": str(_dp), "meta": meta}
         print(f"  decoder 预训练初始化已载入: {_dp} "
               f"(pretrain steps={snap.get('meta', {}).get('steps', '?')} "
               f"loss_avg50={snap.get('meta', {}).get('loss_avg50', '?')})",

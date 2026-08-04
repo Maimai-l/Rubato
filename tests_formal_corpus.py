@@ -84,6 +84,19 @@ def test_signature_and_key_variety():
         assert all(r["n_atoms"] <= 700 for r in rows), "超长控制失效"
 
 
+def test_existing_output_is_not_overwritten_without_flag():
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "corpus.jsonl"
+        out.write_text("sentinel\n", encoding="utf-8")
+        try:
+            gen_main(["--n", "1", "--out", str(out)])
+            raised = False
+        except FileExistsError:
+            raised = True
+        assert raised, "已有 corpus 必须缺省拒绝覆盖"
+        assert out.read_text(encoding="utf-8") == "sentinel\n"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     bad = 0

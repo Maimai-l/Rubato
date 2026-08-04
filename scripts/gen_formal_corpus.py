@@ -145,6 +145,8 @@ def main(argv=None):
                     help="TAST(带时间戳)占比,其余为 A2S;两种都练,格式与正训一致")
     ap.add_argument("--max-atoms", type=int, default=700,
                     help="单条上限(空格分隔原子数);超限重采,保证进 1023 位置表")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="允许原子替换已有输出；缺省拒绝覆盖，防止误删已验收语料")
     args = ap.parse_args(argv)
     if args.n <= 0 or not (0.0 <= args.tast_frac <= 1.0):
         raise ValueError(f"非法参数: n={args.n} tast_frac={args.tast_frac}")
@@ -153,9 +155,14 @@ def main(argv=None):
     t0 = time.time()
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists() and not args.overwrite:
+        raise FileExistsError(f"输出已存在，拒绝覆盖: {out}（确需重建请加 --overwrite）")
+    tmp = out.with_name(f"{out.name}.tmp.{os.getpid()}")
     n_tast = n_resample = 0
     atoms_sum = 0
-    with open(out, "w", encoding="utf-8") as fh:
+    # 只让完整语料出现在正式路径；崩溃时最多留下带 PID 的 .tmp 证据，消费者
+    # 永远不会把半截 JSONL 当作完整 corpus。
+    with open(tmp, "x", encoding="utf-8") as fh:
         for i in range(args.n):
             want_tast = rng.random() < args.tast_frac
             while True:
@@ -171,6 +178,9 @@ def main(argv=None):
                  "text": text, "n_atoms": n_atoms}, ensure_ascii=False) + "\n")
             if (i + 1) % 20000 == 0:
                 print(f"  {i + 1}/{args.n} ({time.time() - t0:.0f}s)", flush=True)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, out)
     print(f"完成: {args.n} 条 → {out}")
     print(f"  TAST {n_tast} / A2S {args.n - n_tast} | 平均原子 {atoms_sum / args.n:.1f}"
           f" | 超长重采 {n_resample} | 用时 {time.time() - t0:.0f}s")

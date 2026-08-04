@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, ".")
 from rubato.model.build import (
     build_target_sequence, DIALECT_PROMPT, estimate_params, check_param_count,
-    verify_encoder_loaded, resize_decoder_vocab,
+    validate_decoder_init_meta, verify_encoder_loaded, resize_decoder_vocab,
 )
 
 PASS = 0
@@ -125,6 +125,21 @@ try:
 except RuntimeError:
     missing_head_rejected = True
 check("missing_output_head_rejected", missing_head_rejected)
+
+print("[8] decoder-init 元数据安全门")
+check("healthy_decoder_init_allowed", validate_decoder_init_meta({
+    "complete": True, "health_pass": True, "artifact_role": "decoder_init"
+})["complete"] is True)
+for name, meta in (
+        ("incomplete_decoder_init_rejected", {"complete": False}),
+        ("failed_decoder_init_rejected", {"health_pass": False}),
+        ("smoke_decoder_init_rejected", {"artifact_role": "smoke"})):
+    try:
+        validate_decoder_init_meta(meta)
+        raised = False
+    except RuntimeError:
+        raised = True
+    check(name, raised)
 
 print(f"\n全部通过: {PASS} 项")
 print("注:实际 canary 加载、encoder hash 核对、前端一致性验证需 GPU+NeMo+canary.nemo,")
