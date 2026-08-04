@@ -66,7 +66,43 @@ LEGATO encoder 836M 冻结 vs 我们 180M 全调)。结论:**表中数字用于�
 - 其余摘要数字(10 epochs / batch 32 / lr 3e-4 / β₂ 0.99 / ε 1e-6 / linear + warmup 0.03 /
   vocab 4097 / >214K 样本)已过原文核对,一致。
 
-## 6. 来源(访问日 2026-07-14)
+## 6. LEGATO 开源代码抽取(2026-08-04,github.com/guang-yng/legato 全库逐文件读)
+
+> 用户问"LEGATO 开源了,有什么训练技巧?"。答案出乎意料也极有信息量:**几乎零技巧**。
+> 全库 ~1,400 行核心代码,逐文件核对如下(引用为仓库内路径)。
+
+- **训练器 = 原版 HF Seq2SeqTrainer**(legato/trainer.py):子类只改三件事 —— 存档时跳过
+  冻结视觉塔参数、DeepSpeed 排除冻结参数、gen_ 前缀输入路由给 generate。
+  **没有 scheduled sampling、没有课程表、没有序列级损失、没有任何自定义训练步**。
+- **损失 = 纯逐 token 均值 CE**(legato/models/modeling_legato.py 直通 Mllama forward;
+  configs/legato.json 无 label_smoothing_factor ⇒ HF 缺省 0.0)。无辅助头、无加权。
+- **数据增广 = 零**(legato/models/image_processing_legato.py 仅做高页切块:高≤4×宽整页,
+  否则按 4×宽高度、3×宽步距切 = 25% 重叠窗)。图像原样进模型。
+- **超参全靠 HF 缺省**:config 未设 max_grad_norm ⇒ 裁剪 1.0(它们 CE 量纲下 gn~O(1),
+  等效温和);lr_scheduler 缺省 linear + warmup_ratio 0.03;AdamW;bf16 + ZeRO-2 +
+  torch.compile;10 epochs,batch = 2/卡 × grad_accum 4。
+- **训练里真正的"招"只有一个 = 评测制度**(scripts/train.py + configs/legato.json):
+  每 5000 步对 mini-val 做**自由生成**(predict_with_generate,beam 3,max_length 2048),
+  算 SER(符号错误率,编辑距离类),**best ckpt 按自由生成 SER 选**(metric_for_best_model
+  = eval_SER,load_best_model_at_end)。训练目标是纯教师强制,但选优眼睛始终盯着自由生成。
+- **指标全是优雅降级,没有硬门归零**:SER/CER 是编辑距离;TEDn/OMR-NED 只在 ABC→XML
+  转换成功的样本上算,配 fail_mask 单独报失败率(scripts/compute_TEDn_convert.py 专为此存在)
+  —— **LEGATO 也有不可解析输出**,只是不用二值 parseable 把全部进步藏在悬崖后面。
+- **推理**:域内 beam 3;OOD/单图脚本 beam 10 + repetition_penalty 1.1 + max_length 2048
+  (scripts/inference.py:37)。与我们已建的 beam/rep 路线一致。
+- **训练目标截断**:collate 里 truncation=True(max 2048)—— 多页长谱直接截断监督,
+  不是过滤丢弃。
+
+**对我们的三条直接启示**(判决仍归各自实验):
+1. 纯 CE + 足量步数在符号谱 seq2seq 上**足以**长出自由生成能力(它 101M decoder 从零,
+   无任何曝光偏差处理)—— 1c 是合理加速器而非必需品,步数与逐 token 精度才是主变量。
+2. 我们的 parseable 硬门与它的优雅指标是**不同测量制度**:同一水平的模型,在它的制度下
+   读作"CER 23.3%",在我们的制度下可能读作"parseable=0"。→ 已交付 val_text_ned_raw
+   (D89):拒绝样本用逐窗原文剥戳拼接对参照算 NED,全样本进分母,给自由生成一根连续针。
+3. 它最强的一张牌不可复制:836M 预训练视觉 encoder 冻结白嫖。我们 encoder 只有 ~130M
+   且来自语音模态 —— encoder 侧质量差距是结构性的,不是技巧能补的。
+
+## 7. 来源(§1-5 访问日 2026-07-14;§6 为 2026-08-04 仓库抓取)
 
 - LEGATO:arxiv.org/abs/2506.19065(html v1 全文抓取;§4.2-4.3、§5、§6.1)
 - M2ST:arxiv.org/abs/2410.00210(html v1;§2.4、§3.1)

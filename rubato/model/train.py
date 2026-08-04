@@ -832,6 +832,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
 
     labels = labels or {}
     metrics = {"parseable_rate": 0.0, "val_text_ned_proxy": None,
+               "val_text_ned_raw": None, "n_raw_scored": 0,
                "a2s_note_f1": None, "maestro_amt_f1": None,
                "empty_rate": None, "n_eval_nasap": 0, "n_eval_maestro": 0,
                "n_text_proxy_scored": 0, "text_proxy_coverage": 0.0,
@@ -859,6 +860,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     n_ok, n_total, n_empty = 0, 0, 0
     truncated = False
     proxy_scores = []                    # 训练监控代理；永不冒充 OMR-NED
+    raw_scores = []                      # 【D89】LEGATO 式优雅针:全样本进分母,拒绝样本用逐窗原文
     viol_entries: list = []              # (is_fallback, viol_list) → viol_tally 拒因直方图
     sample_preds: list[str] = []
     ok_pred = ok_utt = ok_ref = None     # 首个过校验的预测(展示偏差修复:别只看失败样本)
@@ -1018,6 +1020,21 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
             viol_entries.append((False, []))
         else:
             viol_entries.append((is_fallback and not _tv, _tv or viol))
+        # 【D89】LEGATO 式优雅指标(其开源库对转换失败样本用 fail_mask 优雅降级,
+        # 指标全是编辑距离,没有硬门归零):验证器拒绝的样本用逐窗原始输出剥戳拼接
+        # 对参照算 NED,全样本进分母(空输出=1.0)。这是自由生成【内容】的连续针,
+        # 专治 parseable 悬崖挡视线;原文拼接非 IR 合并,只作趋势,不冒充 OMR-NED,
+        # 不参与 best.pt 选优。
+        _ref_raw = (labels.get(sample.get("utt_id"), {}) or {}).get("A2S")
+        if _ref_raw:
+            if not viol:
+                raw_scores.append(text_ned(pred, _ref_raw))
+            else:
+                _rw = [w for w in
+                       (getattr(_inf, "LAST_RAW_WINDOWS", []) or []) if w]
+                _raw_txt = " ".join(
+                    _inf.strip_timestamps(w) for w in _rw).strip()
+                raw_scores.append(text_ned(_raw_txt, _ref_raw))
         if not viol:
             n_ok += 1
             if ok_pred is None and not is_fallback:
@@ -1035,6 +1052,9 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
     metrics["eval_truncated"] = truncated
     metrics["n_text_proxy_scored"] = len(proxy_scores)
     metrics["text_proxy_coverage"] = len(proxy_scores) / max(n_total, 1)
+    metrics["n_raw_scored"] = len(raw_scores)
+    if raw_scores:
+        metrics["val_text_ned_raw"] = sum(raw_scores) / len(raw_scores)
     for k, p in enumerate(sample_preds):
         _p(f"  eval 样本预测[{k}]: {p!r}")
     if ok_pred is not None:
@@ -1126,6 +1146,8 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
        f"amt_f1={metrics['maestro_amt_f1']} "
        f"text_ned_proxy={metrics['val_text_ned_proxy']} "
        f"proxy_scored={metrics['n_text_proxy_scored']}/{metrics['n_eval_nasap']} "
+       f"raw_ned={metrics['val_text_ned_raw']} "
+       f"raw_scored={metrics['n_raw_scored']}/{metrics['n_eval_nasap']} "
        f"n_maestro={metrics['n_eval_maestro']}/{n_amt_expected} "
        f"complete={metrics['eval_complete']}")
 

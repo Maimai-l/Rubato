@@ -28,6 +28,8 @@ _EMPTY_A2S = "|4/4k0"           # 合法空谱(过 validate),stub 与兜底用
 LAST_INFER_ERROR: str | None = None     # infer_a2s 顶层异常(traceback 头)
 LAST_DECODE_DEBUG: dict | None = None   # 单窗解码:validate 拒绝的原始输出 / 解码异常
 LAST_VIOLS: list = []                   # 本次 infer_a2s/infer_amt 全窗累计的真实违规(D44 拒因直方图)
+LAST_RAW_WINDOWS: list = []             # 【D89】逐窗原始输出旁路(验证拒绝也留正文,失败窗为截断后原文):
+                                        # LEGATO 式优雅指标 val_text_ned_raw 的证据源;infer_a2s/infer_amt 入口清零
 LAST_GEN_STATS: dict | None = None      # 【D72】最近一次自研解码:n_new/停因(eot|cap|poslimit)/快慢路径
 LAST_INFER_STATS: dict = {}             # 结构化状态；禁止再靠 "|4/4k0" 字符串猜兜底/局部丢窗
 
@@ -376,6 +378,7 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
     attempts = [max(1, int(beam_size))]
     if fallback_greedy and attempts[0] != 1:
         attempts.append(1)               # 真 beam 失败后才退一次 greedy
+    raw_kept = ""                        # 【D89】本窗最后一次尝试的截断后原文(拒绝也留)
     for beam in attempts:
         try:
             raw = _decode(beam)
@@ -386,9 +389,11 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
                                  "tb": traceback.format_exc(limit=4)}
             continue
         tast = truncate_after_20s(raw) if truncate else raw   # >20s = EOS(末窗除外)
+        raw_kept = tast or raw_kept
         viol = (validate_a2s(strip_timestamps(tast))
                 + validate_tast_timestamps(tast))
         if not viol:
+            LAST_RAW_WINDOWS.append(tast)
             return tast
         # 模型真实输出在此被丢弃 —— 这正是"样本0永远=兜底"时最需要看到的现场
         LAST_DECODE_DEBUG = {"stage": "validate_reject", "viol": viol[:4],
@@ -399,6 +404,7 @@ def single_window_tast(model, audio_window, sr: int, tokenizer,
         # 拒因直方图的证据源(D44):v1 只在 eval 层对兜底常量复验,真实违规从未传出 →
         # 直方图退化成 empty 率。此处全量累积,infer_a2s/infer_amt 入口清零。
         LAST_VIOLS.extend(viol)
+    LAST_RAW_WINDOWS.append(raw_kept)    # 拒绝窗:原文进旁路,指标层不再一票归零
     return ""                            # 两次都不合法 → 空(计入 n_fail)
 
 
@@ -428,8 +434,9 @@ def infer_a2s(model, audio, tokenizer, sr: int = 16000,
     判决前,eval/产品调用方不得擅改缺省)。
     """
     global LAST_VIOLS, LAST_INFER_STATS, LAST_INFER_ERROR
-    global LAST_DECODE_DEBUG, LAST_GEN_STATS
+    global LAST_DECODE_DEBUG, LAST_GEN_STATS, LAST_RAW_WINDOWS
     LAST_VIOLS = []
+    LAST_RAW_WINDOWS = []
     LAST_INFER_ERROR = None
     LAST_DECODE_DEBUG = None
     LAST_GEN_STATS = None
@@ -555,8 +562,9 @@ def infer_amt(model, audio, tokenizer, sr: int = 16000, beam_size: int = 4,
     返回 AMT 文本(含时间戳/力度/踏板);失败返回空串。
     domain 语义同 infer_a2s(缺省 None=现状,判决前不得擅改)。
     """
-    global LAST_VIOLS, LAST_INFER_STATS, LAST_INFER_ERROR
+    global LAST_VIOLS, LAST_INFER_STATS, LAST_INFER_ERROR, LAST_RAW_WINDOWS
     LAST_VIOLS = []
+    LAST_RAW_WINDOWS = []
     LAST_INFER_ERROR = None
     LAST_INFER_STATS = {"status": "starting", "fallback": False,
                         "n_windows": 1, "n_failed_windows": 0}
