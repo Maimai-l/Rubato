@@ -918,6 +918,10 @@ def main():
     ap.add_argument("--tokenizer", default=str(WORK / "rubato_spm.model"))
     ap.add_argument("--nemo", default=str(ROOT / "canary-180m-flash.nemo"))
     ap.add_argument("--vocab-spec", default=str(DEFAULT_VOCAB_SPEC))
+    ap.add_argument("--decoder-init", default=None,
+                    help="D91(round-3 部件):载入 scripts/pretrain_decoder.py 的"
+                         "形式语言预训练 decoder 权重(词表换形后 strict 加载);"
+                         "生效自证看回显 'decoder 预训练初始化已载入' 行")
     ap.add_argument("--from-scratch", action="store_true")
     ap.add_argument("--no-resume", action="store_true",
                     help="不读取已有 last.pt；从 .nemo 当前初始化重新开始，但不随机重置参数。"
@@ -1117,7 +1121,8 @@ def main():
 
     tok = spm.SentencePieceProcessor(model_file=args.tokenizer)
     model, report = build_model(args.nemo, args.tokenizer, args.vocab_spec,
-                                from_scratch=args.from_scratch)
+                                from_scratch=args.from_scratch,
+                                decoder_init=args.decoder_init)
     print(f"build_model: {report.get('vocab_swap')} encoder_ok={report['encoder_verify']['ok']}")
 
     # 【训前体检,problems 非空禁止开训】把所有 Embedding/大 Linear 与 tokenizer 逐个对账,

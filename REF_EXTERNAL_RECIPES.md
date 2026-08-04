@@ -62,6 +62,13 @@ LEGATO encoder 836M 冻结 vs 我们 180M 全调)。结论:**表中数字用于�
 
 ## 5. 更正记录(相对此前 chat 中的搜索摘要转述)
 
+- **重大勘误(2026-08-04,D91)**:本文件卷首及多轮对话中"论文训练技巧只字未提"的
+  说法**不准确** —— 优化器数字确实未提,但论文 §2 表示章节以引文形式写了形式语言
+  pre-pretraining 暗示(k-Shuffle-Dyck "the formal language for which pre-pretraining
+  yields the largest token-efficiency gains",引 Hu et al. 2025 ACL)。该线索用户读
+  论文时已亲自查过引文;规划端两轮通读均未识别为配方候选。已立项交付:
+  EXPERIMENT_PREPRETRAIN.md。
+
 - "冻结 11B encoder" → 原文实为 Llama-3.2-11B-Vision 的**视觉 encoder 组件,836M 参数**(§4.2.2)。
 - 其余摘要数字(10 epochs / batch 32 / lr 3e-4 / β₂ 0.99 / ε 1e-6 / linear + warmup 0.03 /
   vocab 4097 / >214K 样本)已过原文核对,一致。

@@ -13,6 +13,58 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
+## 当前阶段追加 31(2026-08-04,D91):形式语言预训练三步 —— 全部不碰主线训练
+
+背景一句话:论文暗示(用户拍出)+ 我们头号拒因(DYCK/MEASURE)指向同一招 ——
+在 decoder 见音频之前,先用合成的"合法乐谱语法"文本把开闭配对和小节算术练进去,
+产出 decoder_init.pt 备用;round-3 是否用它由 100k 判读决定,现在只是备货。
+
+### 第 1 步:生成语料(纯 CPU,随时跑,与训练并行无碍;~10 分钟)
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/gen_formal_corpus.py','--n','200000','--out',"$W\formal_corpus.jsonl" `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\gen_formal.out.log" `
+  -RedirectStandardError  "$W\gen_formal.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+**贴回**:gen_formal.out.log 末 3 行(条数/TAST 占比/平均原子/"合法性…回验"行)。
+
+### 第 2 步:预训练冒烟(纯 CPU,可与训练并行;~20-40 分钟)
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/pretrain_decoder.py','--corpus',"$W\formal_corpus.jsonl",'--steps','300','--batch-rows','8','--device','cpu','--out',"$W\decoder_init_smoke.pt" `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\pretrain_smoke.out.log" `
+  -RedirectStandardError  "$W\pretrain_smoke.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+**核对**:回显"可训参数=…(decoder+softmax) 冻结=…"行;step 1 的 loss 应在 9 上下
+(ln 8000≈9.0),300 步内应明显下降。**贴回**:回显行 + 首末各 3 条 step 行。
+
+### 第 3 步:全量预训练(GPU,~2 小时;排任何 GPU 空窗 —— 暂停窗、或 100k 跑完之后)
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/pretrain_decoder.py','--corpus',"$W\formal_corpus.jsonl",'--steps','20000','--batch-rows','16','--out',"$W\decoder_init.pt" `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\pretrain_full.out.log" `
+  -RedirectStandardError  "$W\pretrain_full.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+判据(预登记,EXPERIMENT_PREPRETRAIN.md):末 avg50 ≤1.5 = PASS;1.5-3.0 灰区贴回;
+>3.0 = 无效查 bug。**贴回**:末 5 条 step 行 + "完成: …"行 + `dir "$W\decoder_init.pt"`。
+产物用法(round-3 启动时,不是现在):启动命令加 `'--decoder-init',"$W\decoder_init.pt"`,
+核对回显出现"decoder 预训练初始化已载入"行。
+
 ## 当前阶段追加 30(2026-08-03,D87):下一个暂停窗 —— 1c 半剂量重门(可选,不急)
 
 上一窗验收结论(D87):你的判定与回滚全部正确,教科书式执行。数字分解出两件事:

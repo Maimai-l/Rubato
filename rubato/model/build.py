@@ -386,7 +386,8 @@ def reinit_all_parameters(model) -> int:
 def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
                 frontend_wav_paths: list[str] | None = None,
                 backbone_ref: int | None = None,
-                from_scratch: bool = False):
+                from_scratch: bool = False,
+                decoder_init: str | None = None):
     """
     R-S10.5 主路线:NeMo 直用。
     步骤(本地执行,每步带断言):
@@ -472,6 +473,27 @@ def build_model(nemo_path: str, tokenizer_model: str, vocab_spec_path: str,
             model.preprocessor, frontend_wav_paths, fe_spec)
     else:
         report["frontend_diagnostic"] = {"skipped": "训练直接复用 NeMo preprocessor"}
+
+    # 5c.【D91】decoder 形式语言预训练初始化(round-3 部件):在词表换形【之后】载入
+    #    scripts/pretrain_decoder.py 的产物(transf_decoder + log_softmax 两个
+    #    state_dict,形状与换表后完全一致,strict 加载,不匹配即崩)。
+    #    与 from_scratch 组合语义:from_scratch=True + decoder_init = 论文式从零
+    #    encoder + 预训练语法 decoder;热启动 + decoder_init = 覆盖 canary decoder 层。
+    if decoder_init:
+        _dp = Path(decoder_init)
+        if not _dp.exists():
+            raise FileNotFoundError(f"--decoder-init 文件不存在: {_dp}")
+        snap = torch.load(str(_dp), map_location="cpu")
+        for part in ("transf_decoder", "log_softmax"):
+            if part not in snap:
+                raise RuntimeError(f"decoder_init 缺 {part} state_dict: {_dp}")
+            getattr(model, part).load_state_dict(snap[part], strict=True)
+        report["decoder_init"] = {
+            "path": str(_dp), "meta": snap.get("meta", {})}
+        print(f"  decoder 预训练初始化已载入: {_dp} "
+              f"(pretrain steps={snap.get('meta', {}).get('steps', '?')} "
+              f"loss_avg50={snap.get('meta', {}).get('loss_avg50', '?')})",
+              flush=True)
 
     # 6. 参数量(A-S10.1,相对基准)。emb/softmax 是否共享权重因版本而异,
     #    tied/untied 两种口径任一吻合即通过,避免误伤正确模型。
