@@ -888,6 +888,28 @@ def select_training_partitions(part: dict) -> tuple[list, list, list, list, list
     return train, nasap_val, maestro_val, nasap_test, maestro_test
 
 
+def select_train_free_decode_pools(train_utts: list[dict], labels: dict) -> dict[str, list[dict]]:
+    """Return exact training rows suitable for the production TAST->A2S decoder.
+
+    Keep real nASAP and synthetic PDMX separate: a combined training-set score can
+    hide the failure mode where the model memorises/decodes synthetic renders but
+    still cannot freely transcribe real recordings.  ``train_utts`` is already the
+    leakage-certified train partition; requiring an actual TAST label prevents a
+    row from silently entering a diagnostic whose prompt it was never trained on.
+    """
+    pools = {"nasap_real_tast": [], "pdmx_synth_tast": []}
+    for utt in train_utts:
+        kind = utt.get("kind")
+        key = ("nasap_real_tast" if kind == "nasap" else
+               "pdmx_synth_tast" if kind == "pdmx" else None)
+        if key is None:
+            continue
+        lab = labels.get(utt.get("utt_id"), {}) or {}
+        if lab.get("TAST"):
+            pools[key].append(utt)
+    return pools
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train-config", default=str(DEFAULT_TRAIN_CONFIG),
@@ -979,6 +1001,11 @@ def main():
     ap.add_argument("--decode-abtest", action="store_true",
                     help="同 ckpt/同确定性 nASAP 子集比较 greedy 与真实 beam；"
                          "诊断时关闭 beam→greedy 静默回退，不训练")
+    ap.add_argument("--train-free-decode", action="store_true",
+                    help="不训练：从 train split 分别固定抽取 nASAP-real/TAST 与 "
+                         "PDMX-synth/TAST，复用正式自由解码和校验链；结果单独落盘")
+    ap.add_argument("--train-free-n", type=int, default=48,
+                    help="train-free-decode 每个来源的确定性样本数（默认 48）")
     ap.add_argument("--decode-abtest-beams", default="1,4",
                     help="decode-abtest 的 beam 列表，逗号分隔（缺省 1,4）")
     ap.add_argument("--decode-abtest-rep", default="1.1",
@@ -1225,6 +1252,80 @@ def main():
             fh.write(f"\n## probe-only 三源探针 @ step {step0} "
                      f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n" + "\n".join(lines) + "\n")
         print(f"完成,证据已落盘 {autolog} —— git add + commit + push;训练继续保持暂停。")
+        return
+
+    if args.train_free_decode:
+        # 训练集自由生成诊断：不是 teacher forcing，也不启用训练时标签。推理、窗口、
+        # TAST 校验和 A2S 合并全部复用 run_eval_hooks 的正式路径；唯一变化是样本来自
+        # leakage-certified train split，并按 real/synth 分开报告。
+        import gc
+        import json
+        import time as _time
+        import torch
+        from rubato.model.train import _eval_subset, run_eval_hooks
+
+        if args.train_free_n <= 0:
+            raise ValueError("--train-free-n 必须为正整数")
+        last = runtime_ckpt_dir / "last.pt"
+        if not last.exists():
+            raise FileNotFoundError(f"--train-free-decode 需要现有 checkpoint: {last}")
+        snap = torch.load(str(last), map_location="cpu")
+        model.load_state_dict(snap["model"])
+        step0 = int(snap.get("step", 0))
+        del snap
+        gc.collect()
+        if torch.cuda.is_available() and not args.cpu:
+            model = model.cuda()
+        model.eval()
+
+        pools = select_train_free_decode_pools(train_utts, labels)
+        result = {
+            "experiment": "train_free_decode",
+            "checkpoint": str(last),
+            "step": step0,
+            "n_requested_per_source": int(args.train_free_n),
+            "decoder": "production infer_a2s (TAST windows -> validated/merged A2S)",
+            "sampling": "sha256(utt_id), deterministic, train split only",
+            "groups": {},
+        }
+        summary = [
+            f"train-free-decode @ step {step0};每源 n={args.train_free_n};"
+            "正式 infer_a2s/validator;teacher forcing=关"
+        ]
+        with torch.no_grad():
+            for name, pool in pools.items():
+                subset = _eval_subset(pool, int(args.train_free_n))
+                if not subset:
+                    raise RuntimeError(f"训练集自由解码组 {name} 没有可用 TAST 样本")
+                print(f"--train-free-decode {name}: pool={len(pool)} "
+                      f"sample={len(subset)}", flush=True)
+                metrics = run_eval_hooks(
+                    model, subset, [], tok, labels=labels,
+                    eval_max=len(subset),
+                    time_budget_s=max(1200.0, len(subset) * 25.0),
+                    autolog=None, step=step0, probe_utts=None,
+                    decode_legs=True)
+                result["groups"][name] = {
+                    "pool_size": len(pool),
+                    "sample_utt_ids": [u.get("utt_id") for u in subset],
+                    "metrics": metrics,
+                }
+                summary.append(
+                    f"  {name}: parseable={metrics.get('parseable_rate', 0.0):.4f} "
+                    f"empty={metrics.get('empty_rate')} "
+                    f"n={metrics.get('n_eval_nasap')} "
+                    f"violations={metrics.get('violation_tally', {})}")
+
+        out = (Path(__file__).resolve().parents[1] / "reports" /
+               f"TRAIN_FREE_DECODE_STEP{step0}.json")
+        out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        with open(runtime_eval_autolog, "a", encoding="utf-8") as fh:
+            fh.write(f"\n## train-free-decode @ step {step0} "
+                     f"({_time.strftime('%Y-%m-%d %H:%M:%S')})\n"
+                     + "\n".join(summary) + "\n")
+        for line in summary:
+            print(line, flush=True)
+        print(f"完成,逐组证据={out};汇总追加={runtime_eval_autolog}", flush=True)
         return
 
     if args.decode_abtest:

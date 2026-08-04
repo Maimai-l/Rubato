@@ -836,7 +836,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
                "empty_rate": None, "n_eval_nasap": 0, "n_eval_maestro": 0,
                "n_text_proxy_scored": 0, "text_proxy_coverage": 0.0,
                "n_audio_missing": 0, "amt_eval_truncated": False,
-               "eval_complete": False}
+               "eval_complete": False, "violation_tally": {}}
 
     # 证据行:打印 + 缓存,eval 末尾原样追加进 autolog 文件(git 里的报告由代码写,
     # 执行端只 commit 不编辑 —— 人肉摘录三次丢失/删改证据后,把这一步从人手里拿走)。
@@ -1053,6 +1053,7 @@ def run_eval_hooks(model, nasap_val, maestro_val, tokenizer, labels: dict | None
         metrics["val_text_ned_proxy"] = sum(proxy_scores) / len(proxy_scores)
     if viol_entries:
         _vt = viol_tally(viol_entries)
+        metrics["violation_tally"] = _vt
         _p("  eval 拒因(样本数): "
            + " ".join(f"{k}={v}" for k, v in sorted(_vt.items(), key=lambda kv: (-kv[1], kv[0])))
            + f" /共{len(viol_entries)}")
