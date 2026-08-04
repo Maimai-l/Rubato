@@ -17,6 +17,7 @@ loss_mask、右移全同正训),不存在第二套实现。
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -200,6 +201,7 @@ def _run_signature(args) -> dict:
         "lr": float(args.lr), "warmup": int(args.warmup),
         "batch_rows": int(args.batch_rows), "enc_dim": int(args.enc_dim),
         "seed": int(args.seed), "init_mode": args.init_mode,
+        "precision": args.precision,
     }
 
 
@@ -356,6 +358,8 @@ def main(argv=None):
                     help="交叉注意力零上下文的维度;须等于 encoder 输出维(canary=1024),"
                          "错了首步就形状崩,fail loud")
     ap.add_argument("--device", default=None, help="缺省自动:有 CUDA 用 CUDA")
+    ap.add_argument("--precision", choices=("auto", "bf16", "fp32"), default="auto",
+                    help="缺省 CUDA 用 bf16、CPU 用 fp32；写入续跑签名")
     ap.add_argument("--seed", type=int, default=20260804)
     ap.add_argument("--save-every", type=int, default=2000)
     ap.add_argument("--log-every", type=int, default=50)
@@ -392,6 +396,13 @@ def main(argv=None):
     import sentencepiece as spm
     from rubato.model.build import build_model
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    is_cuda = str(device).startswith("cuda")
+    if args.precision == "auto":
+        args.precision = "bf16" if is_cuda and torch.cuda.is_bf16_supported() else "fp32"
+    if args.precision == "bf16" and not is_cuda:
+        raise ValueError("--precision bf16 当前只支持 CUDA；CPU 冒烟请用 auto/fp32")
+    autocast = (lambda: torch.autocast("cuda", dtype=torch.bfloat16)) \
+        if args.precision == "bf16" else contextlib.nullcontext
 
     # Reproducibility starts before build_model: vocabulary replacement itself
     # initializes trainable tensors, so seeding only the row sampler is too late.
@@ -412,7 +423,8 @@ def main(argv=None):
     print(f"预训练配置回显: 可训参数={n_train:,}(decoder+softmax) "
           f"冻结={n_frozen:,} lr={args.lr:g} warmup={args.warmup} "
           f"steps={args.steps} batch_rows={args.batch_rows} enc_dim={args.enc_dim} "
-          f"device={device} init={args.init_mode} reset_modules={n_reset}", flush=True)
+          f"device={device} precision={args.precision} init={args.init_mode} "
+          f"reset_modules={n_reset}", flush=True)
 
     opt = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
@@ -440,6 +452,9 @@ def main(argv=None):
     elif Path(args.out).exists():
         raise FileExistsError(
             f"最终产物已存在但无 resume，拒绝覆盖: {args.out}")
+    run_start_step = step
+    if is_cuda:
+        torch.cuda.reset_peak_memory_stats(device)
 
     while step < args.steps:
         batch_rows = [rows[rng.randrange(len(rows))]
@@ -450,21 +465,33 @@ def main(argv=None):
             continue
         for g in opt.param_groups:
             g["lr"] = args.lr * min(1.0, (step + 1) / max(args.warmup, 1))
-        loss, n_tok = pretrain_step(model, batch, args.enc_dim, device)
+        with autocast():
+            loss, n_tok = pretrain_step(model, batch, args.enc_dim, device)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(f"step {step + 1} loss 非有限: {float(loss)}")
         opt.zero_grad(set_to_none=True)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(
+        grad_norm = torch.nn.utils.clip_grad_norm_(
             [p for p in model.parameters() if p.requires_grad], 1.0)
+        if not torch.isfinite(grad_norm):
+            raise FloatingPointError(
+                f"step {step + 1} gradient norm 非有限: {float(grad_norm)}")
         opt.step()
         step += 1
         recent.append(float(loss.detach()))
         if len(recent) > 50:
             recent.pop(0)
         if step % args.log_every == 0 or step == 1:
+            ran = max(1, step - run_start_step)
+            shape = tuple(batch["input_ids"].shape)
+            cuda_mem = (f" cuda={torch.cuda.memory_allocated(device)/2**20:.0f}MiB"
+                        f" peak={torch.cuda.max_memory_allocated(device)/2**20:.0f}MiB"
+                        if is_cuda else "")
             print(f"step {step} loss={recent[-1]:.4f} "
                   f"avg50={sum(recent) / len(recent):.4f} tok={n_tok} "
+                  f"rows={shape[0]} seq={shape[1]} gn={float(grad_norm):.2f} "
                   f"lr={opt.param_groups[0]['lr']:.2e} "
-                  f"{(time.time() - t0) / step:.2f}s/步", flush=True)
+                  f"{(time.time() - t0) / ran:.2f}s/步{cuda_mem}", flush=True)
         save_now = step % args.save_every == 0 or step == args.steps
         if save_now:
             save_resume_state(
@@ -509,6 +536,10 @@ def main(argv=None):
           f"(health={'PASS' if health_pass else 'FAIL'})", flush=True)
     print(f"完成: {args.steps} 步, 末 avg50={avg50:.4f}({loss_class}), "
           f"超长跳过 {n_skipped_total} 行, 用时 {(time.time() - t0) / 60:.1f} 分钟")
+    if is_cuda:
+        print(f"CUDA 峰值: allocated="
+              f"{torch.cuda.max_memory_allocated(device)/2**20:.0f}MiB "
+              f"reserved={torch.cuda.max_memory_reserved(device)/2**20:.0f}MiB")
     if is_smoke:
         print(f"自由续写诊断(smoke 不设准入门): "
               f"{last_free_eval['n_parseable']}/{last_free_eval['n']}")

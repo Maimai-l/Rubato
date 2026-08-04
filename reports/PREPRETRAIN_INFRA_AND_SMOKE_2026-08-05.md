@@ -37,6 +37,14 @@ artifact is explicitly rejected by `build_model` for round-3 initialization.
    fallback.
 7. Smoke logging previously said to use its artifact for round-3.  It now states
    that smoke is diagnostic only and must be followed by the formal pretrain.
+8. The pulled loop did not use mixed precision even though the main recipe and
+   the stated two-hour estimate assume it.  Precision is now explicit and part
+   of the resume signature: auto selects CUDA BF16 when supported and CPU FP32.
+   Non-finite loss or gradient norm aborts immediately instead of poisoning an
+   optimizer until the final health check.
+9. Step logs now expose actual rows, padded sequence length, gradient norm and
+   CUDA current/peak allocation.  Resume timing counts only steps executed by
+   the current process, rather than dividing fresh elapsed time by saved steps.
 
 ## Corpus evidence
 
