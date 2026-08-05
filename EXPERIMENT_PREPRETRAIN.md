@@ -38,6 +38,20 @@ real 头号拒因 = DYCK(开闭配对),synth 头号 = MEASURE(小节算术)—�
   **raw_ned**(应更低)、探针 sem(不应更差超过 +5%)。
 - 三样两胜 = 预训练留在配方;否则回退 canary decoder 热启,记档关案。
 
+## 结果(2026-08-05,20k 步全量跑;证据 reports/PREPRETRAIN_FULL_RESULT_2026-08-05.md)
+
+- 运行:47.8 分钟 GPU,BF16,峰值显存 7.3 GiB,零 NaN/OOM/跳行;--init-mode scratch
+  (执行端加固:decoder 真从零,canary 继承降为显式消融臂 —— 修正了规划端首版缺口)。
+- 教师强制 CE:末 avg50 **2.006 = 预登记 GRAY**(≤1.5 未达)。判读(D92):门标定失误
+  —— 语料具体音高是不可压缩随机熵,CE 有结构地板;该门对未来重跑废除数值线。
+- **目的指标(执行端新增自由续写门,decoder-only 前缀→自由生成→生产验证器)**:
+  0/4(2k)→ 3/4(20k)可解析;拒因谱 {parse+DYCK+MEASURE} → **{MEASURE×1}**;EOT 4/4。
+  decoder 在纯语法域学会了收口 —— 主线正缺的能力在无音频条件下被证明可学得。
+- 工件:work/decoder_init.pt(SHA 6DFA62AF…)+ 精确续训伴生件,**合格入库 round-3 备用**;
+  装载端(build_model)拒收 smoke/不完整工件的元数据检查已由执行端接线。
+- 待办:n=48 大样本自由续写复评(追加 32,暂停窗顺手);门 v2 = parseable ≥60% 且
+  DYCK≈0(先于数据登记)。
+
 ## 风险与已知让步
 
 - decoder_init 覆盖 canary decoder 层 = 放弃其文本先验 —— 这是本设计的目的

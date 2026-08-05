@@ -13,7 +13,40 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 31(2026-08-04,D91):形式语言预训练三步 —— 全部不碰主线训练
+## 当前阶段追加 32(2026-08-05,D92):预训练验收通过 —— 恢复主线 + 暂停窗合并清单
+
+验收结论一句话:工件合格入库(自由续写 0/4→3/4、拒因收缩到 MEASURE×1 = decoder 学会
+收口);CE 2.006 落灰区是规划端门标定失误(随机音高有熵地板),不扣你分;九项加固
+全部追认,其中 scratch 缺省与自由续写门两项是对规划端设计的正确纠正,记档致谢。
+
+### 立即:恢复主线素跑(若已恢复则跳过,贴回开局三行即可)
+
+追加 28 的 v4 块**原样**执行(不加任何新旗标)。开局核对:"续训:恢复 step=72600
+epoch=8 batch_cursor=186996" + 配置回显四样 + 遮上文/音频依赖均显示(关)。
+decoder_init.pt 与 .resume.pt 两个工件原地保留(哈希已入报告),round-3 才用。
+
+### 下个暂停窗(不急,合并做,总预算 ~2 小时)
+
+1. **1c 半剂量安全门**(追加 30 原样,判据不变)—— 仍是训练侧下一杆。
+2. **预训练 n=48 自由续写复评**(门 v2 预登记:parseable ≥60% 且拒因以 MEASURE 为主、
+   DYCK≈0;用精确续训 +50 步实现,独立 --out,正品工件不动):
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/pretrain_decoder.py','--corpus',"$W\formal_corpus.jsonl",'--batch-rows','16','--steps','20050','--resume-state',"$W\decoder_init.pt.resume.pt",'--out',"$W\decoder_init_eval48.pt",'--free-eval-every','50','--free-eval-n','48' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\pretrain_eval48.out.log" `
+  -RedirectStandardError  "$W\pretrain_eval48.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+(签名校验会核对语料/tokenizer 哈希与配置 —— 这正是把复评钉在同一世界线上的机制;
+ 若被拒,整段贴回,不要改参数硬闯。)
+**贴回**:20050 处的自由续写评测块(48 例的 parseable 数与拒因谱)+ 末 3 行。
+eval48 产物用完可删,decoder_init.pt 正品不动。
+
+## 【已执行,验收见 D92;工具已由执行端加固】当前阶段追加 31(2026-08-04,D91):形式语言预训练三步 —— 全部不碰主线训练
 
 背景一句话:论文暗示(用户拍出)+ 我们头号拒因(DYCK/MEASURE)指向同一招 ——
 在 decoder 见音频之前,先用合成的"合法乐谱语法"文本把开闭配对和小节算术练进去,
