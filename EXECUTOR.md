@@ -13,7 +13,71 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 32(2026-08-05,D92):预训练验收通过 —— 恢复主线 + 暂停窗合并清单
+## 当前阶段追加 33(2026-08-05,D93):round-2 终止,round-3 从强化预训练起步
+
+用户令:不跑到 100k;round-3 从最好的 decoder pretrain 开始。三步顺序执行,
+全程 GPU 串行。round-2 的 ~73k ckpt 归档保留(它的评测曲线就是 round-3 的对照组)。
+
+### 第 1 步:停主线 + 归档(1 分钟)
+
+```powershell
+Stop-Process -Id <训练PID> -Force
+Rename-Item "D:\vscode_projects\ee_download\Rubato\outputs\ckpt" "ckpt_r2_73k"
+```
+(实际步数以停时日志为准,目录名照写 r2_73k 即可;里面的 last.pt/eval 历史全保留。)
+
+### 第 2 步:强化预训练(语料 CPU ~17 分 + GPU ~1.6 小时)
+
+2a. 语料 v2(40 万条,新种子新文件,正品 v1 语料不动):
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/gen_formal_corpus.py','--n','400000','--seed','20260805','--out',"$W\formal_corpus_v2.jsonl" `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\gen_formal_v2.out.log" `
+  -RedirectStandardError  "$W\gen_formal_v2.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+
+2b. 预训练 v2(40k 步,从零,门内置 n=48):
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/pretrain_decoder.py','--corpus',"$W\formal_corpus_v2.jsonl",'--steps','40000','--batch-rows','16','--free-eval-every','2000','--free-eval-n','48','--out',"$W\decoder_init_v2.pt" `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\pretrain_v2.out.log" `
+  -RedirectStandardError  "$W\pretrain_v2.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+**门(预登记,D93③)**:末次自由续写 parseable ≥29/48 且 DYCK≈0(MEASURE 为主可容忍)。
+过门 → 第 3 步用 v2;不过门 → **贴回末两次评测块,然后第 3 步用已合格的 v1**
+(decoder_init.pt)照常启动 —— 只强化这一次,不追"完美"。
+**贴回**:末 3 行 + 最后一个自由续写评测块(48 例数字与拒因谱)。
+
+### 第 3 步:round-3 启动(唯一变量 = --decoder-init;其余与 v4 配方一字不差)
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--decoder-init',"$W\decoder_init_v2.pt" `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r3_v1.out.log" `
+  -RedirectStandardError  "$W\train_r3_v1.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+(若第 2 步没过门,把 decoder_init_v2.pt 换成 decoder_init.pt,其余不动。)
+**开局核对(贴回这几行)**:配置回显四样 + **"decoder 预训练初始化已载入"行** +
+**无"续训:恢复"行**(空目录起跑)+ 遮上文/音频依赖均(关)。
+之后节奏:每 1000 步探针、每 5000 步解码腿照旧,每 10k 发 autolog。
+**round-3 判决点预登记(D93④,不等终点)**:20k 处 —— a) 解码腿 DYCK 拒因数
+≤ round-2@20k 的一半 b) raw_ned ≤ 0.85 c) 探针 sem 劣化 ≤5% vs round-2@20k;
+两胜续跑,全败停训贴回。5k/10k 的解码腿先看趋势不判决。
+1c 遮上文本轮保持关(单变量纪律),它的门另行安排。
+
+## 【被追加 33 取代(用户令:round-2 终止)】当前阶段追加 32(2026-08-05,D92):预训练验收通过 —— 恢复主线 + 暂停窗合并清单
 
 验收结论一句话:工件合格入库(自由续写 0/4→3/4、拒因收缩到 MEASURE×1 = decoder 学会
 收口);CE 2.006 落灰区是规划端门标定失误(随机音高有熵地板),不扣你分;九项加固
