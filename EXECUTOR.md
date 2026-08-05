@@ -4,11 +4,9 @@
 
 - **项目终点**:复现 Rubato 论文 —— 真实钢琴录音 → 可用乐谱(终评对标 OMR-NED 64.3 /
   AMT F1 97.0,在官方 test 集上)。
-- **当前阶段目标**:二轮素跑继续到 100k 不停。暂停窗一(追加 29)判定验收见 D87;
-  你自建的训练集自由解码诊断验收见 D88(结论:parseable≈0 是序列生成能力问题,
-  与数据量无关;合成域死在 MEASURE 自洽,真音频域全面崩)。下一窗(不急,你方便时)
-  按**追加 30**:1c 半剂量(0.05)重门 + ad 纯仪表,门过 v6 / 不过 v4,另带一行
-  词表验证给 1d 立项用。
+- **当前阶段目标**:按**追加 33**执行 D93。round-2 已在实际 step 72,600 终止并归档；
+  生成 400k 形式语料、只强化一次 40k decoder pretrain，再以 `--decoder-init`
+  为唯一模型变量启动 round-3。round-3 在 20k 按预注册三门判决，不盲等 100k。
   **本地运维(内存/性能/路径/存储/磁盘)从此全权归你,不再报备**(D63,用户令)。
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
@@ -21,8 +19,9 @@
 ### 第 1 步:停主线 + 归档(1 分钟)
 
 ```powershell
+# 若训练已停则跳过 Stop-Process。build_dataset 的 ROOT 是 ee_download，不是 Rubato。
 Stop-Process -Id <训练PID> -Force
-Rename-Item "D:\vscode_projects\ee_download\Rubato\outputs\ckpt" "ckpt_r2_73k"
+Rename-Item "D:\vscode_projects\ee_download\outputs\ckpt" "ckpt_r2_73k"
 ```
 (实际步数以停时日志为准,目录名照写 r2_73k 即可;里面的 last.pt/eval 历史全保留。)
 
@@ -44,14 +43,15 @@ $p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
 ```powershell
 $W = "D:\vscode_projects\ee_download\work"
 $p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
-  -ArgumentList '-u','scripts/pretrain_decoder.py','--corpus',"$W\formal_corpus_v2.jsonl",'--steps','40000','--batch-rows','16','--free-eval-every','2000','--free-eval-n','48','--out',"$W\decoder_init_v2.pt" `
+  -ArgumentList '-u','scripts/pretrain_decoder.py','--corpus',"$W\formal_corpus_v2.jsonl",'--steps','40000','--batch-rows','16','--free-eval-every','2000','--free-eval-n','48','--min-free-parseable','0.60','--max-free-dyck','0','--out',"$W\decoder_init_v2.pt" `
   -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
   -RedirectStandardOutput "$W\pretrain_v2.out.log" `
   -RedirectStandardError  "$W\pretrain_v2.err.log" `
   -NoNewWindow -PassThru
 "PID = $($p.Id)"
 ```
-**门(预登记,D93③)**:末次自由续写 parseable ≥29/48 且 DYCK≈0(MEASURE 为主可容忍)。
+**门(预登记,D93③)**:末次自由续写 parseable ≥29/48 且 **DYCK=0**
+(MEASURE 为主可容忍)。两门已由 CLI 写入 artifact `health_pass`,不再靠人工近似解释。
 过门 → 第 3 步用 v2;不过门 → **贴回末两次评测块,然后第 3 步用已合格的 v1**
 (decoder_init.pt)照常启动 —— 只强化这一次,不追"完美"。
 **贴回**:末 3 行 + 最后一个自由续写评测块(48 例数字与拒因谱)。
@@ -61,14 +61,15 @@ $p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
 ```powershell
 $W = "D:\vscode_projects\ee_download\work"
 $p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
-  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--decoder-init',"$W\decoder_init_v2.pt" `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--decoder-init',"$W\decoder_init_v2.pt",'--ckpt-dir','D:\vscode_projects\ee_download\outputs\ckpt_r3_v1' `
   -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
   -RedirectStandardOutput "$W\train_r3_v1.out.log" `
   -RedirectStandardError  "$W\train_r3_v1.err.log" `
   -NoNewWindow -PassThru
 "PID = $($p.Id)"
 ```
-(若第 2 步没过门,把 decoder_init_v2.pt 换成 decoder_init.pt,其余不动。)
+(若第 2 步没过门,把 decoder_init_v2.pt 换成 decoder_init.pt,其余不动。
+`--ckpt-dir` 仅隔离 round-3 checkpoint/eval_autolog,不是训练变量。)
 **开局核对(贴回这几行)**:配置回显四样 + **"decoder 预训练初始化已载入"行** +
 **无"续训:恢复"行**(空目录起跑)+ 遮上文/音频依赖均(关)。
 之后节奏:每 1000 步探针、每 5000 步解码腿照旧,每 10k 发 autolog。

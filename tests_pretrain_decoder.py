@@ -214,6 +214,11 @@ def test_smoke_health_requires_finite_loss():
     assert classify_health(float("inf"), is_smoke=True, free_ok=True)[1] is False
     assert classify_health(2.0, is_smoke=False, free_ok=True) == ("GRAY", True)
     assert classify_health(2.0, is_smoke=False, free_ok=False) == ("GRAY", False)
+    # D92: CE class is now diagnostic only; finite CE + both formal gates pass.
+    assert classify_health(4.0, is_smoke=False, free_ok=True,
+                           dyck_ok=True) == ("FAIL", True)
+    assert classify_health(2.0, is_smoke=False, free_ok=True,
+                           dyck_ok=False) == ("GRAY", False)
 
 
 if __name__ == "__main__":

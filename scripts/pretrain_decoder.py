@@ -43,11 +43,15 @@ def default_nemo_path(repo_root: Path = ROOT) -> Path:
     return next((p for p in candidates if p.exists()), candidates[0])
 
 
-def classify_health(avg50: float, *, is_smoke: bool, free_ok: bool) -> tuple[str, bool]:
+def classify_health(avg50: float, *, is_smoke: bool, free_ok: bool,
+                    dyck_ok: bool = True) -> tuple[str, bool]:
     """Return the registered loss class and whether the artifact is usable."""
     loss_class = "PASS" if avg50 <= 1.5 else ("GRAY" if avg50 <= 3.0 else "FAIL")
+    # D92/D93: random pitch contributes an irreducible CE floor, so the numeric
+    # CE class is diagnostic only.  Formal free continuation is the admission
+    # gate; NaN/Inf remains fatal in every mode.
     health_pass = (math.isfinite(avg50) if is_smoke
-                   else (loss_class != "FAIL" and free_ok))
+                   else (math.isfinite(avg50) and free_ok and dyck_ok))
     return loss_class, health_pass
 
 
@@ -376,6 +380,8 @@ def main(argv=None):
     ap.add_argument("--free-eval-max-new", type=int, default=256)
     ap.add_argument("--min-free-parseable", type=float, default=None,
                     help="终产物自由续写健康门；缺省 steps<2000 为0，否则0.5")
+    ap.add_argument("--max-free-dyck", type=int, default=None,
+                    help="终产物自由续写中允许含 DYCK 违规的样本数；缺省不设此门")
     ap.add_argument("--tokenizer", default=str(WORK / "rubato_spm.model"))
     ap.add_argument("--nemo", default=str(default_nemo_path()))
     ap.add_argument("--vocab-spec",
@@ -391,6 +397,8 @@ def main(argv=None):
     if args.min_free_parseable is not None \
             and not (0.0 <= args.min_free_parseable <= 1.0):
         raise ValueError("--min-free-parseable 必须在 0..1")
+    if args.max_free_dyck is not None and args.max_free_dyck < 0:
+        raise ValueError("--max-free-dyck 必须为非负整数")
 
     import torch
     import sentencepiece as spm
@@ -516,14 +524,19 @@ def main(argv=None):
                 else (0.0 if args.steps < 2000 else 0.5))
     free_ok = bool(last_free_eval) and \
         last_free_eval["parseable_rate"] >= min_free
+    dyck_count = ((last_free_eval or {}).get("violation_tally") or {}).get("DYCK", 0)
+    dyck_ok = (args.max_free_dyck is None
+               or (bool(last_free_eval) and dyck_count <= args.max_free_dyck))
     is_smoke = args.steps < 2000
     loss_class, health_pass = classify_health(
-        avg50, is_smoke=is_smoke, free_ok=free_ok)
+        avg50, is_smoke=is_smoke, free_ok=free_ok, dyck_ok=dyck_ok)
     meta = {"steps": step, "target_steps": args.steps,
             "complete": step == args.steps, "corpus": str(args.corpus),
             "corpus_sha256": signature["corpus_sha256"],
             "loss_avg50": avg50, "loss_class": loss_class,
             "free_eval": last_free_eval, "min_free_parseable": min_free,
+            "max_free_dyck": args.max_free_dyck,
+            "free_dyck_count": dyck_count, "free_dyck_ok": dyck_ok,
             "health_pass": health_pass,
             "artifact_role": "smoke" if is_smoke else "decoder_init",
             "format_version": 2, "lr": args.lr, "seed": args.seed,
@@ -547,6 +560,9 @@ def main(argv=None):
     else:
         print(f"自由续写门: {last_free_eval['n_parseable']}/{last_free_eval['n']} "
               f">= {min_free:.0%} → {'PASS' if free_ok else 'FAIL'}")
+        if args.max_free_dyck is not None:
+            print(f"DYCK 门: {dyck_count} <= {args.max_free_dyck} → "
+                  f"{'PASS' if dyck_ok else 'FAIL'}")
         print("下一步: 仅健康门通过时，round-3 可加 --decoder-init 指向本产物")
     return 0 if health_pass else 2
 
