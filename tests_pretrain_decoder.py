@@ -193,6 +193,27 @@ def test_scratch_reset_and_exact_resume_roundtrip():
         assert raised, "语料/配置指纹变化必须拒绝近似恢复"
 
 
+def test_free_eval_rank_prefers_parseable_then_low_dyck():
+    from scripts.pretrain_decoder import free_eval_rank
+    from rubato.model.build import validate_decoder_init_meta
+    a = {"n_parseable": 45, "n": 48, "violation_tally": {"DYCK": 2}}
+    b = {"n_parseable": 36, "n": 48, "violation_tally": {"DYCK": 5}}
+    c = {"n_parseable": 45, "n": 48, "violation_tally": {"DYCK": 0}}
+    assert free_eval_rank(a) > free_eval_rank(b), "可解析数优先"
+    assert free_eval_rank(c) > free_eval_rank(a), "同可解析数时 DYCK 少者胜"
+    assert free_eval_rank(None) < free_eval_rank(b), "无评测垫底"
+    # 最优旁存的 meta 必须能过生产装载检查(complete=True + 自身健康门)
+    best_meta = {"complete": True, "best_of_run": True, "health_pass": True,
+                 "artifact_role": "decoder_init", "free_eval": a}
+    assert validate_decoder_init_meta(best_meta) is best_meta
+    try:
+        validate_decoder_init_meta(dict(best_meta, health_pass=False))
+        raised = False
+    except RuntimeError:
+        raised = True
+    assert raised, "健康门失败的 best 也必须被装载端拒收"
+
+
 def test_default_nemo_path_matches_workspace_layout():
     with tempfile.TemporaryDirectory() as td:
         parent = Path(td)

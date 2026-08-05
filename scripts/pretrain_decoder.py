@@ -43,6 +43,16 @@ def default_nemo_path(repo_root: Path = ROOT) -> Path:
     return next((p for p in candidates if p.exists()), candidates[0])
 
 
+def free_eval_rank(ev: dict | None) -> tuple:
+    """自由续写评测的选优排序键:先比可解析数,再比 DYCK 越少越好。
+    【D94】v2 实测 30k 处 45/48・DYCK2 优于末态 40k 的 36/48・DYCK5,却因"只存末态"
+    被覆盖丢失 —— LEGATO 式按自由生成质量选优必须用在自己身上。"""
+    if not ev:
+        return (-1, 0)
+    dyck = (ev.get("violation_tally") or {}).get("DYCK", 0)
+    return (int(ev.get("n_parseable", 0)), -int(dyck))
+
+
 def classify_health(avg50: float, *, is_smoke: bool, free_ok: bool,
                     dyck_ok: bool = True) -> tuple[str, bool]:
     """Return the registered loss class and whether the artifact is usable."""
@@ -461,6 +471,23 @@ def main(argv=None):
         raise FileExistsError(
             f"最终产物已存在但无 resume，拒绝覆盖: {args.out}")
     run_start_step = step
+    # 【D94】最优检查点旁存:best = (可解析数, -DYCK) 最大的评测点,存到 *_best.pt。
+    # 跨恢复保序:已有 best 文件先读回它的评测数,防止恢复后被更差的"新best"覆盖。
+    is_smoke_run = args.steps < 2000
+    min_free_gate = (args.min_free_parseable if args.min_free_parseable is not None
+                     else (0.0 if is_smoke_run else 0.5))
+    best_path = str(Path(args.out).with_name(
+        Path(args.out).stem + "_best" + Path(args.out).suffix))
+    best_free = None
+    if not is_smoke_run and Path(best_path).exists():
+        try:
+            best_free = (torch.load(best_path, map_location="cpu")
+                         .get("meta", {}) or {}).get("free_eval")
+            print(f"已有最优旁存,恢复其基准: {best_path} "
+                  f"rank={free_eval_rank(best_free)}", flush=True)
+        except Exception as e:
+            print(f"⚠ 最优旁存读取失败({type(e).__name__}),按无基准继续: {e}",
+                  flush=True)
     if is_cuda:
         torch.cuda.reset_peak_memory_stats(device)
 
@@ -518,6 +545,38 @@ def main(argv=None):
                   f"{last_free_eval['n_parseable']}/{last_free_eval['n']} "
                   f"eot={last_free_eval['n_eot']}/{last_free_eval['n']} "
                   f"拒因={last_free_eval['violation_tally']}", flush=True)
+            if not is_smoke_run and \
+                    free_eval_rank(last_free_eval) > free_eval_rank(best_free):
+                best_free = dict(last_free_eval, step=step)
+                _bd = (best_free.get("violation_tally") or {}).get("DYCK", 0)
+                _b_ok = (best_free["parseable_rate"] >= min_free_gate
+                         and (args.max_free_dyck is None
+                              or _bd <= args.max_free_dyck))
+                _b_avg = sum(recent) / max(len(recent), 1)
+                _b_class, _b_pass = classify_health(
+                    _b_avg, is_smoke=False, free_ok=(
+                        best_free["parseable_rate"] >= min_free_gate),
+                    dyck_ok=(args.max_free_dyck is None
+                             or _bd <= args.max_free_dyck))
+                save_decoder_init(model, best_path, {
+                    "steps": step, "target_steps": args.steps,
+                    "complete": True, "best_of_run": True,
+                    "corpus": str(args.corpus),
+                    "corpus_sha256": signature["corpus_sha256"],
+                    "loss_avg50": _b_avg, "loss_class": _b_class,
+                    "free_eval": best_free,
+                    "min_free_parseable": min_free_gate,
+                    "max_free_dyck": args.max_free_dyck,
+                    "free_dyck_count": _bd, "free_dyck_ok": _b_ok,
+                    "health_pass": _b_pass,
+                    "artifact_role": "decoder_init", "format_version": 2,
+                    "lr": args.lr, "seed": args.seed,
+                    "init_mode": args.init_mode,
+                    "skipped_overlong": n_skipped_total})
+                print(f"  最优旁存已更新 → {best_path} (step {step}, "
+                      f"parseable {best_free['n_parseable']}/{best_free['n']}, "
+                      f"DYCK {_bd}, health={'PASS' if _b_pass else 'FAIL'})",
+                      flush=True)
 
     avg50 = sum(recent) / len(recent)
     min_free = (args.min_free_parseable if args.min_free_parseable is not None
@@ -549,6 +608,11 @@ def main(argv=None):
           f"(health={'PASS' if health_pass else 'FAIL'})", flush=True)
     print(f"完成: {args.steps} 步, 末 avg50={avg50:.4f}({loss_class}), "
           f"超长跳过 {n_skipped_total} 行, 用时 {(time.time() - t0) / 60:.1f} 分钟")
+    if best_free is not None:
+        print(f"最优旁存: {best_path} (step {best_free.get('step')}, "
+              f"parseable {best_free['n_parseable']}/{best_free['n']}, "
+              f"rank={free_eval_rank(best_free)}) —— 选工件时 final/best 二选一,"
+              "各看自身 meta.health_pass", flush=True)
     if is_cuda:
         print(f"CUDA 峰值: allocated="
               f"{torch.cuda.max_memory_allocated(device)/2**20:.0f}MiB "

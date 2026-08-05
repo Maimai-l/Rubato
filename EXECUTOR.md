@@ -11,7 +11,31 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 33(2026-08-05,D93):round-2 终止,round-3 从强化预训练起步
+## 当前阶段追加 34(2026-08-05,D94):round-3 看护节奏(现在唯一的活)
+
+D93 转场验收全过:v2 按门拒收正确、基线冻结质量高(你补的 1/3 分支已收编正典)、
+round-3 启动核验无瑕疵。首步 loss 204 / dec gn 340 不是异常 —— 全新 decoder 撞
+clip 25,warmup 期被强裁是预期形态,看 5k 内 sem/pv 是否进入正常下降即可。
+
+**证据链一条硬规矩**:round-3 的 eval 落盘在 `D:\vscode_projects\ee_download\outputs\ckpt_r3_v1\eval_autolog.md`
+(repo 外)。每个贴回点先拷进 repo 再提交:
+
+```powershell
+Copy-Item "D:\vscode_projects\ee_download\outputs\ckpt_r3_v1\eval_autolog.md" "D:\vscode_projects\ee_download\Rubato\reports\eval_autolog_r3.md" -Force
+```
+然后在 Rubato 目录 `git add reports/eval_autolog_r3.md` + commit + push。
+
+节奏:
+- **5k / 10k(解码腿)**:拷贝+提交 eval_autolog_r3,微信贴一行 parseable 与 DYCK 数
+  即可(看趋势不判决)。
+- **20k(判决点)**:照 reports/ROUND3_20K_BASELINE_2026-08-05.md 三判据算三个数
+  (DYCK ≤21 / raw_ned ≤0.85 / 四探针真sem宏均 ≥0.562875),对决策表行动:
+  2-3 过 → 续跑;0 过 → 停训贴回;恰 1 过 → 暂停贴回等裁决。
+- 训练行照旧不用盯;每 10k 一次整体上报。
+- 预训练工具已加"最优旁存"(*_best.pt,按自由续写选优)—— 本轮无动作,
+  将来若跑 v3 预训练自动生效。
+
+## 【已执行,验收见 D94;v2 按门拒收,round-3 用 v1 已启动】当前阶段追加 33(2026-08-05,D93):round-2 终止,round-3 从强化预训练起步
 
 用户令:不跑到 100k;round-3 从最好的 decoder pretrain 开始。三步顺序执行,
 全程 GPU 串行。round-2 的 ~73k ckpt 归档保留(它的评测曲线就是 round-3 的对照组)。
