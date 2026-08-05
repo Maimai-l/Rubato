@@ -11,7 +11,72 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 34(2026-08-05,D94):round-3 看护节奏(现在唯一的活)
+## 当前阶段追加 35(2026-08-05,D95):弹药重整窗(~3 小时)—— 停 r3、选出真最优 init、重启
+
+用户裁决:不带疑似次优 init 空等两天。v2 不是失败(可解析线过了,栽在过死的
+DYCK=0 上;其 30k 最优态被"只存末态"丢失)。本窗把它找回来,四候选同尺选优后重启。
+**先 git pull**(best 旁存工具在 897aad7)。
+
+### 第 1 步:停 round-3 + 归档(1 分钟)
+
+```powershell
+Stop-Process -Id <round3训练PID> -Force
+Rename-Item "D:\vscode_projects\ee_download\outputs\ckpt_r3_v1" "ckpt_r3_v1_5h_discard"
+```
+
+### 第 2 步:重跑预训练(同 v2 配置,新名 v3;best 旁存自动生效;~2 小时)
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/pretrain_decoder.py','--corpus',"$W\formal_corpus_v2.jsonl",'--steps','40000','--batch-rows','16','--free-eval-every','2000','--free-eval-n','48','--out',"$W\decoder_init_v3.pt" `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\pretrain_v3.out.log" `
+  -RedirectStandardError  "$W\pretrain_v3.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+产物两个:`decoder_init_v3.pt`(末态)+ `decoder_init_v3_best.pt`(最优旁存,
+日志里每次"最优旁存已更新"行都会报它的 step/parseable/DYCK)。
+
+### 第 3 步:v1 补同尺读数(~5 分钟,产物即弃)
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/pretrain_decoder.py','--corpus',"$W\formal_corpus.jsonl",'--batch-rows','16','--steps','20050','--resume-state',"$W\decoder_init.pt.resume.pt",'--out',"$W\decoder_init_v1eval.pt",'--free-eval-every','50','--free-eval-n','48' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\pretrain_v1eval.out.log" `
+  -RedirectStandardError  "$W\pretrain_v1eval.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+(注意用的是 v1 的语料 formal_corpus.jsonl —— 签名校验会自己把关。)
+取 20050 处 free-eval 行的 parseable/DYCK 作为 v1 的同尺读数;v1eval 两个产物用完可删。
+
+### 第 4 步:四候选同尺选优(预登记规则,D95)
+
+比较四个 (parseable, DYCK):v1@20050 读数 / v2-final=36,5(已有)/ v3-best / v3-final。
+**规则:先比 parseable 大,平局比 DYCK 小;底线 parseable ≥29/48,全不过线停机贴回。**
+把四组数字和入选者写进贴回。
+
+### 第 5 步:round-3 重启(入选者进 --decoder-init;新目录 r3_v2)
+
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--decoder-init',"$W\<入选文件名>",'--ckpt-dir','D:\vscode_projects\ee_download\outputs\ckpt_r3_v2' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r3_v2.out.log" `
+  -RedirectStandardError  "$W\train_r3_v2.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+开局核对同追加 33(载入行/无恢复行/四回显/两杆关)。之后按**追加 34 的看护节奏**
+(autolog 拷贝路径换成 ckpt_r3_v2):5k/10k 看趋势,20k 按冻结基线三判据判决。
+**贴回**:四候选数字表 + 入选者 + r3_v2 开局几行。
+
+## 【被追加 35 取代(用户令:不带疑似次优 init 空等)】当前阶段追加 34(2026-08-05,D94):round-3 看护节奏
 
 D93 转场验收全过:v2 按门拒收正确、基线冻结质量高(你补的 1/3 分支已收编正典)、
 round-3 启动核验无瑕疵。首步 loss 204 / dec gn 340 不是异常 —— 全新 decoder 撞
