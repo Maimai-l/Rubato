@@ -1941,7 +1941,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                     # sem=3.39 被停,按此规则应继续训,趋势才是信号。
                     print(f"  (不停训:parseable={m['parseable_rate']:.2f} 但 "
                           f"step<{grace}={step < grace} / sem={sem_now:.2f}>{sem_gate}=模型未熟;"
-                          "连续多个 eval 后 sem<门槛仍 0 才算真故障)", flush=True)
+                          f"滚动sem≤{sem_gate} 后【首个】解码腿 eval 若仍<0.80 即停训"
+                          " —— 那是 1c 的进场铃,见 EXECUTOR 追加 36)", flush=True)
                 elif act in ("pause_unparseable", "stop_bad_labels"):
                     return _finish(f"stopped:{act}:{action['reason']}")
                 if act == "converged":

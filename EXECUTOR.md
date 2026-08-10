@@ -11,7 +11,72 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 35(2026-08-05,D95):弹药重整窗(~3 小时)—— 停 r3、选出真最优 init、重启
+## 当前阶段追加 36(2026-08-06,D97):45k 判读后的三件事 —— 补账、等自动暂停、1c 进场
+
+45k 判读(D97):两条腿首次同时向好(maestro 真pitch 0.61/Δ+0.27 = 聋症实质好转;
+amt_f1 10.7;raw_ned 0.666),残余病灶只剩自由生成闭合(DYCK 41/复读到 cap)——
+正是 1c 遮上文的靶。训练继续跑,以下三件按序做。
+
+### 第 1 步:补账(现在就做,1 分钟,不碰训练)
+
+```powershell
+Copy-Item "D:\vscode_projects\ee_download\outputs\ckpt_r3_v2\eval_autolog.md" "D:\vscode_projects\ee_download\Rubato\reports\eval_autolog_r3_v2.md" -Force
+```
+然后 Rubato 下 `git add reports/eval_autolog_r3_v2.md` + commit + push。
+这份文件里含 20k 那次解码腿 —— 预登记判决在 D97 已按 45k 数据补记(2/3 通过=继续),
+但原始 20k 块必须入库闭合证据链。**今后每逢 5000 步解码腿,重复本步(直接覆盖同名文件)。**
+
+### 第 2 步:等自动停训(修正预报:很可能就是 50k 的解码腿;55k 几乎必停)
+
+精确机制(train.py:1937,D98 核对):每次解码腿评测(每 5000 步)读**近 50 步滚动
+平均 sem**;`滚动 sem ≤ 2.0 且 parseable < 0.80` **首次**满足即干净退出(写完最终
+报告,非挂起)。45k 处滚动 sem 2.03-2.06,正贴门槛下行。单步 sem<2.0 不触发。
+停下后贴回最后 20 行日志,直接进第 3 步。
+(若到 60k 仍未自停 = sem 卡在 2.0 上方,也人工停一次进第 3 步。)
+
+### 第 3 步:1c 半剂量安全门(自动暂停后执行;~1-1.5 小时)
+
+原子分叉(判据沿用追加 30 预登记:不炸 / id=≈0.05 / tc ≤ A×1.08 / loss ≤ A×1.12):
+```powershell
+$O = "D:\vscode_projects\ee_download\outputs"
+New-Item -ItemType Directory -Force "$O\ckpt_ab_r3A" | Out-Null
+New-Item -ItemType Directory -Force "$O\ckpt_ab_r3B" | Out-Null
+Copy-Item "$O\ckpt_r3_v2\last.pt" "$O\ckpt_ab_r3A\last.pt"
+Copy-Item "$O\ckpt_r3_v2\last.pt" "$O\ckpt_ab_r3B\last.pt"
+```
+S = 停时日志最后 step 数;两臂同一个 `<S+100>`,先 A 后 B 不并发:
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--ckpt-dir','D:\vscode_projects\ee_download\outputs\ckpt_ab_r3A','--stop-after-step','<S+100>' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\ab_r3_A.out.log" -RedirectStandardError "$W\ab_r3_A.err.log" -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--input-dropout','0.05','--input-dropout-ramp','5000','--audio-dep-monitor-every','50','--ckpt-dir','D:\vscode_projects\ee_download\outputs\ckpt_ab_r3B','--stop-after-step','<S+100>' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\ab_r3_B.out.log" -RedirectStandardError "$W\ab_r3_B.err.log" -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+**门过 → 主线续训(同目录续 last.pt,带 1c 与 ad 仪表,日志换名)**:
+```powershell
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--input-dropout','0.05','--input-dropout-ramp','5000','--audio-dep-monitor-every','50','--ckpt-dir','D:\vscode_projects\ee_download\outputs\ckpt_r3_v2' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r3_v3.out.log" -RedirectStandardError "$W\train_r3_v3.err.log" -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+核对:**"续训:恢复 step=…"必须在**(接着跑,不从零)+ 回显"遮上文 input_dropout=0.05
+(ramp 5000…)| … | ad 仪表:每 50 步" + 训练行出现 id=/ad= 列。
+门不过 → 素跑续训(同命令去掉三个新旗标),贴回两臂日志,规划端拆因。
+**贴回**:两臂末 5 行 + 续训开局 3 行;之后每 5000 步照第 1 步补账。
+(注:ramp 按全局步计,55k ≫ 5000 → 立即全率 0.05,门测口径与生产口径一致。)
+
+## 【已执行,验收见 D95/D96;round-3-v2 以 v3-best 运行中】当前阶段追加 35(2026-08-05,D95):弹药重整窗 —— 停 r3、选出真最优 init、重启
 
 用户裁决:不带疑似次优 init 空等两天。v2 不是失败(可解析线过了,栽在过死的
 DYCK=0 上;其 30k 最优态被"只存末态"丢失)。本窗把它找回来,四候选同尺选优后重启。
