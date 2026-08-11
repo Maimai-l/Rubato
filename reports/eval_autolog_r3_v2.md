@@ -379,3 +379,38 @@
   eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.25 Δts=+0.25 Δpitch=+0.51 真sem=0.84 静sem=0.59 真pitch=0.92 acc=0.75 n=479
   eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.18 Δts=+0.44 Δpitch=+0.18 真sem=0.84 静sem=0.66 真pitch=0.96 acc=0.81 n=724
   eval(仅探针;解码腿按 eval_decode_every 稀疏跑,本次跳过)
+
+## eval @ step 47000 (2026-08-11 01:37:56)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.13 Δts=+0.26 Δpitch=+0.20 真sem=0.92 静sem=0.79 真pitch=0.97 acc=0.79 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.15 Δts=+0.00 Δpitch=+0.24 真sem=0.81 静sem=0.66 真pitch=0.59 acc=0.72 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.25 Δts=+0.36 Δpitch=+0.51 真sem=0.84 静sem=0.59 真pitch=0.95 acc=0.78 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.17 Δts=+0.26 Δpitch=+0.17 真sem=0.83 静sem=0.67 真pitch=0.96 acc=0.80 n=724
+  eval(仅探针;解码腿按 eval_decode_every 稀疏跑,本次跳过)
+
+## eval @ step 48000 (2026-08-11 04:35:56)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.13 Δts=+0.19 Δpitch=+0.15 真sem=0.94 静sem=0.81 真pitch=0.98 acc=0.78 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.14 Δts=-0.01 Δpitch=+0.23 真sem=0.81 静sem=0.67 真pitch=0.58 acc=0.71 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.25 Δts=+0.36 Δpitch=+0.54 真sem=0.84 静sem=0.59 真pitch=0.95 acc=0.78 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.17 Δts=+0.22 Δpitch=+0.18 真sem=0.83 静sem=0.66 真pitch=0.96 acc=0.79 n=724
+  eval(仅探针;解码腿按 eval_decode_every 稀疏跑,本次跳过)
+
+## eval @ step 49000 (2026-08-11 07:33:08)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.10 Δts=+0.28 Δpitch=+0.14 真sem=0.92 静sem=0.82 真pitch=0.96 acc=0.80 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.15 Δts=+0.01 Δpitch=+0.29 真sem=0.81 静sem=0.66 真pitch=0.62 acc=0.72 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.25 Δts=+0.37 Δpitch=+0.54 真sem=0.84 静sem=0.59 真pitch=0.92 acc=0.78 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.17 Δts=+0.23 Δpitch=+0.20 真sem=0.84 静sem=0.67 真pitch=0.98 acc=0.81 n=724
+  eval(仅探针;解码腿按 eval_decode_every 稀疏跑,本次跳过)
+
+## eval @ step 50000 (2026-08-11 10:48:20)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.13 Δts=+0.25 Δpitch=+0.17 真sem=0.93 静sem=0.80 真pitch=0.99 acc=0.79 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.15 Δts=+0.00 Δpitch=+0.27 真sem=0.81 静sem=0.66 真pitch=0.63 acc=0.72 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.25 Δts=+0.30 Δpitch=+0.59 真sem=0.85 静sem=0.60 真pitch=0.95 acc=0.78 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.16 Δts=+0.16 Δpitch=+0.19 真sem=0.84 静sem=0.68 真pitch=0.98 acc=0.80 n=724
+  eval 样本预测[0]: '|4/4k0'
+  eval 样本预测[1]: '|4/4k0'
+  eval 样本预测[首个通过 nasap_Gasanov08M_f9ac827c_000]: '|2/2k-2PL:C4PR:C5 1/4PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/4PL:c4PR:c5 |2/2k-2PL:C4PR:C5 1/4PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/'
+  eval 同样本参照:              '|6/8k-1PL:C4PR:C5 1/8PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/8PL:c4PR:c5 |6/8k-1PL:C4PR:C5 1/4PL:c4C4PR:c5C5 1/8PL:c4C4PR:c5C5 1/4PL:c4C4PR:c5C5 1/8PL:c4PR:c5 |6/8k-'
+  eval 解码现场: {'stage': 'validate_reject', 'viol': ["DYCK_UNCLOSED:[('PR', SPitch(step='D', alter=0, octave=5))]", 'MEASURE_SUM:0 got 1/2 want 3/8', 'MEASURE_SUM:5 got 1/2 want 3/8', 'MEASURE_SUM:8 got 1/2 want 3/8'], 'raw': '|3/8k#2PL:C#3PR:C#4 <|0.02|> 1/8PL:c#3F#3 <|0.26|> 1/8f#3G3PR:c#4G4 <|0.48|> 1/16PL:g3F#3 <|0.59|> 1/16f#3E#3PR:g4G#4 <|0.70|> 1/16PL:e#3F#3 <|0.81|> 1/16f#3PR:g#4 <|0.92|> |3/8k#2PL:A#3PR:G4 <|0.92|> 1/16g4F#4 <|1.04|> 1/16PL:a#3E#4PR:f#4E#4 <|1.15|> 1/16e#4F#4 <|1.26|> 1/16PL:e#4C#4PR:f#4E5 <|1.37|> 1/16PL:c#4A#3 <|1', 'truncated': '|3/8k#2PL:C#3PR:C#4 <|0.02|> 1/8PL:c#3F#3 <|0.26|> 1/8f#3G3PR:c#4G4 <|0.48|> 1/16PL:g3F#3 <|0.59|> 1', 'gen': {'n_new': 409, 'stop': 'eot', 'fast': True, 'beam_size': 1}}
+  eval 拒因(样本数): DYCK=40 MEASURE=30 TERMINAL=30 TS_MISSING=26 TS_PARSE=3 parse_error=3 通过=2 TS_NONMONOTONE=1 /共48
+  eval 汇总: parseable=0.04 empty=0.8541666666666666 n=48 样本0='|4/4k0' 探针acc=0.79/前缀0.72 eotP0=0.0000
+  eval 指标: parseable=0.04 amt_f1=12.20541666666667 text_ned_proxy=0.6983017741740943 proxy_scored=2/48 raw_ned=0.6772084187489514 raw_scored=48/48 n_maestro=48/48 complete=True
