@@ -414,3 +414,10 @@
   eval 拒因(样本数): DYCK=40 MEASURE=30 TERMINAL=30 TS_MISSING=26 TS_PARSE=3 parse_error=3 通过=2 TS_NONMONOTONE=1 /共48
   eval 汇总: parseable=0.04 empty=0.8541666666666666 n=48 样本0='|4/4k0' 探针acc=0.79/前缀0.72 eotP0=0.0000
   eval 指标: parseable=0.04 amt_f1=12.20541666666667 text_ned_proxy=0.6983017741740943 proxy_scored=2/48 raw_ned=0.6772084187489514 raw_scored=48/48 n_maestro=48/48 complete=True
+
+## eval @ step 51000 (2026-08-11 13:45:26)
+  eval 多源探针 nasap/TAST[nasap_Shi05M_63322b36_000]: Δsem=+0.11 Δts=+0.25 Δpitch=+0.14 真sem=0.92 静sem=0.80 真pitch=0.95 acc=0.79 n=704
+  eval 多源探针 maestro/AMT[maestro_MIDI-Unprocessed_11_R1_2009_06-09_ORIG_MID--AUDIO_11_R1_2009_11_R1_2009_06_WAV_000]: Δsem=+0.13 Δts=+0.01 Δpitch=+0.19 真sem=0.79 静sem=0.65 真pitch=0.55 acc=0.70 n=660
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbRy4561YHg98r1sCMpY3jyL24gamUS5LECitgf6NwXm_000]: Δsem=+0.26 Δts=+0.22 Δpitch=+0.54 真sem=0.84 静sem=0.58 真pitch=0.92 acc=0.76 n=479
+  eval 多源探针 pdmx/TAST[pdmxperf_QmbbFEQzNihEnR2EvTumtWeYgcCWcqUvEeCWPCk5GZA7GQ_000]: Δsem=+0.15 Δts=+0.18 Δpitch=+0.17 真sem=0.82 静sem=0.67 真pitch=0.96 acc=0.79 n=724
+  eval(仅探针;解码腿按 eval_decode_every 稀疏跑,本次跳过)
