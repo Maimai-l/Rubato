@@ -374,6 +374,55 @@ def units_to_ir(units: list[Unit]) -> ScoreIR:
 
 # ---------------------------------------------------------------- 校验器
 
+def validate_units_prefix(units: list[Unit], allow_pickup: bool = True,
+                          lenient_measures: bool = False) -> list[str]:
+    """
+    【D101 约束解码】前缀致命违规判定:生成中途的序列前缀,哪些违规已经不可挽回。
+    与 validate_units 的差异只有两处豁免(其余逻辑必须与其保持逐行同步):
+      - 不查 DYCK_UNCLOSED(音符可在后文关闭);
+      - 不查 TERMINAL_BAR_MISSING(结尾还没到)。
+    即死项:DYCK_DOUBLE_ONSET / DYCK_ORPHAN_OFFSET(事件级,后文救不了)、
+    已完成小节的 MEASURE_SUM(两条小节线之间已定型)、TS_NONMONOTONE。
+    性质保证(tests_prefix_validate 判决):validate_units 全过的序列,其任意
+    单元前缀必过本函数。
+    """
+    v = []
+    open_keys = set()
+    for u in units:
+        for staff, p in u.offs:
+            k = (staff, p)
+            if k not in open_keys:
+                v.append(f"DYCK_ORPHAN_OFFSET:{k}@{u.time}")
+            else:
+                open_keys.discard(k)
+        for staff, p, _ in u.ons:
+            k = (staff, p)
+            if k in open_keys:
+                v.append(f"DYCK_DOUBLE_ONSET:{k}@{u.time}")
+            open_keys.add(k)
+    bar_idx = [i for i, u in enumerate(units) if u.bar is not None]
+    for bi in range(len(bar_idx) - 1):
+        a, b = bar_idx[bi], bar_idx[bi + 1]
+        num, den, _ = units[a].bar
+        s = sum((units[j].frac for j in range(a + 1, b + 1)
+                 if units[j].frac is not None), Fraction(0))
+        declared = Fraction(num, den)
+        first, last = bi == 0, bi == len(bar_idx) - 2
+        if lenient_measures:
+            if s <= 0:
+                v.append(f"MEASURE_SUM_NONPOS:{bi} got {s}")
+        elif s > declared or ((not allow_pickup or not (first or last)) and s != declared):
+            if not ((first or last) and s < declared and allow_pickup):
+                v.append(f"MEASURE_SUM:{bi} got {s} want {declared}")
+    prev_ts = -1
+    for u in units:
+        if u.ts_bin is not None:
+            if u.ts_bin < prev_ts:
+                v.append(f"TS_NONMONOTONE:{u.ts_bin}<{prev_ts}")
+            prev_ts = u.ts_bin
+    return v
+
+
 def validate_units(units: list[Unit], allow_pickup: bool = True,
                    lenient_measures: bool = False) -> list[str]:
     """

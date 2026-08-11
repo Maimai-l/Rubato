@@ -11,7 +11,42 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 36(2026-08-06,D97):45k 判读后的三件事 —— 补账、等自动暂停、1c 进场
+## 当前阶段追加 37(2026-08-11,D101 用户令):1c 立即进场 —— 停旧续新,一条命令
+
+用户裁决:不等自动停,现在开 1c。安全门不再跑(安全性已两次实证,D100)。
+
+### 执行(先停当前训练 PID,再跑下块;同目录续训,不从零)
+
+```powershell
+Stop-Process -Id <当前训练PID> -Force
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--input-dropout','0.05','--input-dropout-ramp','5000','--audio-dep-monitor-every','50','--ckpt-dir','D:\vscode_projects\ee_download\outputs\ckpt_r3_v2' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r3_v3.out.log" `
+  -RedirectStandardError  "$W\train_r3_v3.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+
+**开局核对(贴回这几行)**:①"续训:恢复 step=…"(应为 ~52-53k,绝不从零)
+②回显"遮上文 input_dropout=0.05(ramp 5000 步→全率,替换 unk id=…)| … | ad 仪表:每 50 步"
+③首条训练行出现 id=(≈0.05)与 ad= 列。
+记下恢复步数 S0(判决基准)。
+
+### 预期与判决(先于数据,D101 冻结)
+
+- **loss/sem 会立刻抬高约 10-12%**(遮输入的设计效应,非故障);滚动 sem 回到 2.0 以上
+  → 止损器"模型未熟"豁免重新生效,疗效段内不会自动停训。id= 应恒 ≈0.05。
+- 55k / 60k 解码腿:看趋势不判决(照旧拷 autolog 提交)。
+- **判决点 = 65k 解码腿**(1c 进场后 ≥12k 步):对照素跑平台带(DYCK 40-41 /
+  parseable 1-2 / raw_ned 0.67),三判据任一达成即保留 ——
+  **DYCK ≤35 或 parseable ≥5/48 或 raw_ned ≤0.62**;
+  全不达成 → 停训,去掉 '--input-dropout','0.05','--input-dropout-ramp','5000' 重启
+  (其余旗标不动),1c 关案,规划端按预登记升级路径(真 scheduled sampling)接手。
+- 贴回节奏不变:每 5000 步拷 ckpt_r3_v2\eval_autolog.md 入 repo 提交。
+
+## 【已执行 → 判决见 D99;门程序缺陷复盘见 D100;新令见追加 37】当前阶段追加 36(2026-08-06,D97):45k 判读后的三件事
 
 45k 判读(D97):两条腿首次同时向好(maestro 真pitch 0.61/Δ+0.27 = 聋症实质好转;
 amt_f1 10.7;raw_ned 0.666),残余病灶只剩自由生成闭合(DYCK 41/复读到 cap)——
