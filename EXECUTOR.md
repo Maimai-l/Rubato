@@ -11,7 +11,51 @@
 - **你的角色**:按本文件章节执行/贴回;后台渲染断点续跑;任何开训/改名只认本文件口令;
   任何数字只认文件不认记忆。
 
-## 当前阶段追加 37(2026-08-11,D101 用户令):1c 立即进场 —— 停旧续新,一条命令
+## 当前阶段追加 38(2026-08-11,D102):1c 判退换弹 —— 真 scheduled sampling 进场
+
+用户判定 1c 效果不好并要求换文献正主。两件事:先补 1c 段的证据,再换弹续训。
+
+### 第 1 步:补 1c 疗效段证据(1 分钟,判决数字必须入库)
+
+```powershell
+Copy-Item "D:\vscode_projects\ee_download\outputs\ckpt_r3_v2\eval_autolog.md" "D:\vscode_projects\ee_download\Rubato\reports\eval_autolog_r3_v2.md" -Force
+```
+Rubato 下 `git add reports/eval_autolog_r3_v2.md` + commit + push。
+
+### 第 2 步:停当前训练,换 scheduled sampling 续训(同目录,不从零)
+
+**先 git pull**(两遍法代码在本次推送)。然后:
+
+```powershell
+Stop-Process -Id <当前训练PID> -Force
+$W = "D:\vscode_projects\ee_download\work"
+$p = Start-Process -FilePath 'D:\ProgramData\envs\nemo_test\python.exe' `
+  -ArgumentList '-u','scripts/build_dataset.py','--clip-norm','25','--lr-dec','3e-4','--eval-decode-every','5000','--augment-acoustic','--pitch-loss-weight','2.5','--sched-sampling','0.25','--audio-dep-monitor-every','50','--ckpt-dir','D:\vscode_projects\ee_download\outputs\ckpt_r3_v2' `
+  -WorkingDirectory 'D:\vscode_projects\ee_download\Rubato' `
+  -RedirectStandardOutput "$W\train_r3_v4_ss.out.log" `
+  -RedirectStandardError  "$W\train_r3_v4_ss.err.log" `
+  -NoNewWindow -PassThru
+"PID = $($p.Id)"
+```
+(注意:**不带** --input-dropout —— 两者互斥,启动器会自己拦。)
+
+**开局核对(贴回)**:①"续训:恢复 step=…"(不从零)②回显"scheduled sampling(两遍法)=0.25
+(ramp 5000 步→全率,mode=sample;训练损失取第二遍…)"③训练行出现 ss=(第二遍 sem)
+与 rr=(≈0.25)列。记恢复步 S0。
+
+**预期(先说破,都不是故障)**:
+- 步时 +30-45%(每步多一次 decoder 前向+反传;首几十步可能更高,显存峰值上抬,
+  CUDA_MEM 机制会自己清);
+- **loss 列数值换义**:现在 = 第二遍(混合输入)损失,略高于同权重下第一遍属预期;
+  sem/ts/pv 列仍是第一遍口径,与历史曲线直接可比;
+- rr= 应恒 ≈0.25;ss= 应随训练下降(模型学会接住自己的错误 = 曝光偏差在治)。
+
+**判决(D102 冻结,先于数据)**:S0+12k 之后的首个解码腿 ——
+DYCK ≤35 或 parseable ≥5/48 或 raw_ned ≤0.62,任一达成保留;
+全不达成 → 去掉 '--sched-sampling','0.25' 素跑续训,升级 unlikelihood training
+(规划端接手)。之前的解码腿看趋势;每 5000 步照第 1 步拷 autolog 提交。
+
+## 【已执行 → 疗效判退见 D102,换弹见追加 38】当前阶段追加 37(2026-08-11,D101 用户令):1c 立即进场
 
 用户裁决:不等自动停,现在开 1c。安全门不再跑(安全性已两次实证,D100)。
 

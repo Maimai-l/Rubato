@@ -150,6 +150,7 @@ def new_step_metrics() -> dict:
         "n_acoustic": 0,
         "audio_dep_sum": 0.0, "audio_dep_gap_sum": 0.0, "n_audio_dep": 0,
         "input_dropped": 0, "input_eligible": 0,
+        "ss_sum": 0.0, "n_ss": 0, "ss_replaced": 0, "ss_eligible": 0,
         "dialect_sem": {},
     }
 
@@ -188,6 +189,12 @@ def accumulate_step_metrics(state: dict, parts: dict):
         state["n_audio_dep"] += n_dep
     state["input_dropped"] += int(parts.get("n_input_dropped", 0) or 0)
     state["input_eligible"] += int(parts.get("n_input_eligible", 0) or 0)
+    n_ss = int(parts.get("n_ss_sem", 0) or 0)
+    if n_ss:
+        state["ss_sum"] += float(parts["ss_sem"]) * n_ss
+        state["n_ss"] += n_ss
+    state["ss_replaced"] += int(parts.get("n_ss_replaced", 0) or 0)
+    state["ss_eligible"] += int(parts.get("n_ss_eligible", 0) or 0)
     for d, (v, n) in (parts.get("dialect_sem") or {}).items():
         old_sum, old_n = state["dialect_sem"].get(d, (0.0, 0))
         state["dialect_sem"][d] = (old_sum + float(v) * int(n), old_n + int(n))
@@ -225,6 +232,9 @@ def finalize_step_metrics(state: dict) -> dict:
         "n_audio_dep": int(state["n_audio_dep"]),
         "input_drop_rate": (state["input_dropped"] / state["input_eligible"]
                             if state["input_eligible"] else None),
+        "ss_sem": (state["ss_sum"] / state["n_ss"] if state["n_ss"] else None),
+        "ss_replace_rate": (state["ss_replaced"] / state["ss_eligible"]
+                            if state["ss_eligible"] else None),
         "dialect_sem": {d: (s / n, n) for d, (s, n) in state["dialect_sem"].items()
                         if n},
         "batch_audio_sec": float(state["audio_sec"]),
@@ -592,6 +602,63 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         pitch_mask=cfg.get("pitch_mask"),
     )
     loss = parts["loss"]
+
+    # 【真 scheduled sampling(D102)】两遍法(Mihaylova & Martins 2019):第一遍
+    # 教师强制(即上方主前向)并行取模型自身预测;第二遍用"金标/自预测混合"输入
+    # 重跑 decoder(encoder 状态复用,不重算),训练损失取第二遍 —— 模型在训练时
+    # 暴露于自己的错误分布,直打自由生成曝光偏差。1c(unk 遮蔽 = word dropout,
+    # Bowman 2016)是本法的弱化近似,疗效段判退后由本法接替(用户令,文献对照)。
+    # 监控口径:sem/ts/pv 列仍取第一遍(与历史曲线可比);新增 ss=(第二遍 sem)
+    # 与 rr=(实际替换率)。与 input_dropout 互斥(CLI 校验)。
+    ss_p = float(cfg.get("sched_sampling_p", 0.0) or 0.0)
+    ss_report = None
+    if ss_p > 0:
+        if not isinstance(output, (tuple, list)) or len(output) < 4:
+            raise TypeError(
+                "scheduled sampling 需要 Canary forward 四元组 "
+                "(log_probs, encoded_len, enc_states, enc_mask)")
+        ss_enc, ss_enc_mask = output[2], output[3]
+        ss_dec = getattr(model, "transf_decoder", None)
+        ss_lsm = getattr(model, "log_softmax", None)
+        if ss_dec is None or ss_lsm is None:
+            raise RuntimeError(
+                "scheduled sampling 需要 model.transf_decoder + model.log_softmax"
+                "(与 infer 快速路径同一成员);缺失不能静默跳过")
+        with torch.no_grad():
+            if str(cfg.get("sched_sampling_mode", "sample")) == "argmax":
+                ss_preds = log_probs.argmax(-1)
+            else:
+                _B, _L, _V = log_probs.shape
+                ss_preds = torch.multinomial(
+                    log_probs.float().exp().reshape(-1, _V), 1).reshape(_B, _L)
+        ss_eligible = torch.zeros_like(loss_mask)
+        ss_eligible[:, 1:] = loss_mask[:, :-1]
+        ss_hit = ss_eligible & (torch.rand(input_ids.shape, device=device) < ss_p)
+        ss_mixed = input_ids.clone()
+        # 右移对齐:input[j] 预测 labels[j];位置 j 的"自预测替身"= 第一遍在 j-1
+        # 处的预测(即模型自己对 full[j] 的猜测)。prompt 与首位永不替换。
+        ss_mixed[:, 1:] = torch.where(
+            ss_hit[:, 1:], ss_preds[:, :-1], input_ids[:, 1:])
+        ss_out = ss_dec(input_ids=ss_mixed, decoder_mask=valid_positions.long(),
+                        encoder_embeddings=ss_enc, encoder_mask=ss_enc_mask)
+        log_probs_ss = ss_lsm(hidden_states=ss_out)
+        parts_ss = batch_sequence_loss(
+            log_probs_ss, labels, token_types, loss_mask, ts_bins, ts_token_ids,
+            label_smoothing=cfg.get("sem_label_smooth", 0.1),
+            p_center=cfg.get("p_center", 0.9), w=cfg.get("w", 5),
+            pitch_weight=float(cfg.get("pitch_weight", 1.0)),
+            pitch_mask=cfg.get("pitch_mask"),
+        )
+        loss = parts_ss["loss"]          # 两遍法原方:训练损失 = 第二遍
+        ss_report = {
+            "ss_sem": float(parts_ss["sem"].detach()
+                            if torch.is_tensor(parts_ss["sem"])
+                            else parts_ss["sem"]),
+            "n_ss_sem": int(parts_ss["n_sem"]),
+            "n_ss_replaced": int(ss_hit.sum()),
+            "n_ss_eligible": int(ss_eligible.sum()),
+        }
+
     aux_report = None
     aux_cfg = dict(cfg.get("acoustic_aux") or {})
     aux_weight = float(aux_cfg.get("weight", 0.0))
@@ -733,6 +800,8 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         "n_input_dropped": n_dropped, "n_input_eligible": n_eligible,
         "input_dropout_p": p_drop,
     }
+    if ss_report is not None:
+        result.update(ss_report)
     if dep_report is not None:
         result.update(dep_report)
     if aux_report is not None:
@@ -1566,6 +1635,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
     recent_aux_f1: list = []                        # encoder frame occupancy F1
     recent_ad: list = []                            # 音频依赖 gap=ce_mis−ce_mat(D86,decoder 听没听直读)
     recent_id: list = []                            # 遮上文实际命中率(1c 生效自证)
+    recent_ss: list = []                            # scheduled sampling 第二遍 sem(D102)
+    recent_rr: list = []                            # scheduled sampling 实际替换率
     recent_gn: list = []                            # 裁剪前梯度范数(有效 lr 是否被裁剪吃掉)
     recent_td: list = []                            # 完整 optimizer-step 的装批等待
     recent_tc: list = []                            # 完整 optimizer-step 的计算墙钟
@@ -1681,6 +1752,18 @@ def train(model, datamodule, cfg: dict, tokenizer,
     # 【D87】ad= 纯仪表节奏:weight=0 时每 N 步 no_grad 测一次错配-匹配 CE gap,
     # 不进梯度;weight>0(训练版)时忽略本项,ad= 每步都有。
     ad_monitor_every = max(int(cfg.get("audio_dep_monitor_every", 0) or 0), 0)
+    # 【D102】真 scheduled sampling(两遍法):与遮上文互斥(CLI 已校验)
+    ss_target = float(cfg.get("sched_sampling", 0.0) or 0.0)
+    ss_ramp = max(int(cfg.get("sched_sampling_ramp", 5000) or 5000), 1)
+    if ss_target > 0:
+        if not (0.0 < ss_target < 1.0):
+            raise ValueError(f"sched_sampling 必须在 (0,1),得到 {ss_target}")
+        loss_cfg["sched_sampling_mode"] = str(
+            cfg.get("sched_sampling_mode", "sample"))
+        print(f"  scheduled sampling(两遍法)={ss_target:g}"
+              f"(ramp {ss_ramp} 步→全率,mode={loss_cfg['sched_sampling_mode']};"
+              "训练损失取第二遍,sem/ts/pv 列仍为第一遍口径,新列 ss=/rr=)",
+              flush=True)
     print(f"  遮上文 input_dropout={id_target:g}"
           + (f"(ramp {id_ramp} 步→全率,替换 unk id="
              f"{loss_cfg['input_dropout_token']})" if id_target > 0 else "(关)")
@@ -1749,6 +1832,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
             if id_target > 0:
                 # 线性 ramp:step(已完成 optimizer 步)/ramp,封顶目标率;续训自然接续
                 loss_cfg["input_dropout_p"] = id_target * min(1.0, step / id_ramp)
+            if ss_target > 0:
+                loss_cfg["sched_sampling_p"] = ss_target * min(1.0, step / ss_ramp)
             if ad_monitor_every:
                 loss_cfg["audio_dep"]["monitor_now"] = (
                     step % ad_monitor_every == 0)
@@ -1806,6 +1891,8 @@ def train(model, datamodule, cfg: dict, tokenizer,
                            (recent_aux_f1, step_m.get("acoustic_frame_f1")),
                            (recent_ad, step_m.get("audio_dep_gap")),
                            (recent_id, step_m.get("input_drop_rate")),
+                           (recent_ss, step_m.get("ss_sem")),
+                           (recent_rr, step_m.get("ss_replace_rate")),
                            (recent_td, step_data_sec),
                            (recent_tc, step_comp_sec)):
                 if v is None:
@@ -1835,6 +1922,9 @@ def train(model, datamodule, cfg: dict, tokenizer,
                          if recent_ad else "")
                       + (f"id={sum(recent_id)/len(recent_id):.2f} "
                          if recent_id else "")
+                      + (f"ss={sum(recent_ss)/len(recent_ss):.3f} "
+                         f"rr={sum(recent_rr)/len(recent_rr):.2f} "
+                         if recent_ss else "")
                       +
                       f"gn={gn:.1f}/avg{sum(recent_gn)/len(recent_gn):.1f} "
                       f"enc={gn_groups[0]:.1f} dec={gn_groups[1]:.1f} "

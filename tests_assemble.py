@@ -171,6 +171,7 @@ _cli = SimpleNamespace(
     eval_decode_every=0, pitch_loss_weight=1,
     amt_aux_weight=0, amt_align_weight=0.25, amt_align_margin=0.1,
     input_dropout=0.0, input_dropout_ramp=5000,
+    sched_sampling=0.0, sched_sampling_ramp=5000, sched_sampling_mode="sample",
     audio_dep_weight=0.0, audio_dep_margin=0.1, audio_dep_monitor_every=0,
     max_steps=100000, stop_after_step=None, lr_enc=None, lr_dec=None)
 validate_cli_args(_cli)
@@ -188,6 +189,13 @@ try:
 except ValueError:
     _ad_gate = True
 check("audio_dep_zero_margin_rejected", _ad_gate)
+try:
+    validate_cli_args(SimpleNamespace(
+        **{**vars(_cli), "sched_sampling": 0.25, "input_dropout": 0.05}))
+    _ss_gate = False
+except ValueError:
+    _ss_gate = True
+check("sched_sampling_input_dropout_mutually_exclusive", _ss_gate)
 try:
     validate_cli_args(SimpleNamespace(**{**vars(_cli), "eval_every": 0}))
     _cli_gate = False

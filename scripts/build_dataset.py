@@ -686,6 +686,12 @@ def validate_cli_args(args) -> None:
         bad.append(f"audio_dep_margin={args.audio_dep_margin}")
     if args.audio_dep_monitor_every < 0:
         bad.append(f"audio_dep_monitor_every={args.audio_dep_monitor_every}")
+    if not (0.0 <= args.sched_sampling < 1.0):
+        bad.append(f"sched_sampling={args.sched_sampling}")
+    if args.sched_sampling_ramp <= 0:
+        bad.append(f"sched_sampling_ramp={args.sched_sampling_ramp}")
+    if args.sched_sampling > 0 and args.input_dropout > 0:
+        bad.append("sched_sampling 与 input_dropout 互斥(单变量归因,D102)")
     if args.stop_after_step is not None and args.stop_after_step <= 0:
         bad.append(f"stop_after_step={args.stop_after_step}")
     if (args.stop_after_step is not None
@@ -985,6 +991,18 @@ def main():
                          "0=关。生效自证看启动回显与日志 ad= 列(gap=错配CE−匹配CE)")
     ap.add_argument("--audio-dep-margin", type=float, default=0.1,
                     help="音频依赖损失 margin(nat):gap ≥ margin 才零罚")
+    ap.add_argument("--sched-sampling", type=float, default=0.0,
+                    help="D102 真 scheduled sampling(两遍法,Mihaylova&Martins 2019):"
+                         "内容位以此概率换成模型第一遍的自身预测,第二遍 decoder 前向"
+                         "出训练损失;0=关。与 --input-dropout 互斥。生效自证看回显与"
+                         "日志 ss=/rr= 列;预期步时 +30-45%%(多一次 decoder 前向+反传)")
+    ap.add_argument("--sched-sampling-ramp", type=int, default=5000,
+                    help="scheduled sampling 从 0 线性升到全率的步数(按全局步计,"
+                         "中途进场=立即全率)")
+    ap.add_argument("--sched-sampling-mode", choices=("sample", "argmax"),
+                    default="sample",
+                    help="第一遍预测的取法:sample=按分布采样(Bengio 原方,缺省)/"
+                         "argmax=贪心")
     ap.add_argument("--audio-dep-monitor-every", type=int, default=0,
                     help="D87 ad= 纯仪表:每 N 步 no_grad 测一次错配−匹配 CE gap,"
                          "不进梯度不加 loss(开销 ≈ 第二次 decoder forward ÷ N);"
@@ -1700,6 +1718,9 @@ def main():
         "audio_dep_weight": float(args.audio_dep_weight),
         "audio_dep_margin": float(args.audio_dep_margin),
         "audio_dep_monitor_every": int(args.audio_dep_monitor_every),
+        "sched_sampling": float(args.sched_sampling),
+        "sched_sampling_ramp": int(args.sched_sampling_ramp),
+        "sched_sampling_mode": str(args.sched_sampling_mode),
         "acoustic_aux": {
             "weight": float(args.amt_aux_weight),
             "alignment_weight": float(args.amt_align_weight),
