@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sys
 import time
+import weakref
 
 import torch
 
@@ -36,13 +37,22 @@ class MockDec(torch.nn.Module):
         self.emb = torch.nn.Embedding(V, D)
         self.mix = torch.nn.Linear(D, D)
         self.seen: list = []                     # 记录每次收到的 input_ids
+        self._first_hidden_ref = None
+        self.first_graph_alive_on_second = None
 
     def forward(self, input_ids=None, decoder_mask=None,
                 encoder_embeddings=None, encoder_mask=None):
         self.seen.append(input_ids.detach().clone())
         m = encoder_mask.unsqueeze(-1).to(encoder_embeddings.dtype)
         ctx = (encoder_embeddings * m).sum(1) / m.sum(1).clamp(min=1e-6)
-        return self.emb(input_ids) + self.mix(ctx).unsqueeze(1)
+        hidden = self.emb(input_ids) + self.mix(ctx).unsqueeze(1)
+        if self._first_hidden_ref is None:
+            self._first_hidden_ref = weakref.ref(hidden)
+        else:
+            # 第二遍进场时，第一遍 decoder 图应已释放；encoder 图另有 enc 引用
+            # 保留，不受此断言影响。
+            self.first_graph_alive_on_second = self._first_hidden_ref() is not None
+        return hidden
 
 
 class MockLsm(torch.nn.Module):
@@ -169,6 +179,40 @@ def test_loss_from_second_pass_and_grads_flow():
     assert gn > 0 and all(
         torch.isfinite(p.grad).all() for p in model.parameters()
         if p.grad is not None)
+
+
+def test_first_decoder_graph_released_before_second_pass():
+    model = SSNemo()
+    batch = _mk_batch(seed=13)
+    parts = training_step_logic(
+        model, batch, None, ts_token_ids=TS_IDS,
+        loss_cfg={"sched_sampling_p": 0.25, "sched_sampling_mode": "sample"})
+    assert model.transf_decoder.first_graph_alive_on_second is False, \
+        "第一遍 decoder 图被挂到第二遍，长 batch 会同时驻留两套图"
+    parts["loss"].backward()
+    assert any(p.grad is not None for p in model.parameters()), \
+        "释放第一遍图不得切断第二遍梯度"
+
+
+def test_sampling_probabilities_are_chunked():
+    model = SSNemo()
+    batch = _mk_batch(B=5, L=1024, prompt=3, seed=17)  # 5120 rows > 4096 chunk
+    original = torch.multinomial
+    seen_rows = []
+
+    def wrapped(probs, *args, **kwargs):
+        seen_rows.append(int(probs.shape[0]))
+        return original(probs, *args, **kwargs)
+
+    torch.multinomial = wrapped
+    try:
+        parts = training_step_logic(
+            model, batch, None, ts_token_ids=TS_IDS,
+            loss_cfg={"sched_sampling_p": 0.25, "sched_sampling_mode": "sample"})
+    finally:
+        torch.multinomial = original
+    assert len(seen_rows) == 2 and max(seen_rows) <= 4096, seen_rows
+    assert parts["n_ss_replaced"] > 0
 
 
 def test_missing_decoder_fails_loud():

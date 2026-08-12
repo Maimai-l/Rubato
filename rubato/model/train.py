@@ -612,6 +612,11 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
     # 与 rr=(实际替换率)。与 input_dropout 互斥(CLI 校验)。
     ss_p = float(cfg.get("sched_sampling_p", 0.0) or 0.0)
     ss_report = None
+    # ``ad`` 的纯监控腿需要第一遍 teacher-forcing CE，但没有理由为此保留
+    # (B,L,V) 的完整 decoder 图。scheduled sampling 开启时先把它压成逐序列
+    # 标量，稍后错配音频前向直接复用；训练版 audio-dep(weight>0)仍保留原图，
+    # 因为它按设计需要两侧梯度。
+    ss_dep_own_ce = None
     if ss_p > 0:
         if not isinstance(output, (tuple, list)) or len(output) < 4:
             raise TypeError(
@@ -629,8 +634,29 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
                 ss_preds = log_probs.argmax(-1)
             else:
                 _B, _L, _V = log_probs.shape
-                ss_preds = torch.multinomial(
-                    log_probs.float().exp().reshape(-1, _V), 1).reshape(_B, _L)
+                # 不可把整个 B×L×V 一次性转 FP32+exp：真实 V=8000、长 batch
+                # 会额外制造数 GiB 临时概率张量，叠加两遍 decoder 后触发 Windows
+                # 共享显存换页。逐行分块采样与一次性 multinomial 分布相同，只把
+                # 临时峰值限制在约 chunk×V×4 bytes（4096 时约 125 MiB）。
+                _rows = log_probs.detach().reshape(-1, _V)
+                _sample_chunk = 4096
+                _sampled = []
+                for _lo in range(0, int(_rows.shape[0]), _sample_chunk):
+                    _probs = _rows[_lo:_lo + _sample_chunk].float().exp()
+                    _sampled.append(torch.multinomial(_probs, 1))
+                    del _probs
+                ss_preds = torch.cat(_sampled, dim=0).reshape(_B, _L)
+                del _rows, _sampled
+            _dep_cfg_early = dict(cfg.get("audio_dep") or {})
+            if bool(_dep_cfg_early.get("monitor_now")) \
+                    and float(_dep_cfg_early.get("weight", 0.0)) <= 0:
+                _sem_scored = loss_mask & (token_types == 0)
+                _n_sem_seq = _sem_scored.sum(-1)
+                _tok_ce = -log_probs.gather(
+                    -1, labels.unsqueeze(-1)).squeeze(-1)
+                ss_dep_own_ce = (
+                    (_tok_ce * _sem_scored).sum(-1)
+                    / _n_sem_seq.clamp(min=1)).detach()
         ss_eligible = torch.zeros_like(loss_mask)
         ss_eligible[:, 1:] = loss_mask[:, :-1]
         ss_hit = ss_eligible & (torch.rand(input_ids.shape, device=device) < ss_p)
@@ -639,8 +665,25 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
         # 处的预测(即模型自己对 full[j] 的猜测)。prompt 与首位永不替换。
         ss_mixed[:, 1:] = torch.where(
             ss_hit[:, 1:], ss_preds[:, :-1], input_ids[:, 1:])
+
+        # 第一遍只负责取自身预测与历史口径监控；训练目标完全来自第二遍。
+        # 旧实现把第一遍 loss/log_probs/output 一直挂到第二遍 backward，导致
+        # 两套完整 decoder 图同时驻留，长 batch 峰值可达 21 GiB，并触发 Windows
+        # 共享显存换页。保留 enc_states 的图供第二遍回传，释放不参与梯度的第一遍
+        # decoder 图。audio-dep 训练版(weight>0)例外：它明确需要第一遍梯度。
+        _dep_weight_early = float(
+            dict(cfg.get("audio_dep") or {}).get("weight", 0.0))
+        if _dep_weight_early <= 0:
+            parts = dict(parts)
+            parts["loss"] = parts["loss"].detach()
+            loss = parts["loss"]
+            if isinstance(output, tuple):
+                output = (None,) + tuple(output[1:])
+            else:
+                output = [None] + list(output[1:])
+            del log_probs
         ss_out = ss_dec(input_ids=ss_mixed, decoder_mask=valid_positions.long(),
-                        encoder_embeddings=ss_enc, encoder_mask=ss_enc_mask)
+                         encoder_embeddings=ss_enc, encoder_mask=ss_enc_mask)
         log_probs_ss = ss_lsm(hidden_states=ss_out)
         parts_ss = batch_sequence_loss(
             log_probs_ss, labels, token_types, loss_mask, ts_bins, ts_token_ids,
@@ -741,10 +784,15 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
             import contextlib
             grad_ctx = (contextlib.nullcontext() if dep_weight > 0
                         else torch.no_grad())
-            lp_mat = log_probs if dep_weight > 0 else log_probs.detach()
             with grad_ctx:
-                tok_ce_mat = -lp_mat.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
-                ce_mat = (tok_ce_mat * sem_scored).sum(-1) / n_sem_seq.clamp(min=1)
+                if dep_monitor and ss_dep_own_ce is not None:
+                    ce_mat = ss_dep_own_ce
+                else:
+                    lp_mat = log_probs if dep_weight > 0 else log_probs.detach()
+                    tok_ce_mat = -lp_mat.gather(
+                        -1, labels.unsqueeze(-1)).squeeze(-1)
+                    ce_mat = ((tok_ce_mat * sem_scored).sum(-1)
+                              / n_sem_seq.clamp(min=1))
                 perm = torch.roll(torch.arange(b_now, device=device), 1)
                 dec_out = dec(
                     input_ids=input_ids, decoder_mask=valid_positions.long(),
