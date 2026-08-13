@@ -690,6 +690,10 @@ def validate_cli_args(args) -> None:
         bad.append(f"sched_sampling={args.sched_sampling}")
     if args.sched_sampling_ramp <= 0:
         bad.append(f"sched_sampling_ramp={args.sched_sampling_ramp}")
+    _ss_start = getattr(args, "sched_sampling_start_step", None)
+    if _ss_start is not None and _ss_start < 0:
+        bad.append(
+            f"sched_sampling_start_step={_ss_start}")
     if args.sched_sampling > 0 and args.input_dropout > 0:
         bad.append("sched_sampling 与 input_dropout 互斥(单变量归因,D102)")
     if args.stop_after_step is not None and args.stop_after_step <= 0:
@@ -997,8 +1001,11 @@ def main():
                          "出训练损失;0=关。与 --input-dropout 互斥。生效自证看回显与"
                          "日志 ss=/rr= 列;预期步时 +30-45%%(多一次 decoder 前向+反传)")
     ap.add_argument("--sched-sampling-ramp", type=int, default=5000,
-                    help="scheduled sampling 从 0 线性升到全率的步数(按全局步计,"
-                         "中途进场=立即全率)")
+                    help="scheduled sampling 从 0 线性升到全率的步数(相对实验接入步)")
+    ap.add_argument("--sched-sampling-start-step", type=int, default=None,
+                    help="scheduled sampling ramp 的绝对接入 step；缺省取本次启动时"
+                         "的 step 0。只要从非零 checkpoint 接入或恢复，为保证中断后"
+                         "剂量连续，必须显式传入最初接入 step")
     ap.add_argument("--sched-sampling-mode", choices=("sample", "argmax"),
                     default="sample",
                     help="第一遍预测的取法:sample=按分布采样(Bengio 原方,缺省)/"
@@ -1720,6 +1727,7 @@ def main():
         "audio_dep_monitor_every": int(args.audio_dep_monitor_every),
         "sched_sampling": float(args.sched_sampling),
         "sched_sampling_ramp": int(args.sched_sampling_ramp),
+        "sched_sampling_start_step": args.sched_sampling_start_step,
         "sched_sampling_mode": str(args.sched_sampling_mode),
         "acoustic_aux": {
             "weight": float(args.amt_aux_weight),

@@ -14,7 +14,9 @@ import torch
 sys.path.insert(0, ".")
 
 from rubato.model.train import (accumulate_step_metrics, finalize_step_metrics,
-                                new_step_metrics, training_step_logic)
+                                new_step_metrics,
+                                scheduled_sampling_probability,
+                                training_step_logic)
 
 V, NBINS, D = 64, 16, 16
 TS_IDS = torch.arange(40, 40 + NBINS)
@@ -159,6 +161,45 @@ def test_full_rate_argmax_mixes_own_predictions():
     assert torch.equal(batch["input_ids"], orig), "batch 张量不许就地污染"
 
 
+def test_scheduled_sampling_never_replaces_timestamp_inputs():
+    model = SSNemo()
+    batch = _mk_batch(B=2, L=12, prompt=3)
+    # token_types[k] 描述 labels[k]，也就是 input_ids[k+1] 的类型。
+    # 把两个计分目标标成时间戳；即使 p=1，其对应 decoder 输入仍必须保持金标。
+    for k, ts_bin in ((5, 2), (8, 7)):
+        batch["token_types"][:, k] = 1
+        batch["ts_bins"][:, k] = ts_bin
+        batch["labels"][:, k] = TS_IDS[ts_bin]
+        batch["input_ids"][:, k + 1] = TS_IDS[ts_bin]
+    orig = batch["input_ids"].clone()
+    training_step_logic(
+        model, batch, None, ts_token_ids=TS_IDS,
+        loss_cfg={"sched_sampling_p": 1.0,
+                  "sched_sampling_mode": "argmax"})
+    mixed = model.transf_decoder.seen[1]
+    assert torch.equal(mixed[:, 6], orig[:, 6])
+    assert torch.equal(mixed[:, 9], orig[:, 9])
+
+
+def test_input_dropout_never_replaces_timestamp_inputs():
+    model = SSNemo()
+    batch = _mk_batch(B=2, L=12, prompt=3)
+    for k, ts_bin in ((5, 2), (8, 7)):
+        batch["token_types"][:, k] = 1
+        batch["ts_bins"][:, k] = ts_bin
+        batch["labels"][:, k] = TS_IDS[ts_bin]
+        batch["input_ids"][:, k + 1] = TS_IDS[ts_bin]
+    orig = batch["input_ids"].clone()
+    training_step_logic(
+        model, batch, None, ts_token_ids=TS_IDS,
+        loss_cfg={"input_dropout_p": 1.0, "input_dropout_token": 47})
+    seen = model.transf_decoder.seen[0]
+    assert torch.equal(seen[:, 6], orig[:, 6])
+    assert torch.equal(seen[:, 9], orig[:, 9])
+    # 至少一个普通内容输入确实被遮，防止测试因整个功能没生效而假通过。
+    assert bool((seen[:, 4:] == 47).any())
+
+
 def test_loss_from_second_pass_and_grads_flow():
     model = SSNemo()
     batch = _mk_batch(seed=9)
@@ -242,6 +283,19 @@ def test_metrics_aggregation():
     accumulate_step_metrics(st2, dict(base))
     m2 = finalize_step_metrics(st2)
     assert m2["ss_sem"] is None and m2["ss_replace_rate"] is None
+
+
+def test_ramp_is_relative_to_immutable_entry_step():
+    target, ramp, start = 0.10, 5000, 51300
+    assert scheduled_sampling_probability(target, ramp, start, 51300) == 0.0
+    assert abs(scheduled_sampling_probability(
+        target, ramp, start, 53800) - 0.05) < 1e-12
+    assert abs(scheduled_sampling_probability(
+        target, ramp, start, 56300) - 0.10) < 1e-12
+    # A restart at 54k must retain the original dose, not restart from zero.
+    before = scheduled_sampling_probability(target, ramp, start, 54000)
+    after = scheduled_sampling_probability(target, ramp, start, 54001)
+    assert 0.05 < before < after < 0.10
 
 
 if __name__ == "__main__":

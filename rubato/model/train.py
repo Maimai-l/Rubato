@@ -564,7 +564,11 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
                 "input_dropout_p>0 但 loss_cfg 缺 input_dropout_token(unk id)"
                 " —— 启动期 resolve_unk_id 没接上,不能静默不遮")
         eligible = torch.zeros_like(loss_mask)
-        eligible[:, 1:] = loss_mask[:, :-1]
+        # input_ids[j] == labels[j-1]，因此可遮性也必须取 j-1 的元数据。
+        # loss_mask 只排除了 prompt/padding，并不区分语义与时间戳；旧实现漏掉
+        # token_types 限制，实际会把时间戳上文也遮掉，与“只遮内容 token”的设计
+        # 和日志声明不符。
+        eligible[:, 1:] = loss_mask[:, :-1] & (token_types[:, :-1] == 0)
         hit = eligible & (torch.rand(input_ids.shape, device=device) < p_drop)
         input_ids = torch.where(
             hit, torch.full_like(input_ids, int(unk)), input_ids)
@@ -658,7 +662,12 @@ def training_step_logic(model, batch, tokenizer, ts_token_ids=None, loss_cfg=Non
                     (_tok_ce * _sem_scored).sum(-1)
                     / _n_sem_seq.clamp(min=1)).detach()
         ss_eligible = torch.zeros_like(loss_mask)
-        ss_eligible[:, 1:] = loss_mask[:, :-1]
+        # 与 input dropout 相同，替换的是 decoder 输入 j，而其 token 类型记录在
+        # labels/token_types[j-1]。只在语义内容位暴露自身预测；时间戳、prompt、
+        # padding 和首位必须保持金标，否则会把“学习纠正内容错误”的实验变成
+        # 随机破坏时间轴。
+        ss_eligible[:, 1:] = (
+            loss_mask[:, :-1] & (token_types[:, :-1] == 0))
         ss_hit = ss_eligible & (torch.rand(input_ids.shape, device=device) < ss_p)
         ss_mixed = input_ids.clone()
         # 右移对齐:input[j] 预测 labels[j];位置 j 的"自预测替身"= 第一遍在 j-1
@@ -1571,6 +1580,28 @@ def load_snapshot(path, model, opt, sched, allow_legacy_cursor: bool = False,
             f"({type(e).__name__}: {e})") from e
 
 
+def scheduled_sampling_probability(target: float, ramp_steps: int,
+                                   start_step: int, step: int) -> float:
+    """Return the SS probability at an absolute optimizer step.
+
+    The ramp is relative to the experiment's immutable entry step, not the
+    model's lifetime step.  Keeping this calculation pure makes restart
+    behavior testable and prevents a 51k checkpoint from entering at full
+    dose merely because its global step is already larger than the ramp.
+    """
+    target = float(target)
+    ramp_steps = int(ramp_steps)
+    start_step = int(start_step)
+    step = int(step)
+    if not (0.0 <= target < 1.0):
+        raise ValueError(f"scheduled sampling target 越界:{target}")
+    if ramp_steps <= 0 or start_step < 0:
+        raise ValueError(
+            f"scheduled sampling ramp 非法:ramp={ramp_steps} start={start_step}")
+    elapsed = max(0, step - start_step)
+    return target * min(1.0, elapsed / ramp_steps)
+
+
 def save_train_control(path, step: int, best_eval_metric: dict,
                        stopper: StopController) -> None:
     """原子保存小型训练决策状态，避免恢复后 best/平台历史失忆。"""
@@ -1803,13 +1834,26 @@ def train(model, datamodule, cfg: dict, tokenizer,
     # 【D102】真 scheduled sampling(两遍法):与遮上文互斥(CLI 已校验)
     ss_target = float(cfg.get("sched_sampling", 0.0) or 0.0)
     ss_ramp = max(int(cfg.get("sched_sampling_ramp", 5000) or 5000), 1)
+    ss_ramp_start_cfg = cfg.get("sched_sampling_start_step")
+    ss_ramp_start = (0 if ss_ramp_start_cfg is None
+                     else int(ss_ramp_start_cfg))
     if ss_target > 0:
         if not (0.0 < ss_target < 1.0):
             raise ValueError(f"sched_sampling 必须在 (0,1),得到 {ss_target}")
+        if step > 0 and ss_ramp_start_cfg is None:
+            raise ValueError(
+                "从非零 checkpoint 接入/恢复 scheduled sampling 时必须显式传入 "
+                "--sched-sampling-start-step；否则重启会静默重置 ramp 剂量。"
+                f"当前恢复 step={step}")
+        if ss_ramp_start < 0 or ss_ramp_start > step:
+            raise ValueError(
+                "sched_sampling_start_step 必须在 [0,当前恢复 step]："
+                f"start={ss_ramp_start} resume_step={step}")
         loss_cfg["sched_sampling_mode"] = str(
             cfg.get("sched_sampling_mode", "sample"))
         print(f"  scheduled sampling(两遍法)={ss_target:g}"
-              f"(ramp {ss_ramp} 步→全率,mode={loss_cfg['sched_sampling_mode']};"
+              f"(从 step={ss_ramp_start} 相对 ramp {ss_ramp} 步→全率,"
+              f"mode={loss_cfg['sched_sampling_mode']};"
               "训练损失取第二遍,sem/ts/pv 列仍为第一遍口径,新列 ss=/rr=)",
               flush=True)
     print(f"  遮上文 input_dropout={id_target:g}"
@@ -1881,7 +1925,10 @@ def train(model, datamodule, cfg: dict, tokenizer,
                 # 线性 ramp:step(已完成 optimizer 步)/ramp,封顶目标率;续训自然接续
                 loss_cfg["input_dropout_p"] = id_target * min(1.0, step / id_ramp)
             if ss_target > 0:
-                loss_cfg["sched_sampling_p"] = ss_target * min(1.0, step / ss_ramp)
+                # ramp 必须从实验接入点算。旧实现直接使用全局 step；在 51k 中途
+                # 接入时首步就达到满剂量 0.25，完全没有预期的渐进暴露。
+                loss_cfg["sched_sampling_p"] = scheduled_sampling_probability(
+                    ss_target, ss_ramp, ss_ramp_start, step)
             if ad_monitor_every:
                 loss_cfg["audio_dep"]["monitor_now"] = (
                     step % ad_monitor_every == 0)
